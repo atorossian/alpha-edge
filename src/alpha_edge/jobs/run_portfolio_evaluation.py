@@ -2,12 +2,13 @@ from alpha_edge.universe.universe import load_universe
 from alpha_edge.core.data_loader import load_closes_from_folder
 from alpha_edge.market.stats_engine import compute_daily_returns, compute_lw_cov_df
 from alpha_edge.portfolio.optimizer_engine import evaluate_portfolio_candidate
+from alpha_edge import paths
 
 # 1) Universe & prices
-universe = load_universe("data/universe.csv")
+universe = load_universe(paths.universe_dir() / "universe.csv")
 tickers = list(universe.keys())
 
-closes = load_closes_from_folder("data/prices", tickers)
+closes = load_closes_from_folder(paths.prices_dir(), tickers)
 returns = compute_daily_returns(closes)
 
 # 2) Ledoit–Wolf covariance

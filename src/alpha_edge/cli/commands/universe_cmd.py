@@ -5,6 +5,7 @@ import typer
 from alpha_edge.jobs.run_universe_update import main as universe_update_main
 from alpha_edge.jobs.run_universe_triage import run_post_ingest_triage  # usually called by ingest
 from alpha_edge.core.market_store import MarketStore
+from alpha_edge import paths
 
 app = typer.Typer(no_args_is_help=True, help="Universe maintenance commands.")
 
@@ -25,9 +26,9 @@ def update(
 @app.command("triage")
 def triage(
     as_of: str = typer.Option(..., help="dt partition date YYYY-MM-DD for ingest failures."),
-    universe_csv: str = typer.Option("data/universe/universe.csv", help="Universe CSV."),
-    overrides_csv: str = typer.Option("data/universe/universe_overrides.csv", help="Overrides CSV."),
-    excluded_csv: str = typer.Option("data/universe/asset_excluded.csv", help="Excluded CSV."),
+    universe_csv: str = typer.Option(paths.universe_dir() / "universe.csv", help="Universe CSV."),
+    overrides_csv: str = typer.Option(paths.universe_dir() / "universe_overrides.csv", help="Overrides CSV."),
+    excluded_csv: str = typer.Option(paths.universe_dir() / "asset_excluded.csv", help="Excluded CSV."),
     bucket: str = typer.Option("alpha-edge-algo", help="S3 bucket."),
 ) -> None:
     """

@@ -4,7 +4,8 @@ from __future__ import annotations
 import datetime as dt
 import threading
 from typing import Optional
-from pathlib import Path
+from alpha_edge import paths
+
 import numpy as np
 import pandas as pd
 import yfinance as yf
@@ -372,11 +373,11 @@ def call_yf_with_retries(
 def ingest(
     *,
     bucket: str = "alpha-edge-algo",
-    universe_csv: str = "data/universe/universe.csv",
+    universe_csv: str = paths.universe_dir() / "universe.csv",
     start_base: str = "2010-01-01",
     interval: str = "1d",
     max_tickers: Optional[int] = None,
-    force_refresh_csv: str | None = "data/universe/ingest_force_refresh.csv",
+    force_refresh_csv: str | None = paths.universe_dir() / "ingest_force_refresh.csv",
     max_workers: int = 4,
     yahoo_max_concurrency: int = 2,   # concurrency cap
     yahoo_rate_per_sec: float = 1.5,  # NEW: global rate cap (across all threads)
@@ -818,14 +819,14 @@ def ingest(
     if not fails.empty:
         store.write_ingest_failures(fails)
 
-    # --- local copy of failures for quick debugging ---
+    # Local debug copy (easy to inspect)
     try:
-        local_fail_dir = Path("data/ingest_failures") / f"dt={as_of}"
-        local_fail_dir.mkdir(parents=True, exist_ok=True)
-        fails.to_csv(local_fail_dir / "failures.csv", index=False)
-        print(f"[fails][local] wrote -> {local_fail_dir / 'failures.csv'}")
+        out_dir = paths.ensure_dir(paths.local_outputs_dir() / "ingest_failures")
+        out_csv = out_dir / f"failures_{as_of}.csv"
+        fails.to_csv(out_csv, index=False)
+        print(f"[fails][local] wrote -> {out_csv}")
     except Exception as e:
-        print(f"[fails][local][warn] could not write local failures.csv: {e}")
+        print(f"[fails][local][warn] could not write local failures csv: {e}")
 
 
     store.write_last_date_state(last_state)
@@ -847,13 +848,13 @@ def ingest(
         store=store,
         as_of=as_of,
         universe_csv=universe_csv,
-        overrides_csv="data/universe/universe_overrides.csv",
-        excluded_csv="data/universe/asset_excluded.csv",
+        overrides_csv=paths.universe_dir() / "universe_overrides.csv",
+        excluded_csv=paths.universe_dir() / "asset_excluded.csv",
         mapping_changes=pd.DataFrame(),
         mapping_validation=pd.DataFrame(),
         verbose=True,
         sample_n=15,
-        local_out_dir="data/universe/triage_outputs",
+        local_out_dir=paths.universe_dir() / "triage_outputs",
     )
 
     print("\n[DONE]")

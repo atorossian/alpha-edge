@@ -8,6 +8,7 @@ import time
 import re
 import pandas as pd
 import yfinance as yf
+from alpha_edge import paths
 
 
 # =========================
@@ -433,7 +434,6 @@ def enrich_universe_csv_patch(
 
     This avoids rewriting your enrichment logic.
     """
-    from universe import enrich_universe_csv  # reuse your existing function
 
     tickers_subset = [str(t).strip().upper() for t in (tickers_subset or []) if str(t).strip()]
     if not tickers_subset:
@@ -450,7 +450,7 @@ def enrich_universe_csv_patch(
     if sub.empty:
         return
 
-    tmp_dir = Path("data/universe/.tmp")
+    tmp_dir = Path(paths.universe_dir() / ".tmp")
     tmp_dir.mkdir(parents=True, exist_ok=True)
     tmp_in = str(tmp_dir / "universe_patch_in.csv")
     tmp_out = str(tmp_dir / "universe_patch_out.csv")

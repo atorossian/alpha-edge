@@ -4,7 +4,7 @@ from pathlib import Path
 
 from alpha_edge.universe.universe_triage import triage_failures, write_triage_outputs_local
 from alpha_edge.core.market_store import MarketStore
-
+from alpha_edge import paths
 
 def run_post_ingest_triage(
     *,
@@ -109,17 +109,19 @@ def run_post_ingest_triage(
         mapping_validation=mapping_validation,
     )
 
-    # 5) ALSO write local CSVs (ALWAYS write, even if empty)
-    if local_out_dir:
-        # keep them partitioned by date so you can inspect history
-        out_dir = str(Path(local_out_dir) / f"dt={as_of}")
+    # 5) also write local copies for debugging (ALWAYS useful)
+    out_dir = paths.ensure_dir(paths.universe_dir()).as_posix()
+    try:
         write_triage_outputs_local(
             out_dir=out_dir,
             triage_report=triage_report,
             suggested_overrides=sug_overrides,
             suggested_exclusions=sug_exclusions,
         )
-        print(f"[triage][local] wrote -> {out_dir}")
+        print(f"[triage][local] wrote csvs -> {out_dir}")
+    except Exception as e:
+        print(f"[triage][local][warn] could not write local triage csvs: {e}")
+
 
     if verbose:
         print("[triage] outputs_written (triage_report/suggested_overrides/suggested_exclusions + mapping artifacts)")

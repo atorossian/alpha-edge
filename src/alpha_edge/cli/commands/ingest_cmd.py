@@ -3,15 +3,15 @@ from __future__ import annotations
 import typer
 
 from alpha_edge.market.ingest_market_data import ingest as ingest_fn
-
+from alpha_edge import paths
 
 def ingest(
     bucket: str = typer.Option("alpha-edge-algo", help="S3 bucket."),
-    universe_csv: str = typer.Option("data/universe/universe.csv", help="Universe CSV path."),
+    universe_csv: str = typer.Option(paths.universe_dir() / "universe.csv", help="Universe CSV path."),
     start_base: str = typer.Option("2010-01-01", help="Start date for full history."),
     interval: str = typer.Option("1d", help="Bar interval (e.g., 1d)."),
     max_tickers: int | None = typer.Option(None, help="Limit tickers for testing."),
-    force_refresh_csv: str | None = typer.Option("data/universe/ingest_force_refresh.csv", help="Force refresh list."),
+    force_refresh_csv: str | None = typer.Option(paths.universe_dir() / "ingest_force_refresh.csv", help="Force refresh list."),
     max_workers: int = typer.Option(4, help="ThreadPool max workers."),
     yahoo_max_concurrency: int = typer.Option(2, help="Throttle yfinance concurrency."),
 ) -> None:

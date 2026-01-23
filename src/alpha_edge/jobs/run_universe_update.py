@@ -10,9 +10,10 @@ from pathlib import Path
 import numpy as np
 
 from alpha_edge.universe.universe import resolve_ticker_strict, enrich_universe_csv, enrich_universe_csv_patch
+from alpha_edge import paths
 
 
-UNIVERSE_CSV = "data/universe/universe.csv"
+UNIVERSE_CSV = paths.universe_dir() / "universe.csv"
 
 QF_PAGES = {
     "etf": "https://help.quantfury.com/en/articles/5448760-etfs",
@@ -23,10 +24,10 @@ QF_PAGES = {
 STABLE_QUOTES = {"USD", "USDT", "USDC"}
 
 SAFE_SCRAPE_UPDATE_COLS = ["name", "asset_class", "role", "region", "include", "max_weight", "min_weight"]
-OVERRIDES_CSV = "data/universe/universe_overrides.csv"
-ASSET_EXCLUDED_CSV = "data/universe/asset_excluded.csv"
+OVERRIDES_CSV = paths.universe_dir() / "universe_overrides.csv"
+ASSET_EXCLUDED_CSV = paths.universe_dir() / "asset_excluded.csv"
 
-SNAP_DIR = Path("data/universe/.snapshots")
+SNAP_DIR = paths.universe_dir() / "snapshots"
 SNAP_DIR.mkdir(parents=True, exist_ok=True)
 
 

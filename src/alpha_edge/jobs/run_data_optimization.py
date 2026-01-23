@@ -3,13 +3,14 @@
 from alpha_edge.universe.universe import load_universe
 from alpha_edge.core.data_loader import load_closes_from_folder
 from alpha_edge.market.stats_engine import compute_daily_returns, compute_asset_stats, compute_corr_matrix
+from alpha_edge import paths
 
 # 1) Load universe config
-universe = load_universe("data/universe.csv")
+universe = load_universe(paths.universe_dir() / "universe.csv")
 universe_tickers = list(universe.keys())
 
 # 2) Load prices for those tickers
-closes = load_closes_from_folder("data/prices", universe_tickers)
+closes = load_closes_from_folder(paths.prices_dir(), universe_tickers)
 
 # 3) Compute returns
 returns = compute_daily_returns(closes)

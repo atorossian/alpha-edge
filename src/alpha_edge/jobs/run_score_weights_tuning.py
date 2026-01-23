@@ -19,6 +19,7 @@ from alpha_edge.core.data_loader import (
     parse_positions_obj,
     clean_returns_matrix,   # MUST match portfolio search config
 )
+from alpha_edge import paths
 
 
 ENGINE_BUCKET = "alpha-edge-algo"
@@ -35,7 +36,7 @@ def main():
     s3 = s3_init(ENGINE_REGION)
 
     # Universe (file-based for now)
-    universe_all = load_universe("data/universe/universe.csv")
+    universe_all = load_universe(paths.universe_dir() / "universe.csv")
 
     # ---------- Load latest positions (S3-only) ----------
     raw_positions = s3_load_latest_json(

@@ -27,6 +27,7 @@ from alpha_edge.core.data_loader import (
     parse_positions_obj,
     clean_returns_matrix,
 )
+from alpha_edge import paths
 
 
 ENGINE_BUCKET = "alpha-edge-algo"
@@ -164,7 +165,7 @@ def main():
     score_cfg = ScoreConfig(**raw_score_cfg)
 
     # Universe (load as dataframe so we can key by asset_id)
-    u = pd.read_csv("data/universe/universe.csv")
+    u = pd.read_csv(paths.universe_dir() / "universe.csv")
     u = u[u.get("include", 1).fillna(1).astype(int) == 1].copy()
 
     u["asset_id"] = u["asset_id"].astype(str).str.strip()

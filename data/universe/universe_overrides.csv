@@ -1,0 +1,60 @@
+ticker,yahoo_ticker,lock_yahoo_ticker,expected_name,note
+POL-USD,POL28321-USD,1,Polygon (POL),Quantfury POL is Polygon; Yahoo POL-USD is Proof of Liquidity
+TAO-USD,TAO22974-USD,1,Bittensor,Quantfury TAO is Bittensor; use Yahoo CMC-id symbol
+TON-USD,TON11419-USD,1,Toncoin,Quantfury TON is Toncoin; Yahoo TON-USD is a different token
+UNI-USD,UNI7083-USD,1,Uniswap,Quantfury UNI is Uniswap; Yahoo UNI-USD points to a different token
+APT-USD,APT21794-USD,1,Aptos,Quantfury APT is Aptos; Yahoo APT-USD points to a different token
+ARB-USD,ARB11841-USD,1,Arbitrum,Quantfury ARB is Arbitrum; Yahoo ARB-USD points to a different token
+AI.PA,AI.PA,1,Air Liquide,Manual addition (Quantfury has separate asset vs AI)
+ANDR,ANDR.VI,1,Andritz AG, Quantfury ANDR is Andritz AG; Yahoo ANDR points to a different asset
+ANE,ANE.MC,1,Corporacion Acciona Energias Renovable SA,triage:add_suffix_by_region_hint;conf=LOW
+BCP,BCP.LS,1,Banco Comercial Português SA,triage:add_suffix_by_region_hint;conf=LOW
+BCU,BC.MI,1,Brunello Cucinelli S.p.A.,triage:add_suffix_by_region_hint;conf=LOW
+BIM,BIM.PA,1,BioMerieux SA,triage:add_suffix_by_region_hint;conf=LOW
+HIAB,HIAB.HE,1,Hiab Oyj,triage:add_suffix_by_region_hint;conf=LOW
+DHL,DHL.DE,1,DHL Group,triage:add_suffix_by_region_hint;conf=LOW
+EDPR,EDPR.LS,1,EDP Renovaveis SA,triage:add_suffix_by_region_hint;conf=LOW
+EMBJ3,EMBJ3.SA,1,Embraer SA,triage:add_suffix_by_region_hint;conf=HIGH
+EMBJ,EMBJ,1,Embraer SA,triage:add_suffix_by_region_hint;conf=HIGH
+ENG,ENG.MC,1,Enagas SA,triage:add_suffix_by_region_hint;conf=LOW
+EOAN,EOAN.DE,1,E ON SE,triage:add_suffix_by_region_hint;conf=LOW
+FDJU,FDJU.PA,1,FDU United,triage:add_suffix_by_region_hint;conf=LOW
+GALP,GALP.LS,1,GALP Energia SGPS SA,triage:add_suffix_by_region_hint;conf=LOW
+JBS,JBSS3.SA,1,JBS S.A.,triage:add_suffix_by_region_hint;conf=HIGH
+JMT,JMT.LS,1,Jeronimo Martins,triage:add_suffix_by_region_hint;conf=LOW
+MUV2,MUV2.DE,1,Munich Reinsurance Company,triage:add_suffix_by_region_hint;conf=LOW
+RBI,RBI.VI,1,Raiffeisen Bank International AG,triage:add_suffix_by_region_hint;conf=LOW
+ROXO34,ROXO34.SA,1,Nu Holdings Ltd.,triage:add_suffix_by_region_hint;conf=HIGH
+SPIE,SPIE.PA,1,Spie SA,triage:add_suffix_by_region_hint;conf=LOW
+UN01,UN0.DE,1,Uniper SE,triage:add_suffix_by_region_hint;conf=LOW
+UQA,UQA.VI,1,UNIQA Insurance Group AG,triage:add_suffix_by_region_hint;conf=LOW
+VER,VER.VI,1,VERBUND AG,triage:add_suffix_by_region_hint;conf=LOW
+WIE,WIE.VI,1,Wienerberger AG,triage:add_suffix_by_region_hint;conf=LOW
+XPBR31,XPBR31.SA,1,XP Inc,triage:add_suffix_by_region_hint;conf=HIGH
+SAN,SAN.MC,1,Banco Santander SA, Manual addition (Quantfury has separate asset vs SAN)
+BF,BF-B,1,Brown-Forman Corporation,triage:add_suffix_by_region_hint;conf=HIGH
+OR,OR.PA,1,L'Oréal S.A.,triage:add_suffix_by_region_hint;conf=HIGH
+PSKY,PSKY,1,Paramount Skydance Corp,triage:add_suffix_by_region_hint;conf=HIGH
+PUMD,PUM.DE,1,Puma SE,triage:add_suffix_by_region_hint;conf=HIGH
+REE,RED.MC,1,Redeia Corporación S.A.,triage:add_suffix_by_region_hint;conf=HIGH
+TEF,TEF.MC,1,Telefonica SA,triage:add_suffix_by_region_hint;conf=HIGH
+VIG,VIG.VI,1,Vienna Insurance Group AG,triage:add_suffix_by_region_hint;conf=HIGH
+SHA,SHA0.DE,1,Schaeffler AG,triage:add_suffix_by_region_hint;conf=HIGH
+BG,BG.VI,1,BAWAG Group AG,triage:add_suffix_by_region_hint;conf=HIGH
+DEC,DEC.PA,1,JC Decaux S.A.,triage:add_suffix_by_region_hint;conf=HIGH
+AXIA,AXIA,1,Centrais Elétricas Brasileiras S.A. - Eletrobrás,triage:add_suffix_by_region_hint;conf=HIGH
+AXIA3,AXIA3.SA,1,Centrais Elétricas Brasileiras S.A. - Eletrobrás,triage:add_suffix_by_region_hint;conf=HIGH
+EBS,EBS.VI,1,Erste Group Bank AG,triage:add_suffix_by_region_hint;conf=HIGH
+GLE,GLE.PA,1,Societe Generale S.A.,triage:add_suffix_by_region_hint;conf=HIGH
+HESM,HESM,1,Hess Corp.,Asset changed ticker
+BRSL,BRSL,1,Brightstar Lottery PLC,Asset changed ticker
+NEE,NEE,1,Nextera Energy Partners LP,Asset changed ticker
+NVG,NVG.LS,1,The Navigator Company SA,triage:add_suffix_by_region_hint;conf=HIGH
+TRN,TRN.MI,1,Terna Rete Elettrica Nazionale SpA,triage:add_suffix_by_region_hint;conf=HIGH
+VOE,VOE.VI,1,Voestalpine AG,triage:add_suffix_by_region_hint;conf=HIGH
+GTM,GTM,1,ZoomInfo Technologies Inc.,Asset changed ticker
+BNP,BNP.PA,1,BNP Paribas S.A.,triage:add_suffix_by_region_hint;conf=HIGH
+MBRF3,MBRF3.SA,1,Mafrig Global Foods S.A.,triage:add_suffix_by_region_hint;conf=HIGH
+DIA,DIA,1,SPDR Dow Jones Industrial Average ETF Trust,Manual addition (Quantfury has separate asset vs DIA)
+MZTI,MZTI,1,Marzetti Co,Manual addition
+SUI-USD,SUI20947-USD,1,SUI,Quantfury SUI is SUI; Yahoo SUI-USD is other ticker

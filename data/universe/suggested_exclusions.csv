@@ -1,0 +1,2 @@
+ticker,asset_class,reason,note
+BTC-BRL,crypto,triage_exclude,unsupported crypto fiat quote

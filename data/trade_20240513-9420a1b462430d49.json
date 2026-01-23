@@ -1,0 +1,13 @@
+{
+  "trade_id": "20240513-9420a1b462430d49",
+  "as_of": "2024-05-13",
+  "ts_utc": "2024-05-13T07:38:27+00:00",
+  "ticker": "AI.PA",
+  "side": "BUY",
+  "quantity": 7.0,
+  "price": 187.36,
+  "currency": "EUR",
+  "choice_id": null,
+  "portfolio_run_id": null,
+  "note": "source=quantfury_pdf_all | asset_class=STOCKS_ETFS"
+}

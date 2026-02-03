@@ -1,0 +1,1 @@
+row_id,broker_ticker,ticker,yahoo_ticker,name,asset_class,role,region,max_weight,min_weight,include,asset_id,lock_yahoo_ticker,symbol,resolver_debug,shortName,longName,quoteType,exchange,fullExchangeName,currency,market,country,yahoo_ok,yahoo_symbol_returned,yahoo_symbol_used

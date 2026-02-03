@@ -1,34 +1,3 @@
-ticker,yahoo_ticker,lock_yahoo_ticker,expected_name,note,confidence
-ALFAA,ALFAA.MX,1,Alfa,triage:add_suffix_by_region_hint;conf=HIGH,HIGH
-ANE,ANE.MC,1,Corporacion Acciona Energias Renovable SA,triage:add_suffix_by_region_hint;conf=LOW,LOW
-BCP,BCP.LS,1,Banco Comercial Português SA,triage:add_suffix_by_region_hint;conf=LOW,LOW
-BCU,BC.MI,1,Brunello Cucinelli S.p.A.,triage:add_suffix_by_region_hint;conf=LOW,LOW
-BIM,BIM.PA,1,BioMerieux SA,triage:add_suffix_by_region_hint;conf=LOW,LOW
-CCRO3,CCRO3.SA,1,CCR S.A.,triage:add_suffix_by_region_hint;conf=HIGH,HIGH
-CGCBV,CGCBV.DE,1,Cargotec Corp,triage:add_suffix_by_region_hint;conf=LOW,LOW
-CPLE6,CPLE6.SA,1,Companhia Paranaense de Energia - COPEL,triage:add_suffix_by_region_hint;conf=HIGH,HIGH
-CRFB3,CRFB3.SA,1,Atacadão S.A.,triage:add_suffix_by_region_hint;conf=HIGH,HIGH
-DHL,DHL.DE,1,DHL Group,triage:add_suffix_by_region_hint;conf=LOW,LOW
-ECV,ECV.DE,1,Encavis AG,triage:add_suffix_by_region_hint;conf=LOW,LOW
-EDPR,EDPR.DE,1,EDP Renovaveis SA,triage:add_suffix_by_region_hint;conf=LOW,LOW
-EMBR3,EMBR3.SA,1,Embraer SA,triage:add_suffix_by_region_hint;conf=HIGH,HIGH
-ENG,ENG.DE,1,Enagas SA,triage:add_suffix_by_region_hint;conf=LOW,LOW
-EOAN,EOAN.DE,1,E ON SE,triage:add_suffix_by_region_hint;conf=LOW,LOW
-FDJ,FDJ.PA,1,La Francaise Des Jeux Societe Anonyme,triage:add_suffix_by_region_hint;conf=LOW,LOW
-GALP,GALP.DE,1,GALP Energia SGPS SA,triage:add_suffix_by_region_hint;conf=LOW,LOW
-JBSS3,JBSS3.SA,1,JBS S.A.,triage:add_suffix_by_region_hint;conf=HIGH,HIGH
-JMT,JMT.DE,1,Jeronimo Martins,triage:add_suffix_by_region_hint;conf=LOW,LOW
-MRFG3,MRFG3.SA,1,Marfrig Global Foods S.A.,triage:add_suffix_by_region_hint;conf=HIGH,HIGH
-MUV2,MUV2.DE,1,Munich Reinsurance Company,triage:add_suffix_by_region_hint;conf=LOW,LOW
-NEOEN,NEOEN.DE,1,Neoen SA,triage:add_suffix_by_region_hint;conf=LOW,LOW
-NTCO3,NTCO3.SA,1,Natura &Co Holding S.A.,triage:add_suffix_by_region_hint;conf=HIGH,HIGH
-RBI,RBI.DE,1,Raiffeisen Bank International AG,triage:add_suffix_by_region_hint;conf=LOW,LOW
-ROXO34,ROXO34.SA,1,Nu Holdings Ltd.,triage:add_suffix_by_region_hint;conf=HIGH,HIGH
-SHA,SHA.DE,1,Schaeffler AG,triage:add_suffix_by_region_hint;conf=LOW,LOW
-SPIE,SPIE.DE,1,Spie SA,triage:add_suffix_by_region_hint;conf=LOW,LOW
-TKWY,TKWY.DE,1,Just Eat Takeaway.com NV,triage:add_suffix_by_region_hint;conf=LOW,LOW
-UN01,UN01.DE,1,Uniper SE,triage:add_suffix_by_region_hint;conf=LOW,LOW
-UQA,UQA.DE,1,UNIQA Insurance Group AG,triage:add_suffix_by_region_hint;conf=LOW,LOW
-VER,VER.DE,1,VERBUND AG,triage:add_suffix_by_region_hint;conf=LOW,LOW
-WIE,WIE.DE,1,Wienerberger AG,triage:add_suffix_by_region_hint;conf=LOW,LOW
-XPBR31,XPBR31.SA,1,XP Inc,triage:add_suffix_by_region_hint;conf=HIGH,HIGH
+ticker,yahoo_ticker,lock_yahoo_ticker,exclude,exclude_reason,expected_name,note
+ELP,ELP.DE,1,0,,Companhia Paranaense de Energia,auto-suggest from failures(empty); base=ELP; region=NYSE
+CGCBV,CGCBV.DE,1,0,,Cargotec Corp,auto-suggest from failures(empty); base=CGCBV; region=Cboe Europe

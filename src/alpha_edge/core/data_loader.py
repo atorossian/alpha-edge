@@ -13,7 +13,7 @@ import numpy as np
 import pandas as pd
 from collections.abc import KeysView, ValuesView, ItemsView
 
-from schemas import ScoreConfig, Position, PortfolioHealth
+from alpha_edge.core.schemas import ScoreConfig, Position, PortfolioHealth
 
 
 # ----------------------------
@@ -390,3 +390,43 @@ def parse_portfolio_health(obj) -> PortfolioHealth:
     d = dict(obj)
     d["date"] = pd.to_datetime(d["date"])
     return PortfolioHealth(**d)
+
+def s3_get_json(s3, *, bucket: str, key: str) -> dict:
+    obj = s3.get_object(Bucket=bucket, Key=key)
+    body = obj["Body"].read()
+    return json.loads(body.decode("utf-8"))
+
+def s3_load_latest_json_asof(
+    s3,
+    *,
+    bucket: str,
+    root_prefix: str,
+    table: str,
+    as_of: str,
+) -> dict | None:
+    """
+    Loads the most recent dt-partitioned JSON <= as_of (YYYY-MM-DD),
+    falling back to latest.json if nothing found.
+    """
+    as_of_str = pd.Timestamp(as_of).strftime("%Y-%m-%d")
+    prefix = f"{root_prefix.rstrip('/')}/{table}/"
+    keys = s3_list_keys(s3, bucket=bucket, prefix=prefix)
+
+    best_dt = None
+    best_key = None
+    for k in keys:
+        m = _DT_RE.search(k)
+        if not m:
+            continue
+        dt_str = m.group(1)
+        if dt_str <= as_of_str and (best_dt is None or dt_str > best_dt):
+            # prefer "latest.json" within dt partition if it exists, else any json
+            if k.endswith(".json"):
+                best_dt = dt_str
+                best_key = k
+
+    if best_key:
+        return s3_get_json(s3, bucket=bucket, key=best_key)
+
+    # fallback
+    return s3_load_latest_json(s3, bucket=bucket, root_prefix=root_prefix, table=table)

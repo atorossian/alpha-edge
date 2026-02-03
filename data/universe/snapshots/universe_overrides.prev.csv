@@ -1,0 +1,104 @@
+target_row_id,ticker,yahoo_ticker,lock_yahoo_ticker,expected_name,note
+2C20A1D8D7DCF530,POL-USD,POL28321-USD,1,Polygon (POL),Quantfury POL is Polygon; Yahoo POL-USD is Proof of Liquidity
+48CBD7C8989D4ACB,TAO-USD,TAO22974-USD,1,Bittensor,Quantfury TAO is Bittensor; use Yahoo CMC-id symbol
+559EBB3FB9377A35,TON-USD,TON11419-USD,1,Toncoin,Quantfury TON is Toncoin; Yahoo TON-USD is a different token
+3F224449EBE1FD24,UNI-USD,UNI7083-USD,1,Uniswap,Quantfury UNI is Uniswap; Yahoo UNI-USD points to a different token
+252CEE46104F0E24,APT-USD,APT21794-USD,1,Aptos,Quantfury APT is Aptos; Yahoo APT-USD points to a different token
+1E0020F0D2D45F33,ARB-USD,ARB11841-USD,1,Arbitrum,Quantfury ARB is Arbitrum; Yahoo ARB-USD points to a different token
+8D22B41A46A5E938,AI.PA,AI.PA,1,Air Liquide,Manual addition (Quantfury has separate asset vs AI)
+526C4F97D87323E5,ANDR,ANDR.VI,1,Andritz AG, Quantfury ANDR is Andritz AG; Yahoo ANDR points to a different asset
+26593173D5B405BC,ANE,ANE.MC,1,Corporacion Acciona Energias Renovable SA,triage:add_suffix_by_region_hint;conf=LOW
+C06FF75D9838A72D,BCP,BCP.LS,1,Banco Comercial Português SA,triage:add_suffix_by_region_hint;conf=LOW
+68D93C2409B78638,BCU,BC.MI,1,Brunello Cucinelli S.p.A.,triage:add_suffix_by_region_hint;conf=LOW
+9D06997E387C24F4,BIM,BIM.PA,1,BioMerieux SA,triage:add_suffix_by_region_hint;conf=LOW
+B330C007C8DF2744,DHL,DHL.DE,1,DHL Group,triage:add_suffix_by_region_hint;conf=LOW
+5882E682A9C4340E,EDPR,EDPR.LS,1,EDP Renovaveis SA,triage:add_suffix_by_region_hint;conf=LOW
+2E80114F54B43F1C,EMBJ3,EMBJ3.SA,1,Embraer SA,triage:add_suffix_by_region_hint;conf=HIGH
+9A68147A83762C1B,EMBJ,EMBJ,1,Embraer SA,triage:add_suffix_by_region_hint;conf=HIGH
+4B2D61A04F8E62DC,ENG,ENG.MC,1,Enagas SA,triage:add_suffix_by_region_hint;conf=LOW
+FA8DA16D3D3B0913,EOAN,EOAN.DE,1,E ON SE,triage:add_suffix_by_region_hint;conf=LOW
+ECECA28D685AE41B,GALP,GALP.LS,1,GALP Energia SGPS SA,triage:add_suffix_by_region_hint;conf=LOW
+0A7CE081908759A3,JBS,JBSS3.SA,1,JBS S.A.,triage:add_suffix_by_region_hint;conf=HIGH
+D40C264A28E9271E,JMT,JMT.LS,1,Jeronimo Martins,triage:add_suffix_by_region_hint;conf=LOW
+9B4B13E585E3AA74,MUV2,MUV2.DE,1,Munich Reinsurance Company,triage:add_suffix_by_region_hint;conf=LOW
+BAF3F1CAF5BA307C,RBI,RBI.VI,1,Raiffeisen Bank International AG,triage:add_suffix_by_region_hint;conf=LOW
+31BC29E41B92B6D8,ROXO34,ROXO34.SA,1,Nu Holdings Ltd.,triage:add_suffix_by_region_hint;conf=HIGH
+0EBB3A8F3BE62126,SPIE,SPIE.PA,1,Spie SA,triage:add_suffix_by_region_hint;conf=LOW
+61BFBECB3E3E08E8,UN01,UN0.DE,1,Uniper SE,triage:add_suffix_by_region_hint;conf=LOW
+1D8E009CAB9BC985,UQA,UQA.VI,1,UNIQA Insurance Group AG,triage:add_suffix_by_region_hint;conf=LOW
+B972C7BE6FBE4984,VER,VER.VI,1,VERBUND AG,triage:add_suffix_by_region_hint;conf=LOW
+2807A38D6D84E2F6,WIE,WIE.VI,1,Wienerberger AG,triage:add_suffix_by_region_hint;conf=LOW
+4D17A4279D74F09E,XPBR31,XPBR31.SA,1,XP Inc,triage:add_suffix_by_region_hint;conf=HIGH
+DBC2021D1A130B4D,BF,BF-B,1,Brown-Forman Corporation,triage:add_suffix_by_region_hint;conf=HIGH
+15D96E79DC2C85AE,OR,OR.PA,1,L'Oréal S.A.,triage:add_suffix_by_region_hint;conf=HIGH
+2FC621173E5C4908,PSKY,PSKY,1,Paramount Skydance Corp,triage:add_suffix_by_region_hint;conf=HIGH
+E26BFB917A4AFB4A,PUMD,PUM.DE,1,Puma SE,triage:add_suffix_by_region_hint;conf=HIGH
+329A893CD0AE91F0,REE,RED.MC,1,Redeia Corporación S.A.,triage:add_suffix_by_region_hint;conf=HIGH
+3DDA62820293F619,TEF,TEF.MC,1,Telefonica SA,triage:add_suffix_by_region_hint;conf=HIGH
+8EFA21275EC0D27D,VIG,VIG.VI,1,Vienna Insurance Group AG,triage:add_suffix_by_region_hint;conf=HIGH
+A54B124CD027D59C,SHA,SHA0.DE,1,Schaeffler AG,triage:add_suffix_by_region_hint;conf=HIGH
+A164FC8EB0845681,DEC,DEC.PA,1,JC Decaux S.A.,triage:add_suffix_by_region_hint;conf=HIGH
+310768DAFFA0D7DA,AXIA,AXIA,1,Centrais Elétricas Brasileiras S.A. - Eletrobrás,triage:add_suffix_by_region_hint;conf=HIGH
+DF503B401813E565,AXIA3,AXIA3.SA,1,Centrais Elétricas Brasileiras S.A. - Eletrobrás,triage:add_suffix_by_region_hint;conf=HIGH
+814262829364F3FD,EBS,EBS.VI,1,Erste Group Bank AG,triage:add_suffix_by_region_hint;conf=HIGH
+92142F95A81167FA,GLE,GLE.PA,1,Societe Generale S.A.,triage:add_suffix_by_region_hint;conf=HIGH
+0BD26A219816D281,HESM,HESM,1,Hess Corp.,Asset changed ticker
+F8D97A05558A8754,NEE,NEE,1,Nextera Energy Partners LP,Asset changed ticker
+870A50FD62405317,NVG,NVG.LS,1,The Navigator Company SA,triage:add_suffix_by_region_hint;conf=HIGH
+26C9E4625ACA86CE,TRN,TRN.MI,1,Terna Rete Elettrica Nazionale SpA,triage:add_suffix_by_region_hint;conf=HIGH
+16551232D6D8BC35,VOE,VOE.VI,1,Voestalpine AG,triage:add_suffix_by_region_hint;conf=HIGH
+8362126E3E327373,ZI,GTM,1,ZoomInfo Technologies Inc.,Asset changed ticker
+F18483BDA5EF9F64,BNP,BNP.PA,1,BNP Paribas S.A.,triage:add_suffix_by_region_hint;conf=HIGH
+C8253241F2504805,SUI-USD,SUI20947-USD,1,SUI,Quantfury SUI is SUI; Yahoo SUI-USD is other ticker
+86BFA0B4F407F52A,DIA,DIA,1,SPDR Dow Jones Industrial Average ETF Trust,Manual addition (Quantfury has separate asset vs DIA)
+8F6A445B7568FF88,DIA.MI,DIA.MI,1,DiaSorin S.p.A,Manual addition (Quantfury has separate asset vs DIA)
+5D62BE9DD1375966,ORA,ORA,1,Ormat Technologies Inc.,Manual addition (Quantfury has separate asset vs ORA)
+883E83CB5A0FEBAA,ORA.PA,ORA.PA,1,Orange SA,Manual addition (Quantfury has separate asset vs ORA)
+E8A1AF93E2E281F0,AC,AC.PA,1,Accor SA,Manual addition (Quantfury has separate asset vs AC)
+4094E750DF928AC9,AC,AC.MX,1,Arca Continental S.A.B. de C.V.,Manual addition (Quantfury has separate asset vs AC)
+782650EC7DB6C2A8,ACA,ACA,1,Arcosa Inc.,Manual addition (Quantfury has separate asset vs ACA)
+DB5747CE8F30DFB7,ACA,ACA.PA,1,Credit Agricole SA,Manual addition (Quantfury has separate asset vs ACA)
+84B4579B772EA533,BG,BG.VI,1,BAWAG Group AG,triage:add_suffix_by_region_hint;conf=HIGH
+4849E394639F3AD7,BN,BN,1,Brookfield Corporation,Manual addition (Quantfury has separate asset vs BN)
+67A886547F85D229,BN,BN.PA,1,Danone SA,Manual addition (Quantfury has separate asset vs BN)
+342B8D8338CE18E7,CON,CON.DE,1,Continental AG O.N.,Manual addition (Quantfury has separate asset vs CON)
+FB38B7CC51F12E53,DG,DG.PA,1,Vinci SA,Manual addition (Quantfury has separate asset vs DG)
+15AB78FA0F73A60B,DG,DG,1,Dollar General Corporation,Manual addition (Quantfury has separate asset vs DG)
+6D6D86D80F84387D,DTE,DTE.DE,1,Deutsche Telekom AG,Manual addition (Quantfury has separate asset vs DTE)
+A659D89328445C29,DTE,DTE,1,DTE Energy Co,Manual addition (Quantfury has separate asset vs DTE)
+6A4F6FA91F49780B,EL,EL.PA,1,EssilorLuxottica SA,Manual addition (Quantfury has separate asset vs EL)
+C1E49D53B38C1361,EL,EL,1,Estee Lauder Companies Inc.,Manual addition (Quantfury has separate asset vs EL)
+247AEC6B199B5F3F,FR,FR.PA,1,Valeo SA,Manual addition (Quantfury has separate asset vs FR)
+E9F2C899B4C03491,FR,FR,1,First Industrial Realty Trust Inc.,Manual addition (Quantfury has separate asset vs FR)
+AF642008EB124FF2,G,G.MI,1,Assicurazioni Generali S.p.A.,Manual addition (Quantfury has separate asset vs G)
+116417D7E6692FA1,G,G,1,Genpact Ltd,Manual addition (Quantfury has separate asset vs G)
+63222BBF6753AD4D,HEI,HEI.DE,1,Heidelberg Materials AG,Manual addition (Quantfury has separate asset vs HEI)
+CB329E7696872913,HEI,HEI,1,Heico Corp.,Manual addition (Quantfury has separate asset vs HEI)
+77264FB35F664181,LI,LI.PA,1,Klepierre SA,Manual addition (Quantfury has separate asset vs LI)
+BC1A4AD4DB022C28,LI,LI,1,Li Auto Inc.,Manual addition (Quantfury has separate asset vs LI)
+7024895E47F78664,MC,MC.PA,1,LVMH Moët Hennessy - Louis Vuitton Société Européenne,Manual addition (Quantfury has separate asset vs MC)
+C2F51088C3EFA7A6,MC,MC,1,Moelis & Co,Manual addition (Quantfury has separate asset vs MC)
+A54FEAFC746737BE,MRK,MRK.DE,1,Merck KGaA,Manual addition (Quantfury has separate asset vs MRK)
+4996FFA610AB5CE2,MRK,MRK,1,Merck & Co Inc.,Manual addition (Quantfury has separate asset vs MRK)
+C61F4C245E80E153,NDA,NDA.DE,1,Aurubis AG,Manual addition (Quantfury has separate asset vs NDA)
+209A7B34C17A07B2,NDA,NDA-FI.HE,1,Nordea Bank Abp,Manual addition (Quantfury has separate asset vs NDA)
+9480B1C0FAE5C337,NEM,NEM.DE,1,Nemetschek SE,Manual addition (Quantfury has separate asset vs NEM)
+5C2810D64FC70AD7,NEM,NEM,1,Newmont Corporation,Manual addition (Quantfury has separate asset vs NEM)
+BBC9D3A3B9D1755E,RF,RF.PA,1,Eurazeo SE,Manual addition (Quantfury has separate asset vs RF)
+D5A7A20BDE4EDBB0,RF,RF,1,Regions Financial Corp,Manual addition (Quantfury has separate asset vs RF)
+62C535D368ED5C1C,RYAAY,RYA.IR,1,Ryanair Holdings plc,Manual addition (Quantfury has different ticker for this asset)
+DC60B00823B87EAB,SW,SW.PA,1,Sodexo SA,Manual addition (Quantfury has separate asset vs SW)
+33538BC089AF220E,TRI,TRI.PA,1,Trigano SA,Manual addition (Quantfury has separate asset vs TRI)
+47241D772951CFB0,TRI,TRI,1,Thomson Reuters Corp,Manual addition (Quantfury has separate asset vs TRI)
+7A2124E9CBEECFC1,VIV,VIV.PA,1,Vivendi SA,Manual addition (Quantfury has separate asset vs VIV)
+627E71FBC7CF701E,VIV,VIV,1,Telefonica Brasil SA,Manual addition (Quantfury has separate asset vs VIV)
+EE5F50622101CA2B,SAN,SAN.MC,1,Banco Santander SA, Manual addition (Quantfury has separate asset vs SAN)
+467561B62CFF7E3A,SAN,SAN.PA,1,Sanofi S.A.,Manual addition (Quantfury has separate asset vs SAN)
+C2DB5CB3F85A5155,FDJ,FDJU.PA,1,FDU United,Rebranding
+3FC16F40E497A6EC,MZTI,MZTI,1,Marzetti Co,Rebranding
+207312880793BF64,HIAB,HIAB.HE,1,Hiab Oyj,Rebranding
+CC92C44071979482,IGT,BRSL,1,Brightstar Lottery PLC,Rebranding
+9F1FAAEB4E3AE438,BFIT,BFIT.AS,1,Basic Fit NV,triage:add_suffix_by_region_hint;conf=HIGH
+4E3FF6CCFD160123,BOSS,BOSS.DE,1,Hugo Boss AG,triage:add_suffix_by_region_hint;conf=HIGH
+3AE9AF92F2A9FE01,SESG,SESG.PA,1,SES SA,triage:add_suffix_by_region_hint;conf=HIGH
+92F437A7E50D72CE,BRK,BRK-B,1,Berkshire Hathaway Inc.,Manual addition

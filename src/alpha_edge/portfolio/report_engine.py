@@ -6,10 +6,12 @@ from typing import Dict, Any, List
 import numpy as np
 import pandas as pd
 
+import json
+
 from alpha_edge.core.schemas import Position, PortfolioSnapshot, PortfolioReport
 from alpha_edge.portfolio.optimizer_engine import evaluate_portfolio  # canonical evaluator
 from alpha_edge.market.stats_engine import compute_daily_returns   # to build asset returns
-
+from alpha_edge.portfolio.alpha_report import format_alpha_report
 
 # ---------- Core helpers ----------
 
@@ -368,3 +370,195 @@ def print_hmm_summary(hmm_res: dict, lev_rec: dict | None = None) -> None:
         )
 
     print("└──────────────┴──────────┴──────────┴────────────┴──────────┘")
+
+
+def print_decision_addendum(
+    *,
+    decision,
+    health,
+    bench_ann_ret: float | None,
+    reopt: bool,
+    plan=None,                 # RescalePlan | None
+    top_n: int = 8,
+    show_full_alpha_blob: bool = False,
+) -> None:
+    # decision: RebalanceDecision
+    # health: PortfolioHealth
+    # plan: RescalePlan (optional)
+
+    # format_alpha_report must be in scope (import where you call this)
+    # from alpha_edge.portfolio.portfolio_health import format_alpha_report
+
+    def pct(x: float | None) -> str:
+        if x is None or (isinstance(x, float) and not np.isfinite(x)):
+            return "n/a"
+        return f"{100.0 * float(x):+.2f}%"
+
+    def num(x: float | None, nd: int = 4) -> str:
+        if x is None or (isinstance(x, float) and not np.isfinite(x)):
+            return "n/a"
+        return f"{float(x):.{nd}f}"
+
+    def money(x: float | None) -> str:
+        if x is None or (isinstance(x, float) and not np.isfinite(x)):
+            return "n/a"
+        return f"{float(x):,.2f} USD"
+
+    print("\n" + "─" * 44)
+    print("Decision Addendum")
+    print("─" * 44)
+
+    # --- REBALANCE ---
+    should_rb = bool(getattr(decision, "should_rebalance", False))
+    print("\nRebalance")
+    print(f"▶ should_rebalance: {should_rb}")
+
+    drift_ratio = getattr(decision, "drift_ratio", None)
+    drift = None
+    try:
+        drift = abs(float(drift_ratio) - 1.0) if drift_ratio is not None else None
+    except Exception:
+        drift = None
+
+    print(
+        f"  L_real={num(getattr(decision, 'leverage_real', None), 2)}x  "
+        f"L_target={num(getattr(decision, 'leverage_target', None), 2)}x  "
+        f"drift={pct(drift)}"
+    )
+    reasons = getattr(decision, "reasons", None)
+    if reasons:
+        print(f"  reasons: {', '.join(reasons)}")
+
+    # --- HEALTH ---
+    print("\nHealth")
+    print(f"▶ should_reoptimize: {bool(reopt)}")
+    print(
+        f"  score={num(getattr(health, 'score', None), 4)}  "
+        f"sharpe={num(getattr(health, 'sharpe', None), 2)}"
+    )
+    print(
+        f"  ann_return={pct(getattr(health, 'ann_return', None))}  "
+        f"ruin_prob_1y={pct(getattr(health, 'ruin_prob', None))}"
+    )
+
+    # --- BENCH + ALPHA (CAPM) ---
+    print("\nBenchmark & Alpha (CAPM)")
+    print(f"  bench_ann_return={pct(bench_ann_ret)}")
+
+    # Diagnostics (active return) — do NOT call it alpha
+    ex1y = getattr(health, "excess_return_1y", None)
+    if ex1y is None:
+        # fallback to legacy field if you still store it there
+        ex1y = getattr(health, "alpha_vs_bench", None)
+    print(f"  excess_return_1y={pct(ex1y)}")
+
+    # CAPM alpha is the only “alpha”
+    print(
+        f"  capm_alpha_1y={pct(getattr(health, 'alpha_1y', None))}  "
+        f"beta_1y={num(getattr(health, 'beta_1y', None), 3)}  "
+        f"r2_1y={num(getattr(health, 'r2_1y', None), 3)}"
+    )
+    print(
+        f"  IR_1y={num(getattr(health, 'info_ratio_1y', None), 3)}  "
+        f"TE_1y={pct(getattr(health, 'tracking_error_1y', None))}"
+    )
+
+    # Optional: 3m window if your health has it
+    if getattr(health, "alpha_3m", None) is not None or getattr(health, "excess_return_3m", None) is not None:
+        print(
+            f"  capm_alpha_3m={pct(getattr(health, 'alpha_3m', None))}  "
+            f"beta_3m={num(getattr(health, 'beta_3m', None), 3)}  "
+            f"r2_3m={num(getattr(health, 'r2_3m', None), 3)}"
+        )
+        print(
+            f"  IR_3m={num(getattr(health, 'info_ratio_3m', None), 3)}  "
+            f"TE_3m={pct(getattr(health, 'tracking_error_3m', None))}  "
+            f"excess_return_3m={pct(getattr(health, 'excess_return_3m', None))}"
+        )
+
+    # Pretty alpha lines (short) - recommended default
+    if getattr(health, "alpha_report_json", None):
+        try:
+            ar = json.loads(health.alpha_report_json)
+            print("\n" + format_alpha_report(ar))
+        except Exception:
+            print("\n[alpha][warn] could not parse alpha_report_json")
+
+    # --- RESCALE / REBALANCE PLAN (PREVIEW) ---
+    # Only show if we actually decided to rebalance and we have a plan
+    if should_rb and plan is not None:
+        print("\n" + "=" * 72)
+        print("RESCALE / REBALANCE PLAN (PREVIEW)")
+        print("=" * 72)
+        print(f"Equity:                {money(getattr(plan, 'equity', None))}")
+        print(f"Recommended leverage:  {num(getattr(plan, 'recommended_leverage', None), 2)}x")
+        print(f"Current leverage:      {num(getattr(plan, 'leverage_current', None), 2)}x")
+        print(f"Target gross notional: {money(getattr(plan, 'target_gross_notional', None))}")
+        print(f"Used gross notional:   {money(getattr(plan, 'used_gross_notional', None))}")
+        print(f"Leftover notional:     {money(getattr(plan, 'leftover_notional', None))}")
+        print("-" * 72)
+
+        try:
+            df = getattr(plan, "targets", None)
+            if df is None or len(df) == 0:
+                print("(plan.targets empty)")
+            else:
+                d = df.copy()
+
+                view_cols = [
+                    "ticker",
+                    "price",
+                    "qty_current",
+                    "qty_target",
+                    "delta_qty",
+                    "exp_current",
+                    "exp_target_rounded",
+                    "delta_exp",
+                ]
+                # keep only columns that exist (defensive)
+                view_cols = [c for c in view_cols if c in d.columns]
+                df_view = d[view_cols].copy()
+
+                # coerce numeric safely
+                for c in ["price", "qty_current", "qty_target", "delta_qty", "exp_current", "exp_target_rounded", "delta_exp"]:
+                    if c in df_view.columns:
+                        df_view[c] = pd.to_numeric(df_view[c], errors="coerce")
+
+                # formatting
+                if "price" in df_view.columns:
+                    df_view["price"] = df_view["price"].map(lambda x: "n/a" if not np.isfinite(x) else f"{x:,.2f}")
+                for c in ["exp_current", "exp_target_rounded"]:
+                    if c in df_view.columns:
+                        df_view[c] = df_view[c].map(lambda x: "n/a" if not np.isfinite(x) else f"{x:,.2f}")
+                if "delta_exp" in df_view.columns:
+                    df_view["delta_exp"] = df_view["delta_exp"].map(lambda x: "n/a" if not np.isfinite(x) else f"{x:+,.2f}")
+                if "delta_qty" in df_view.columns:
+                    # if you want crypto decimals preserved, change +.0f -> +.8f when is_crypto
+                    df_view["delta_qty"] = df_view["delta_qty"].map(lambda x: "n/a" if not np.isfinite(x) else f"{x:+.0f}")
+
+                print("\nPosition adjustments:")
+                print(df_view.to_string(index=False))
+                print("-" * 72)
+
+                # signed/gross checks (same as old version)
+                if "exp_target_rounded" in d.columns:
+                    exp_tgt = pd.to_numeric(d["exp_target_rounded"], errors="coerce")
+                    signed_sum = float(exp_tgt.sum(skipna=True))
+                    gross_sum = float(exp_tgt.abs().sum(skipna=True))
+
+                    print(f"Signed exposure sum: {signed_sum:,.2f} USD")
+                    print(f"Gross exposure sum:  {gross_sum:,.2f} USD")
+
+                    used = getattr(plan, "used_gross_notional", None)
+                    if used is not None and np.isfinite(float(used)):
+                        if abs(gross_sum - float(used)) > 1e-2:
+                            print("[WARN] Gross exposure mismatch after rounding")
+
+                leftover = getattr(plan, "leftover_notional", None)
+                if leftover is not None and np.isfinite(float(leftover)) and float(leftover) > 0:
+                    print("[INFO] Some notional could not be deployed due to rounding constraints")
+
+        except Exception as e:
+            print(f"(plan preview failed: {type(e).__name__})")
+
+        print("\n" + "=" * 72)

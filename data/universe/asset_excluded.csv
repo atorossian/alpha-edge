@@ -1,66 +1,65 @@
-ticker,asset_class,reason,note
-FTM-USD,crypto,Not tradable in Quantfury app,
-BTC-BRL,crypto,Not available in YahooFinance,
-ALFAA,equity,Not tradable in Quantfury app,
-CGCBV,equity,Asset changed names
-CCRO3,equity,Not tradable in Quantfury app,
-CPLE6,equity,Not tradable in Quantfury app,
-CRFB3,equity,Not tradable in Quantfury app,
-ECV,equity,Not tradable in Quantfury app,
-EMBR3,equity,Not tradable in Quantfury app,
-ERJ,equity,Not tradable in Quantfury app,
-JBSS3,equity,Not tradable in Quantfury app,
-MRFG3,equity,Not tradable in Quantfury app,
-NEOEN,equity,Not tradable in Quantfury app,
-NTCO3,equity,Not tradable in Quantfury app,
-TKWY,equity,Not tradable in Quantfury app,
-ASAI,equity,Not tradable in Quantfury app,
-AZEK,equity,Not tradable in Quantfury app,
-ARCH,equity,Not tradable in Quantfury app,
-AZUL,equity,Not tradable in Quantfury app,
-AZPN,equity,Not tradable in Quantfury app,
-BRFS,equity,Not tradable in Quantfury app,
-BRFS3,equity,Not tradable in Quantfury app,
-WBA,equity,Asset not publicly traded anymore,
-DESP,equity,Asset not publicly traded anymore,
-PARA,equity,Asset changed names,
-HCP,equity,Asset not publicly traded anymore,
-ALTR,equity,Not available in YahooFinance,
-ANSS,equity,Asset not publicly traded anymore,
-BERY,equity,Asset not publicly traded anymore,
-DFS,equity,Asset not publicly traded anymore,
-DNB,equity,Asset not publicly traded anymore,
-EBR,equity,Asset changed names,
-ELET3,equity,Asset changed names,
-EDR,equity,Not tradable in Quantfury app,
-FL,equity,Asset not publicly traded anymore,
-GOGL,equity,Asset not publicly traded anymore,
-HES,equity,Asset changed names,
-IGT,equity,Asset changed names,
-ITCI,equity,Not available in YahooFinance,
-JNPR,equity,Asset not publicly traded anymore,Acquired by Hewlett Packard Enterprise (HPE)
-JWN,equity,Asset not publicly traded anymore
-NARI,equity,Asset not publicly traded anymore,Acquired by Stryker (SYK)
-NEP,equity,Asset changed names,
-PDCO,equity,Asset not publicly traded anymore,Acquired by Patient Square Capital
-PLL,equity,Asset not publicly traded anymore,
-PPBI,equity,Asset not publicly traded anymore,
-RDFN,equity,Not tradable in Quantfury app,
-SKX,equity,Asset not publicly traded anymore,
-SMAR,equity,Asset not publicly traded anymore,Acquired by Blackstone (BX) and Vista Equity Partners
-STR,equity,Not tradable in Quantfury app,
-SUM,equity,Asset not publicly traded anymore,
-TPX,equity,Not tradable in Quantfury app,
-WNS,equity,Asset not publicly traded anymore,Acquired by Capgemini (CAP.PA)
-X,equity,Asset not publicly traded anymore,Acquired by Nippon Steel (5401.T)
-ZI,equity,Asset changed names,
-FDJ,equity,Asset changed names,
-LANC,equity,Asset changed names, Rebranding
-IPG,equity,Asset not publicly traded anymore,Acquired by Omnicom Group Inc. (OMC)
-PYCR,equity,Asset not publicly traded anymore,Acquired by Paycheck Inc. (PAYX)
-SNV,equity,Asset not publicly traded anymore,Merged with Pinnacle Financial Partners Inc. (PNFP)
-ALE,equity,Not tradable in Quantfury app,
-SPR,equity,Not tradable in Quantfury app,
-K,equity,Not tradable in Quantfury app,
-INFA,equity,Not tradable in Quantfury app,
-1COV,equity,Not tradable in Quantfury app,
+target_row_id,ticker,asset_class,reason,note
+E4A8089C5D2511B2,FTM-USD,crypto,Not tradable in Quantfury app,
+435EFD5617F3D896,BTC-BRL,crypto,Not available in YahooFinance,
+6545C87607F0763C,ALFAA,equity,Not tradable in Quantfury app,
+70EA9366BC587474,CCRO3,equity,Not tradable in Quantfury app,
+F8833D496F010634,CPLE6,equity,Not tradable in Quantfury app,
+18C506377991404C,CRFB3,equity,Not tradable in Quantfury app,
+1F09B88F3A22AC99,ECV,equity,Not tradable in Quantfury app,
+2E80114F54B43F1C,EMBR3,equity,Not tradable in Quantfury app,
+9A68147A83762C1B,ERJ,equity,Not tradable in Quantfury app,
+0A7CE081908759A3,JBSS3,equity,Not tradable in Quantfury app,
+CEF2868E5E50AE2C,MRFG3,equity,Not tradable in Quantfury app,
+4D351AC620ACBD41,NEOEN,equity,Not tradable in Quantfury app,
+2F074ABC060E61E7,NTCO3,equity,Not tradable in Quantfury app,
+A6195FA366A28C77,TKWY,equity,Not tradable in Quantfury app,
+67DBB01D42F7565F,ASAI,equity,Not tradable in Quantfury app,
+82EBDA073D62FACC,AZEK,equity,Not tradable in Quantfury app,
+0BF0E23CA8BB3859,ARCH,equity,Not tradable in Quantfury app,
+BE7C91E1B9E07A62,AZUL,equity,Not tradable in Quantfury app,
+4295AC12187E2F8A,AZPN,equity,Not tradable in Quantfury app,
+32A45213C967F6A2,BRFS,equity,Not tradable in Quantfury app,
+32A45213C967F6A2,BRFS3,equity,Not tradable in Quantfury app,
+8640904D3C6DB3B8,WBA,equity,Asset not publicly traded anymore,
+7053A316894FE77A,DESP,equity,Asset not publicly traded anymore,
+B5A7C8FDDED56A5C,HCP,equity,Asset not publicly traded anymore,
+668FFBACAF8D372F,ALTR,equity,Not available in YahooFinance,
+6759CD29FE1D56C0,ANSS,equity,Asset not publicly traded anymore,
+41BED8813C6A19EC,BERY,equity,Asset not publicly traded anymore,
+6E59147FE88FE34D,DFS,equity,Asset not publicly traded anymore,
+863F81A9C3CBDF90,DNB,equity,Asset not publicly traded anymore,
+310768DAFFA0D7DA,EBR,equity,Asset changed names,
+DF503B401813E565,ELET3,equity,Asset changed names,
+950B132C1B5F64F9,EDR,equity,Not tradable in Quantfury app,
+FD56DD1C30928A5F,FL,equity,Asset not publicly traded anymore,
+6221C5CC1BBE69E7,GOGL,equity,Asset not publicly traded anymore,
+6218967B92FC869E,ITCI,equity,Not available in YahooFinance,
+0C82A3495A8A4ABA,JNPR,equity,Asset not publicly traded anymore,Acquired by Hewlett Packard Enterprise (HPE)
+CFAB2A89BB983D04,JWN,equity,Asset not publicly traded anymore
+A5AAEDDAD0C90755,NARI,equity,Asset not publicly traded anymore,Acquired by Stryker (SYK)
+DEDAE41425B1B462,PDCO,equity,Asset not publicly traded anymore,Acquired by Patient Square Capital
+D38D4562CC9EC13E,PLL,equity,Asset not publicly traded anymore,
+90FF52E1A6A20171,PPBI,equity,Asset not publicly traded anymore,
+F90705A0CDBB93B0,RDFN,equity,Not tradable in Quantfury app,
+C4366AD8EBD1FF99,SKX,equity,Asset not publicly traded anymore,
+8FB439A4778C981D,SMAR,equity,Asset not publicly traded anymore,Acquired by Blackstone (BX) and Vista Equity Partners
+5FBC785B321F3DEB,STR,equity,Not tradable in Quantfury app,
+A43905DA8FCCF7CF,SUM,equity,Asset not publicly traded anymore,
+198CC306C9E38AD5,TPX,equity,Not tradable in Quantfury app,
+981718C8E13FD7A2,WNS,equity,Asset not publicly traded anymore,Acquired by Capgemini (CAP.PA)
+DB4C5AE028A3113C,X,equity,Asset not publicly traded anymore,Acquired by Nippon Steel (5401.T)
+2F93ED434924C82E,IPG,equity,Asset not publicly traded anymore,Acquired by Omnicom Group Inc. (OMC)
+8B2D80E51396538C,PYCR,equity,Asset not publicly traded anymore,Acquired by Paycheck Inc. (PAYX)
+5A70A4674B60ED51,SNV,equity,Asset not publicly traded anymore,Merged with Pinnacle Financial Partners Inc. (PNFP)
+F091A13C6379B76B,ALE,equity,Not tradable in Quantfury app,
+AAE364AD17D40431,SPR,equity,Not tradable in Quantfury app,
+C5E3CB03B52F518A,K,equity,Not tradable in Quantfury app,
+F967D1C14E88F2A8,INFA,equity,Not tradable in Quantfury app,
+7FAE16B174B40718,1COV,equity,Not tradable in Quantfury app,
+D66A42EBB1A8945A,LNW,equity,Not tradable in Quantfury app,
+C3BFE64D6C11C24F,PINC,equity,Not tradable in Quantfury app,
+AF9A01DBE04B1E06,AZUL4,equity,Not tradable in Quantfury app,
+DFD81C0F5C8D9F9F,FYBR,equity,Asset not publicly traded anymore,Acquired by Verizon Communications Inc. (VZ)
+64BE304B51FEB38F,IRBT,equity,Asset not publicly traded anymore,
+207312880793BF64,CGCBV,equity,Not tradable in Quantfury app,
+B156FC7F56F91AEB,ELP,equity,Not tradable in Quantfury app,

@@ -192,7 +192,28 @@ class PortfolioHealth:
     ruin_prob: float
     ann_return: float
     sharpe: float
-    alpha_vs_bench: float  # annualized excess return vs benchmark
+
+    # headline legacy metric (keep)
+    alpha_vs_bench: float
+
+    # alpha report blob (optional)
+    alpha_report_json: str | None = None
+
+    # ---- 1y diagnostics (optional) ----
+    alpha_1y: float | None = None          # CAPM alpha annualized (preferred)
+    beta_1y: float | None = None           # CAPM beta
+    r2_1y: float | None = None             # CAPM R^2
+    info_ratio_1y: float | None = None     # IR
+    tracking_error_1y: float | None = None # TE annualized
+    excess_return_1y: float | None = None  # mean(port-bench)*252
+
+    # ---- 3m diagnostics (optional) ----
+    alpha_3m: float | None = None
+    beta_3m: float | None = None
+    r2_3m: float | None = None
+    info_ratio_3m: float | None = None
+    tracking_error_3m: float | None = None
+    excess_return_3m: float | None = None
 
 
 @dataclass(frozen=True)

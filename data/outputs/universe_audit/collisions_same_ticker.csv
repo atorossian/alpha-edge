@@ -1,0 +1,51 @@
+row_id,broker_ticker,ticker,yahoo_ticker,name,asset_class,role,region,max_weight,min_weight,include,asset_id,lock_yahoo_ticker,symbol,resolver_debug,shortName,longName,quoteType,exchange,fullExchangeName,currency,market,country,yahoo_ok,yahoo_symbol_returned,yahoo_symbol_used
+A54FEAFC746737BE,MRK,MRK,MRK.DE,Merck KGaA,equity,stock,Cboe Europe,0.25,0.0,1,EQH001c29fe564c5036,1,MRK,,MERCK KGAA                    I,Merck KGaA,EQUITY,GER,XETRA,EUR,de_market,Germany,True,MRK.DE,MRK.DE
+78D0D5C2400AADC3,COP,COP,COP,CompuGroup Medical SE & Co. KGaA,equity,stock,Cboe Europe,0.25,0.0,1,EQH0816028bb3741194,0,COP,,ConocoPhillips,ConocoPhillips,EQUITY,NYQ,NYSE,USD,us_market,United States,True,COP,COP
+7A2124E9CBEECFC1,VIV,VIV,VIV.PA,Vivendi S.A.,equity,stock,Cboe Europe,0.25,0.0,1,EQH16d9ffdd3289a90c,1,VIV,,VIVENDI SE,Vivendi SE,EQUITY,PAR,Paris,EUR,fr_market,France,True,VIV.PA,VIV.PA
+15AB78FA0F73A60B,DG,DG,DG,Dollar General Corporation,equity,stock,NYSE,0.25,0.0,1,EQH1d131e37dfa410e6,1,DG,,Dollar General Corporation,Dollar General Corporation,EQUITY,NYQ,NYSE,USD,us_market,United States,True,DG,DG
+8D22B41A46A5E938,AI,AI,AI,Air Liquide S.A.,equity,stock,Cboe Europe,0.25,0.0,1,EQH1d950ce3e134f54b,0,AI,,"C3.ai, Inc.","C3.ai, Inc.",EQUITY,NYQ,NYSE,USD,us_market,United States,True,AI,AI
+883E83CB5A0FEBAA,ORA,ORA,ORA,ORANGE S.A.,equity,stock,Cboe Europe,0.25,0.0,1,EQH1f1f1e1dd63ddb5a,1,ORA,,"Ormat Technologies, Inc.","Ormat Technologies, Inc.",EQUITY,NYQ,NYSE,USD,us_market,United States,True,ORA,ORA
+A659D89328445C29,DTE,DTE,DTE,DTE Energy Co,equity,stock,NYSE,0.25,0.0,1,EQH25264f1fda71ec80,1,DTE,,DTE Energy Company,DTE Energy Company,EQUITY,NYQ,NYSE,USD,us_market,United States,True,DTE,DTE
+77264FB35F664181,LI,LI,LI.PA,Klepierre SA,equity,stock,Cboe Europe,0.25,0.0,1,EQH3342dcfdf4838816,1,LI,,KLEPIERRE,Klépierre SA,EQUITY,PAR,Paris,EUR,fr_market,France,True,LI.PA,LI.PA
+D05E9A172A241882,COP,COP,COP,ConocoPhillips,equity,stock,NYSE,0.25,0.0,1,EQH341782fd07d43832,0,COP,,ConocoPhillips,ConocoPhillips,EQUITY,NYQ,NYSE,USD,us_market,United States,True,COP,COP
+116417D7E6692FA1,G,G,G,Genpact Ltd,equity,stock,NYSE,0.25,0.0,1,EQH3817411bbda3214c,1,G,,Genpact Limited,Genpact Limited,EQUITY,NYQ,NYSE,USD,us_market,Bermuda,True,G,G
+BC1A4AD4DB022C28,LI,LI,LI,Li Auto Inc.,equity,stock,NASDAQ,0.25,0.0,1,EQH3eb901be41974d6a,1,LI,,Li Auto Inc.,Li Auto Inc.,EQUITY,NMS,NasdaqGS,USD,us_market,China,True,LI,LI
+FB38B7CC51F12E53,DG,DG,DG.PA,Vinci S.A.,equity,stock,Cboe Europe,0.25,0.0,1,EQH3ece6ebc5bd1bb4b,1,DG,,VINCI,Vinci SA,EQUITY,PAR,Paris,EUR,fr_market,France,True,DG.PA,DG.PA
+782650EC7DB6C2A8,ACA,ACA,ACA,Arcosa Inc.,equity,stock,NYSE,0.25,0.0,1,EQH4113c94384740eeb,1,ACA,,"Arcosa, Inc.","Arcosa, Inc.",EQUITY,NYQ,NYSE,USD,us_market,United States,True,ACA,ACA
+C61F4C245E80E153,NDA,NDA,NDA.DE,Aurubis AG,equity,stock,Cboe Europe,0.25,0.0,0,EQH4d8c549ef7af6b41,1,NDA,,,,,,,,,,,,
+AF642008EB124FF2,G,G,G.MI,Assicurazioni Generali S.p.A.,equity,stock,Cboe Europe,0.25,0.0,1,EQH4e48f73a16cfd58e,1,G,,GENERALI,Assicurazioni Generali S.p.A.,EQUITY,MIL,Milan,EUR,it_market,Italy,True,G.MI,G.MI
+209A7B34C17A07B2,NDA,NDA,NDA-FI.HE,Nordea Bank Abp,equity,stock,Cboe Europe,0.25,0.0,0,EQH54bab57353b5391d,1,NDA,,,,,,,,,,,,
+E8A1AF93E2E281F0,AC,AC,AC.PA,Accor S.A.,equity,stock,Cboe Europe,0.25,0.0,0,EQH561b3463ca3cc228,1,AC,,,,,,,,,,,,
+4AE933AEEA356CAA,AM,AM,AM,Dassault Aviation SA,equity,stock,Cboe Europe,0.25,0.0,1,EQH5b5a2d9f87835d1f,0,AM,,Antero Midstream Corporation,Antero Midstream Corporation,EQUITY,NYQ,NYSE,USD,us_market,United States,True,AM,AM
+86BFA0B4F407F52A,DIA,DIA,DIA,SPDR Dow Jones Industrial Average ETF,equity,etf,NYSE,0.25,0.0,1,EQH5c97d832742945c9,1,DIA,,SPDR Dow Jones Industrial Avera,SPDR Dow Jones Industrial Average ETF Trust,ETF,PCX,NYSEArca,USD,us_market,,True,DIA,DIA
+37F1DFDA42D6A4AF,ADP,ADP,ADP,Automatic Data Processing Inc.,equity,stock,NASDAQ,0.25,0.0,1,EQH5cd6ee5dd8d979a3,0,ADP,,"Automatic Data Processing, Inc.","Automatic Data Processing, Inc.",EQUITY,NMS,NasdaqGS,USD,us_market,United States,True,ADP,ADP
+7024895E47F78664,MC,MC,MC.PA,LVMH Moet Hennessy Louis Vuitton SE,equity,stock,Cboe Europe,0.25,0.0,1,EQH65423d42e6ad7a9c,1,MC,,LVMH,"LVMH Moët Hennessy - Louis Vuitton, Société Européenne",EQUITY,PAR,Paris,EUR,fr_market,France,True,MC.PA,MC.PA
+E9F2C899B4C03491,FR,FR,FR,First Industrial Realty Trust Inc.,equity,stock,NYSE,0.25,0.0,1,EQH664cf50b6fe41288,1,FR,,"First Industrial Realty Trust, ","First Industrial Realty Trust, Inc.",EQUITY,NYQ,NYSE,USD,us_market,United States,True,FR,FR
+CB329E7696872913,HEI,HEI,HEI,Heico Corp.,equity,stock,NYSE,0.25,0.0,1,EQH66a6a3c66cdff12a,1,HEI,,Heico Corporation,HEICO Corporation,EQUITY,NYQ,NYSE,USD,us_market,United States,True,HEI,HEI
+DB5747CE8F30DFB7,ACA,ACA,ACA.PA,Credit Agricole SA,equity,stock,Cboe Europe,0.25,0.0,1,EQH6bbae78c07d52510,1,ACA,,CREDIT AGRICOLE,Crédit Agricole S.A.,EQUITY,PAR,Paris,EUR,fr_market,France,True,ACA.PA,ACA.PA
+E8CF4A6C0C43E0CE,AMP,AMP,AMP,Amplifon S.p.A.,equity,stock,Cboe Europe,0.25,0.0,1,EQH6bd3d656cb90cc50,0,AMP,,"Ameriprise Financial, Inc.","Ameriprise Financial, Inc.",EQUITY,NYQ,NYSE,USD,us_market,United States,True,AMP,AMP
+FED70677BB43F756,AM,AM,AM,Antero Midstream Corp.,equity,stock,NYSE,0.25,0.0,1,EQH6fd36d2f7e238840,0,AM,,Antero Midstream Corporation,Antero Midstream Corporation,EQUITY,NYQ,NYSE,USD,us_market,United States,True,AM,AM
+247AEC6B199B5F3F,FR,FR,FR.PA,Valeo S.A.,equity,stock,Cboe Europe,0.25,0.0,1,EQH73f584e5d7aed5ac,1,FR,,VALEO,Valeo SE,EQUITY,PAR,Paris,EUR,fr_market,France,True,FR.PA,FR.PA
+9480B1C0FAE5C337,NEM,NEM,NEM.DE,Nemetschek SE,equity,stock,Cboe Europe,0.25,0.0,1,EQH745d5701cc59ed54,1,NEM,,Nemetschek SE                 I,Nemetschek SE,EQUITY,GER,XETRA,EUR,de_market,Germany,True,NEM.DE,NEM.DE
+6D6D86D80F84387D,DTE,DTE,DTE.DE,Deutsche Telekom AG,equity,stock,Cboe Europe,0.25,0.0,1,EQH7713b456d2aaf9cb,1,DTE,,DEUTSCHE TELEKOM AG           N,Deutsche Telekom AG,EQUITY,GER,XETRA,EUR,de_market,Germany,True,DTE.DE,DTE.DE
+33538BC089AF220E,TRI,TRI,TRI.PA,Trigano S.A.,equity,stock,Cboe Europe,0.25,0.0,1,EQH77655c0fdb4f520f,1,TRI,,TRIGANO,Trigano S.A.,EQUITY,PAR,Paris,EUR,fr_market,France,True,TRI.PA,TRI.PA
+8F6A445B7568FF88,DIA,DIA,DIA,DiaSorin S.p.A.,equity,stock,Cboe Europe,0.25,0.0,1,EQH7c7035eda0f6b715,1,DIA,,SPDR Dow Jones Industrial Avera,SPDR Dow Jones Industrial Average ETF Trust,ETF,PCX,NYSEArca,USD,us_market,,True,DIA,DIA
+4094E750DF928AC9,AC,AC,AC.MX,Arca Continental,equity,stock,BMV,0.25,0.0,0,EQH800f1b3b2098934c,1,AC,,,,,,,,,,,,
+63222BBF6753AD4D,HEI,HEI,HEI.DE,Heidelberg Materials AG,equity,stock,Cboe Europe,0.25,0.0,1,EQH83ec1a250d929275,1,HEI,,Heidelberg Materials AG       I,Heidelberg Materials AG,EQUITY,GER,XETRA,EUR,de_market,Germany,True,HEI.DE,HEI.DE
+6A4F6FA91F49780B,EL,EL,EL.PA,EssilorLuxottica S.A.,equity,stock,Cboe Europe,0.25,0.0,1,EQH879872c52d68a45e,1,EL,,ESSILORLUXOTTICA,EssilorLuxottica Société anonyme,EQUITY,PAR,Paris,EUR,fr_market,France,True,EL.PA,EL.PA
+BD9D686E9238158B,ADP,ADP,ADP,Aeroports de Paris SA,equity,stock,Cboe Europe,0.25,0.0,1,EQH8983943c3dcf91dc,0,ADP,,"Automatic Data Processing, Inc.","Automatic Data Processing, Inc.",EQUITY,NMS,NasdaqGS,USD,us_market,United States,True,ADP,ADP
+EE5F50622101CA2B,SAN,SAN,SAN.MC,Banco Santander SA,equity,stock,Cboe Europe,0.25,0.0,0,EQH93fbaa1d25603f2d,1,SAN.MC,,,,,,,,,,,,
+C1E49D53B38C1361,EL,EL,EL,Estee Lauder Companies Inc.,equity,stock,NYSE,0.25,0.0,1,EQH9717f179a70f5581,1,EL,,"Estee Lauder Companies, Inc. (T",The Estée Lauder Companies Inc.,EQUITY,NYQ,NYSE,USD,us_market,United States,True,EL,EL
+634F864070243AE3,AMP,AMP,AMP,"Ameriprise Financial, Inc.",equity,stock,NYSE,0.25,0.0,1,EQHa7ec45a545114bf2,0,AMP,,"Ameriprise Financial, Inc.","Ameriprise Financial, Inc.",EQUITY,NYQ,NYSE,USD,us_market,United States,True,AMP,AMP
+67A886547F85D229,BN,BN,BN.PA,Danone S.A.,equity,stock,Cboe Europe,0.25,0.0,1,EQHacbc9c2ec73587ec,1,BN,,DANONE,Danone S.A.,EQUITY,PAR,Paris,EUR,fr_market,France,True,BN.PA,BN.PA
+47241D772951CFB0,TRI,TRI,TRI,Thomson Reuters Corp,equity,stock,NYSE,0.25,0.0,1,EQHb5f0b64c8a97fd70,1,TRI,,Thomson Reuters Corp,Thomson Reuters Corporation,EQUITY,NMS,NasdaqGS,USD,us_market,Canada,True,TRI,TRI
+4849E394639F3AD7,BN,BN,BN,Brookfield Corporation,equity,stock,NYSE,0.25,0.0,1,EQHbc1cd4d1a50c1c94,1,BN,,Brookfield Corporation,Brookfield Corporation,EQUITY,NYQ,NYSE,USD,us_market,Canada,True,BN,BN
+D5A7A20BDE4EDBB0,RF,RF,RF,Regions Financial Corp,equity,stock,NYSE,0.25,0.0,1,EQHbe7647a72fd5c7db,1,RF,,Regions Financial Corporation,Regions Financial Corporation,EQUITY,NYQ,NYSE,USD,us_market,United States,True,RF,RF
+5D62BE9DD1375966,ORA,ORA,ORA,Ormat Technologies Inc.,equity,stock,NYSE,0.25,0.0,1,EQHc910a8fac40775d2,1,ORA,,"Ormat Technologies, Inc.","Ormat Technologies, Inc.",EQUITY,NYQ,NYSE,USD,us_market,United States,True,ORA,ORA
+4138E711B1A1CCB7,AI,AI,AI,C3.ai Inc.,equity,stock,NYSE,0.25,0.0,1,EQHd38b2280deacb6f0,0,AI,,"C3.ai, Inc.","C3.ai, Inc.",EQUITY,NYQ,NYSE,USD,us_market,United States,True,AI,AI
+4996FFA610AB5CE2,MRK,MRK,MRK,Merck & Co Inc.,equity,stock,NYSE,0.25,0.0,1,EQHd5db961edd5024f8,1,MRK,,"Merck & Company, Inc.","Merck & Co., Inc.",EQUITY,NYQ,NYSE,USD,us_market,United States,True,MRK,MRK
+50CADC0E1EE377BF,VIV,VIV,VIV,Telefonica Brasil SA,equity,stock,NYSE,0.25,0.0,1,EQHdd5e34152649a5ee,1,VIV,,Telefonica Brasil S.A.,Telefônica Brasil S.A.,EQUITY,NYQ,NYSE,USD,us_market,Brazil,True,VIV,VIV
+5C2810D64FC70AD7,NEM,NEM,NEM,Newmont Corporation,equity,stock,NYSE,0.25,0.0,1,EQHddc2e6e74e7ef037,1,NEM,,Newmont Corporation,Newmont Corporation,EQUITY,NYQ,NYSE,USD,us_market,United States,True,NEM,NEM
+BBC9D3A3B9D1755E,RF,RF,RF.PA,Eurazeo SE,equity,stock,Cboe Europe,0.25,0.0,1,EQHde07bb35e79f9cd0,1,RF,,EURAZEO SE,Eurazeo SE,EQUITY,PAR,Paris,EUR,fr_market,France,True,RF.PA,RF.PA
+467561B62CFF7E3A,SAN,SAN,SAN.PA,Sanofi S.A.,equity,stock,Cboe Europe,0.25,0.0,0,EQHe42ec253064a85da,1,SAN.MC,,,,,,,,,,,,
+C2F51088C3EFA7A6,MC,MC,MC,Moelis & Co,equity,stock,NYSE,0.25,0.0,1,EQHe93aee68b654332f,1,MC,,Moelis & Company,Moelis & Company,EQUITY,NYQ,NYSE,USD,us_market,United States,True,MC,MC

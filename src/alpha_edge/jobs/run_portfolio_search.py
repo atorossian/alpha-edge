@@ -1,5 +1,4 @@
 # run_portfolio_search.py  (S3-only I/O)
-
 from __future__ import annotations
 
 from dataclasses import asdict
@@ -8,7 +7,7 @@ import datetime as dt
 import numpy as np
 import pandas as pd
 
-from alpha_edge.universe.universe import load_universe, Asset
+from alpha_edge.universe.universe import Asset
 from alpha_edge.core.schemas import ScoreConfig, StabilityEnergyConfig, StabilityReport
 from alpha_edge.portfolio.optimizer_engine import compute_stability_for_candidate
 from alpha_edge.market.build_returns_wide_cache import build_returns_wide_cache, CacheConfig
@@ -137,17 +136,44 @@ def _safe_float(x, default=np.nan) -> float:
         return float(default)
 
 
-def main():
-    run_dt = pd.Timestamp(dt.date.today()).normalize()
-    as_of_run_date = run_dt.strftime("%Y-%m-%d")
+def run_portfolio_search_asof(
+    *,
+    as_of: str,
+    equity0: float,
+    goals: tuple[float, float, float],
+    main_goal: float,
+    universe_csv: str | None = None,
+    use_market_hmm: bool = True,
+    override_target_leverage: float | None = None,
+    write_outputs: bool = True,
+    run_dt: str | pd.Timestamp | None = None,
+    cache_min_years: float = 5.0,
+) -> dict:
+    """
+    Backtest-friendly portfolio search that reuses the same logic as `main()` but:
+      - slices returns to <= as_of (close-to-close realism)
+      - equity0/goals/main_goal passed in
+      - leverage from engine/v1/regimes/market_hmm/latest.json (or overridden)
+      - optionally writes outputs to S3 (same schema as before)
+
+    Returns a dict with key outputs + some metadata.
+    """
+    # normalize dates
+    as_of_ts = pd.Timestamp(as_of).tz_localize(None).normalize()
+    as_of_market_date = as_of_ts.strftime("%Y-%m-%d")
+
+    if run_dt is None:
+        run_dt_ts = pd.Timestamp(dt.date.today()).normalize()
+    else:
+        run_dt_ts = pd.Timestamp(run_dt).tz_localize(None).normalize()
+    as_of_run_date = run_dt_ts.strftime("%Y-%m-%d")
+
     # ---- S3 clients / stores ----
     s3 = s3_init(ENGINE_REGION)
     market = MarketStore(bucket=ENGINE_BUCKET)
 
-    # keep hardcoded
-    equity0 = 1295.12
-    GOALS = (1500.0, 2000.0, 3000.0)
-    MAIN_GOAL = 2000.0
+    GOALS = goals
+    MAIN_GOAL = float(main_goal)
 
     # ---------- Load latest inputs (S3-only) ----------
     raw_positions = s3_load_latest_json(
@@ -155,7 +181,7 @@ def main():
     )
     if not raw_positions:
         raise RuntimeError("Missing S3 latest positions. Expected engine/v1/inputs/positions/latest.json")
-    positions = parse_positions_obj(raw_positions)  # dict[str, Position]
+    positions = parse_positions_obj(raw_positions)
 
     raw_score_cfg = s3_load_latest_json(
         s3, bucket=ENGINE_BUCKET, root_prefix=ENGINE_ROOT_PREFIX, table="configs/score_config"
@@ -164,10 +190,13 @@ def main():
         raise RuntimeError("Missing S3 latest score_config. Expected engine/v1/configs/score_config/latest.json")
     score_cfg = ScoreConfig(**raw_score_cfg)
 
-    # Universe (load as dataframe so we can key by asset_id)
-    u = pd.read_csv(paths.universe_dir() / "universe.csv")
-    u = u[u.get("include", 1).fillna(1).astype(int) == 1].copy()
+    # Universe dataframe
+    if universe_csv is None:
+        u = pd.read_csv(paths.universe_dir() / "universe.csv")
+    else:
+        u = pd.read_csv(universe_csv)
 
+    u = u[u.get("include", 1).fillna(1).astype(int) == 1].copy()
     u["asset_id"] = u["asset_id"].astype(str).str.strip()
     u["ticker"] = u.get("ticker", u["asset_id"]).astype(str).str.upper().str.strip()
 
@@ -182,98 +211,91 @@ def main():
     latest_prices_df["asset_id"] = latest_prices_df["asset_id"].astype(str).str.strip()
     latest_prices_df["adj_close_usd"] = pd.to_numeric(latest_prices_df["adj_close_usd"], errors="coerce")
 
-    # prices keyed by asset_id (NOT ticker)
-    px_map = (
-        latest_prices_df.set_index("asset_id")["adj_close_usd"]
-        .dropna()
-        .to_dict()
-    )
+    px_map = latest_prices_df.set_index("asset_id")["adj_close_usd"].dropna().to_dict()
 
-    # ---------- Load MARKET regime snapshot and set leverage ----------
-    # Primary path: read engine/v1/regimes/market_hmm/latest.json and use leverage_recommendation.leverage
-    # Fallback: compute from hmm payload if leverage_recommendation missing (backward compat)
-    hmm_payload_wrapped = s3_load_latest_json(
-        s3, bucket=ENGINE_BUCKET, root_prefix=ENGINE_ROOT_PREFIX, table="regimes/market_hmm"
-    ) or {}
-
-    # --- MARKET date (data as-of) ---
-    as_of_market_date = hmm_payload_wrapped.get("as_of") if isinstance(hmm_payload_wrapped, dict) else None
-    as_of_market_date = str(as_of_market_date) if as_of_market_date else as_of_run_date
-
-    # Always define lev_rec to avoid UnboundLocalError later
+    # ---------- Regime / leverage ----------
     lev_rec: dict = {}
+    target_leverage: float
 
-    lr = (hmm_payload_wrapped.get("leverage_recommendation") or {}) if isinstance(hmm_payload_wrapped, dict) else {}
-
-    if isinstance(lr, dict) and lr.get("leverage") is not None:
-        # Fast path: use already computed leverage recommendation from compute_market_regime.py
-        lev_rec = lr
-        target_leverage = float(lr["leverage"])
-
-        # Make prints robust even if fields missing
-        lev_rec.setdefault("mode", "stored")
-        lev_rec.setdefault("confidence", np.nan)
-        lev_rec.setdefault("chosen_label", (lr.get("chosen_label") or lr.get("label") or lr.get("label_commit")))
-
+    if override_target_leverage is not None:
+        target_leverage = float(override_target_leverage)
+        lev_rec = {
+            "mode": "override",
+            "chosen_label": None,
+            "confidence": np.nan,
+            "leverage": target_leverage,
+        }
     else:
-        # Fallback: compute from hmm payload (keeps backward compat)
-        hmm_res = hmm_payload_wrapped.get("hmm") if isinstance(hmm_payload_wrapped, dict) else None
-        if hmm_res is None:
-            hmm_res = hmm_payload_wrapped if isinstance(hmm_payload_wrapped, dict) else {}
+        hmm_payload_wrapped = {}
+        if use_market_hmm:
+            hmm_payload_wrapped = s3_load_latest_json(
+                s3, bucket=ENGINE_BUCKET, root_prefix=ENGINE_ROOT_PREFIX, table="regimes/market_hmm"
+            ) or {}
 
-        st_raw = market.read_regime_filter_state() or {}
-        st = RegimeFilterState(
-            last_date=st_raw.get("last_date"),
-            chosen_label=st_raw.get("chosen_label"),
-            days_in_regime=int(st_raw.get("days_in_regime", 0) or 0),
-            probs_smoothed=st_raw.get("probs_smoothed"),
-        )
+        # Always define lev_rec to avoid UnboundLocalError later
+        lr = (hmm_payload_wrapped.get("leverage_recommendation") or {}) if isinstance(hmm_payload_wrapped, dict) else {}
 
-        lev_rec = leverage_from_hmm(
-            hmm_res or {},
-            default=1.0,
-            risk_appetite=0.6,
-            low_confidence_floor=0.2,
-            hard_cap=12.0,
-            filter_state=st,
-            as_of=as_of_market_date,
-            filter_alpha=0.20,
-            min_hold_days=3,
-            min_prob_to_switch=0.60,
-            min_margin_to_switch=0.12,
-        )
+        if isinstance(lr, dict) and lr.get("leverage") is not None:
+            lev_rec = dict(lr)
+            target_leverage = float(lev_rec["leverage"])
+            lev_rec.setdefault("mode", "stored")
+            lev_rec.setdefault("confidence", np.nan)
+            lev_rec.setdefault(
+                "chosen_label",
+                (lev_rec.get("chosen_label") or lev_rec.get("label") or lev_rec.get("label_commit")),
+            )
+        else:
+            hmm_res = hmm_payload_wrapped.get("hmm") if isinstance(hmm_payload_wrapped, dict) else None
+            if hmm_res is None:
+                hmm_res = hmm_payload_wrapped if isinstance(hmm_payload_wrapped, dict) else {}
 
-        if isinstance(lev_rec.get("filter_state"), dict):
-            market.write_regime_filter_state(lev_rec["filter_state"])
+            st_raw = market.read_regime_filter_state() or {}
+            st = RegimeFilterState(
+                last_date=st_raw.get("last_date"),
+                chosen_label=st_raw.get("chosen_label"),
+                days_in_regime=int(st_raw.get("days_in_regime", 0) or 0),
+                probs_smoothed=st_raw.get("probs_smoothed"),
+            )
 
-        target_leverage = float(lev_rec.get("leverage", 1.0))
+            lev_rec = leverage_from_hmm(
+                hmm_res or {},
+                default=1.0,
+                risk_appetite=0.6,
+                low_confidence_floor=0.2,
+                hard_cap=12.0,
+                filter_state=st,
+                as_of=as_of_market_date,  # IMPORTANT: backtest as-of
+                filter_alpha=0.20,
+                min_hold_days=3,
+                min_prob_to_switch=0.60,
+                min_margin_to_switch=0.12,
+            )
 
-    # ---------- Target notional from hardcoded equity + leverage ----------
+            if isinstance(lev_rec.get("filter_state"), dict):
+                market.write_regime_filter_state(lev_rec["filter_state"])
+
+            target_leverage = float(lev_rec.get("leverage", 1.0))
+
+    # ---------- Target notional ----------
     notional = float(equity0) * float(target_leverage)
     if not np.isfinite(notional) or notional <= 0:
         raise RuntimeError(f"Invalid target notional={notional} from equity0={equity0} and lev={target_leverage}")
 
-    # Keep current portfolio notional too (for reference only)
+    # Current portfolio notional (reference)
     current_gross_notional = 0.0
     missing_px = []
-
     for p in positions.values():
         t = str(p.ticker).upper().strip()
         aid = ticker_to_asset.get(t)
-
         if not aid or aid not in px_map:
             missing_px.append(t)
             continue
-
         px = float(px_map[aid])
         if not np.isfinite(px) or px <= 0:
             missing_px.append(t)
             continue
+        current_gross_notional += abs(float(p.quantity) * px)
 
-        exp = float(p.quantity) * px
-        current_gross_notional += abs(exp)
-
-    # Safe print formatting (confidence may be missing/NaN)
     conf = _safe_float(lev_rec.get("confidence"), default=np.nan)
     conf_s = "n/a" if not np.isfinite(conf) else f"{conf:.2f}"
 
@@ -290,19 +312,23 @@ def main():
         print(f"[capital][warn] missing prices for {len(missing_px)} tickers (sample: {missing_px[:10]})")
 
     # ---------- Load returns wide cache ----------
-    cache_cfg = CacheConfig(bucket=ENGINE_BUCKET, min_years=5.0)
+    cache_cfg = CacheConfig(bucket=ENGINE_BUCKET, min_years=float(cache_min_years))
     build_returns_wide_cache(cache_cfg)
+
     returns_path = f"s3://{ENGINE_BUCKET}/{cache_cfg.cache_prefix}/returns_wide_min{int(cache_cfg.min_years)}y.parquet"
     returns_wide = pd.read_parquet(returns_path, engine="pyarrow").sort_index()
     returns_wide, diag = clean_returns_matrix(returns_wide)
 
+    # slice to <= as_of (CRITICAL for backtest realism)
+    returns_wide.index = pd.to_datetime(returns_wide.index, errors="coerce").tz_localize(None).normalize()
+    returns_wide = returns_wide.loc[returns_wide.index <= as_of_ts]
+    if returns_wide.shape[0] < 252:
+        raise RuntimeError(f"Not enough returns history up to as_of={as_of_market_date}: rows={returns_wide.shape[0]}")
+
     # map asset_id -> ticker (if cache columns are asset_ids)
     returns_wide = returns_wide.rename(columns=lambda c: asset_to_ticker.get(c, c))
 
-    # ---- Align universe to RETURNS (ticker-based for GA) ----
-    returns_wide = returns_wide.rename(columns=lambda c: asset_to_ticker.get(c, c))
-
-    # Build universe keyed by TICKER with Asset objects
+    # Build universe keyed by ticker with Asset objects
     universe = {}
     for _, row in u.iterrows():
         t = row["ticker"]
@@ -320,7 +346,7 @@ def main():
             )
 
     if len(universe) < 10:
-        raise RuntimeError(f"Universe after returns cleaning too small: {len(universe)}. diag={diag}")
+        raise RuntimeError(f"Universe after returns slicing/cleaning too small: {len(universe)}. diag={diag}")
 
     # ---------- Search ----------
     ga_params = dict(
@@ -341,8 +367,8 @@ def main():
         returns=returns_wide,
         universe=universe,
         lw_cov=None,
-        equity0=equity0,
-        notional=notional,
+        equity0=float(equity0),
+        notional=float(notional),
         goals=GOALS,
         main_goal=MAIN_GOAL,
         score_config=score_cfg,
@@ -353,8 +379,8 @@ def main():
 
     best_ga = ga_pop[0]
 
-    # ---------- Stability rerank on GA archive ----------
-    topK = ga_archive[:200]  # tune K
+    # ---------- Stability rerank ----------
+    topK = ga_archive[:200]
     st_cfg = StabilityEnergyConfig(
         alpha_cdar=0.95,
         breach_dd=0.25,
@@ -372,13 +398,13 @@ def main():
         rep = compute_stability_for_candidate(
             returns=returns_wide,
             weights=m.weights,
-            equity0=equity0,
-            notional=notional,
+            equity0=float(equity0),
+            notional=float(notional),
             goals=GOALS,
             days=252,
             n_paths=20000,
             mc_seed=int(rng.integers(0, 2**31 - 1)),
-            path_source="bootstrap",   # OR "pca" if you want consistency with anneal later
+            path_source="bootstrap",
             pca_k=5,
             block_size=(8, 12),
             stability_cfg=st_cfg,
@@ -409,8 +435,8 @@ def main():
         returns=returns_wide,
         universe=universe,
         lw_cov=None,
-        equity0=equity0,
-        notional=notional,
+        equity0=float(equity0),
+        notional=float(notional),
         goals=GOALS,
         main_goal=MAIN_GOAL,
         score_config=score_cfg,
@@ -418,12 +444,11 @@ def main():
         **anneal_params,
     )
 
-    # ---------- Discretize into shares (post-processing only) ----------
-    weights_ticker = {asset_to_ticker.get(aid, aid): w for aid, w in best_refined.weights.items()}
+    # ---------- Discretize into shares ----------
     prices_ticker = {asset_to_ticker.get(aid, aid): px for aid, px in px_map.items()}
 
     alloc = weights_to_discrete_shares(
-        weights=weights_ticker,
+        weights=dict(best_refined.weights),
         prices=prices_ticker,
         notional=float(notional),
         min_units=1.0,
@@ -431,89 +456,90 @@ def main():
         crypto_decimals=8,
     )
 
-    # ---------- Persist to S3 (engine artifacts; append-only) ----------
-    run_id = f"{run_dt.strftime('%Y%m%d')}-{pd.Timestamp.utcnow().strftime('%H%M%S')}"
+    # ---------- Persist to S3 ----------
+    run_id = f"{run_dt_ts.strftime('%Y%m%d')}-{pd.Timestamp.utcnow().strftime('%H%M%S')}"
     last_score = s3_load_latest_report_score(s3, bucket=ENGINE_BUCKET, root_prefix=ENGINE_ROOT_PREFIX)
 
-    s3_write_json_event(
-        s3,
-        bucket=ENGINE_BUCKET,
-        root_prefix=ENGINE_ROOT_PREFIX,
-        table="portfolio_search/runs",
-        dt=run_dt,
-        filename=f"run_{run_id}.json",
-        payload={
-            "run_id": run_id,
-            "as_of": as_of_market_date,
-            "meta": {
-                "as_of_market_date": as_of_market_date,
-                "as_of_run_date": as_of_run_date,
-                "hmm_snapshot_as_of": as_of_market_date,
-            },
-            "inputs": {
-                "equity0": float(equity0),
-                "target_leverage": float(target_leverage),
-                "target_notional": float(notional),
-                "current_positions_notional": float(current_gross_notional),
-                "current_leverage_real": float(current_gross_notional / float(equity0)) if float(equity0) > 0 else float("inf"),
-                "goals": list(GOALS),
-                "main_goal": MAIN_GOAL,
-                "last_daily_report_score": last_score,
-                "positions": {t: asdict(p) for t, p in positions.items()},
-                "score_config": asdict(score_cfg),
-                "universe_size": len(universe),
-                "returns_clean_diag": diag,
-                "regime": lev_rec,  # ALWAYS defined now
-                "market_data": {
-                    "bucket": ENGINE_BUCKET,
-                    "returns_cache": "market/cache/v1/returns_wide_min5y.parquet",
-                    "latest_prices_snapshot": "market/snapshots/v1/latest_prices.parquet",
+    if write_outputs:
+        s3_write_json_event(
+            s3,
+            bucket=ENGINE_BUCKET,
+            root_prefix=ENGINE_ROOT_PREFIX,
+            table="portfolio_search/runs",
+            dt=run_dt_ts,
+            filename=f"run_{run_id}.json",
+            payload={
+                "run_id": run_id,
+                "as_of": as_of_market_date,
+                "meta": {
+                    "as_of_market_date": as_of_market_date,
+                    "as_of_run_date": as_of_run_date,
+                    "hmm_snapshot_as_of": as_of_market_date,
+                },
+                "inputs": {
+                    "equity0": float(equity0),
+                    "target_leverage": float(target_leverage),
+                    "target_notional": float(notional),
+                    "current_positions_notional": float(current_gross_notional),
+                    "current_leverage_real": float(current_gross_notional / float(equity0)) if float(equity0) > 0 else float("inf"),
+                    "goals": list(GOALS),
+                    "main_goal": MAIN_GOAL,
+                    "last_daily_report_score": last_score,
+                    "positions": {t: asdict(p) for t, p in positions.items()},
+                    "score_config": asdict(score_cfg),
+                    "universe_size": len(universe),
+                    "returns_clean_diag": diag,
+                    "regime": lev_rec,
+                    "market_data": {
+                        "bucket": ENGINE_BUCKET,
+                        "returns_cache": "market/cache/v1/returns_wide_min5y.parquet",
+                        "latest_prices_snapshot": "market/snapshots/v1/latest_prices.parquet",
+                    },
+                },
+                "params": {"ga": ga_params, "anneal": anneal_params},
+                "outputs": {
+                    "best_ga": asdict(best_ga),
+                    "best_refined": asdict(best_refined),
+                    "discrete_allocation": {
+                        "cash_left": float(alloc.cash_left),
+                        "shares": {k: float(v) for k, v in alloc.shares.items()},
+                        "realized_weights": {k: float(v) for k, v in alloc.realized_weights.items()},
+                    },
                 },
             },
-            "params": {"ga": ga_params, "anneal": anneal_params},
-            "outputs": {
-                "best_ga": asdict(best_ga),
-                "best_refined": asdict(best_refined),
-                "discrete_allocation": {
-                    "cash_left": float(alloc.cash_left),
-                    "shares": {k: float(v) for k, v in alloc.shares.items()},
-                    "realized_weights": {k: float(v) for k, v in alloc.realized_weights.items()},
-                },
-            },
-        },
-    )
+        )
 
-    # candidates leaderboard (parquet)
-    top_n = min(50, len(ga_pop))
-    df_top = pd.DataFrame([evalmetrics_to_row(m) for m in ga_pop[:top_n]])
-    df_top.insert(0, "run_id", run_id)
+        # candidates leaderboard (parquet)
+        top_n = min(50, len(ga_pop))
+        df_top = pd.DataFrame([evalmetrics_to_row(m) for m in ga_pop[:top_n]])
+        df_top.insert(0, "run_id", run_id)
 
-    s3_write_parquet_partition(
-        s3,
-        bucket=ENGINE_BUCKET,
-        root_prefix=ENGINE_ROOT_PREFIX,
-        table="portfolio_search/candidates",
-        dt=run_dt,
-        filename=f"top_{top_n}_{run_id}.parquet",
-        df=df_top,
-    )
+        s3_write_parquet_partition(
+            s3,
+            bucket=ENGINE_BUCKET,
+            root_prefix=ENGINE_ROOT_PREFIX,
+            table="portfolio_search/candidates",
+            dt=run_dt_ts,
+            filename=f"top_{top_n}_{run_id}.parquet",
+            df=df_top,
+        )
 
-    # weights table (parquet)
-    rows = []
-    rows += weights_to_rows(best_refined.weights, tag="best_refined_weights")
-    rows += weights_to_rows(alloc.realized_weights, tag="realized_weights")
-    df_w = pd.DataFrame(rows)
-    df_w.insert(0, "run_id", run_id)
+        # weights table (parquet)
+        rows = []
+        rows += weights_to_rows(best_refined.weights, tag="best_refined_weights")
+        rows += weights_to_rows(alloc.realized_weights, tag="realized_weights")
+        df_w = pd.DataFrame(rows)
+        df_w.insert(0, "run_id", run_id)
 
-    s3_write_parquet_partition(
-        s3,
-        bucket=ENGINE_BUCKET,
-        root_prefix=ENGINE_ROOT_PREFIX,
-        table="portfolio_search/weights",
-        dt=run_dt,
-        filename=f"weights_{run_id}.parquet",
-        df=df_w,
-    )
+        s3_write_parquet_partition(
+            s3,
+            bucket=ENGINE_BUCKET,
+            root_prefix=ENGINE_ROOT_PREFIX,
+            table="portfolio_search/weights",
+            dt=run_dt_ts,
+            filename=f"weights_{run_id}.parquet",
+            df=df_w,
+        )
 
     # ---------- Print ----------
     print("\n=== GA best ===")
@@ -534,7 +560,52 @@ def main():
     for t, w in sorted(alloc.realized_weights.items(), key=lambda x: -x[1]):
         print(f"  {t:8s}  {w:.2%}")
 
-    print(f"\n[S3] Saved portfolio search run_id={run_id}")
+    if write_outputs:
+        print(f"\n[S3] Saved portfolio search run_id={run_id}")
+
+    return {
+        "run_id": run_id,
+        "as_of": as_of_market_date,
+        "as_of_run_date": as_of_run_date,
+        "equity0": float(equity0),
+        "target_leverage": float(target_leverage),
+        "target_notional": float(notional),
+        "regime": lev_rec,
+        "returns_diag": diag,
+        "universe_size": int(len(universe)),
+        "best_ga": asdict(best_ga),
+        "best_refined": asdict(best_refined),
+        "discrete_allocation": {
+            "cash_left": float(alloc.cash_left),
+            "shares": {k: float(v) for k, v in alloc.shares.items()},
+            "realized_weights": {k: float(v) for k, v in alloc.realized_weights.items()},
+        },
+        "params": {"ga": ga_params, "anneal": anneal_params},
+    }
+
+
+def main():
+    run_dt = pd.Timestamp(dt.date.today()).normalize()
+    as_of_run_date = run_dt.strftime("%Y-%m-%d")
+
+    # keep hardcoded (LIVE defaults)
+    equity0 = 5541.63
+    GOALS = (7500.0, 10000.0, 12500.0)
+    MAIN_GOAL = 10000.0
+
+    # run using latest market_hmm snapshot (as in prod)
+    run_portfolio_search_asof(
+        as_of=as_of_run_date,
+        equity0=equity0,
+        goals=GOALS,
+        main_goal=MAIN_GOAL,
+        universe_csv=None,
+        use_market_hmm=True,
+        override_target_leverage=None,
+        write_outputs=True,
+        run_dt=run_dt,
+        cache_min_years=5.0,
+    )
 
 
 if __name__ == "__main__":

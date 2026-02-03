@@ -5,6 +5,7 @@ import datetime as dt
 import json
 import uuid
 from typing import Optional
+from alpha_edge.core.data_loader import s3_get_json
 
 import boto3
 import pandas as pd
@@ -20,13 +21,6 @@ TARGETS_TABLE = "targets"   # NEW
 
 def s3_client(region: str = REGION):
     return boto3.client("s3", region_name=region)
-
-
-def s3_get_json(s3, *, bucket: str, key: str) -> dict:
-    obj = s3.get_object(Bucket=bucket, Key=key)
-    body = obj["Body"].read()
-    return json.loads(body.decode("utf-8"))
-
 
 def s3_put_json(s3, *, bucket: str, key: str, payload: dict) -> None:
     s3.put_object(

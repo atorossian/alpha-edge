@@ -1,0 +1,6 @@
+as_of,asset_id,ticker,yahoo_ticker,start,interval,reason,error
+2026-01-30,EQH00560f212a12736e,CFG,CFG,2010-01-01,1d,fail,"arg must be a list, tuple, 1-d array, or Series"
+2026-01-30,EQH789fc1f4fd063ffd,NESTE,NESTE.HE,2010-01-01,1d,fail,"arg must be a list, tuple, 1-d array, or Series"
+2026-01-30,EQH890be10d8d837909,DAL,DAL,2010-01-01,1d,fail,"arg must be a list, tuple, 1-d array, or Series"
+2026-01-30,EQHd0c93605e3e488a5,ASM,ASM,2010-01-01,1d,fail,"arg must be a list, tuple, 1-d array, or Series"
+2026-01-30,EQHf0e8929bf118b709,KO,KO,2010-01-01,1d,fail,"arg must be a list, tuple, 1-d array, or Series"

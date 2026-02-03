@@ -1,0 +1,33 @@
+as_of,asset_id,ticker,yahoo_ticker,start,interval,reason,error
+2026-02-03,CRYPTO:BTC-USD,BTC-USD,BTC-USD,2026-02-02,1d,fail,"arg must be a list, tuple, 1-d array, or Series"
+2026-02-03,EQH05fce1c09bec6c79,ELP,ELP,2025-12-25,1d,empty,
+2026-02-03,EQH48927c97ac845fc2,VALE3,VALE3.SA,2026-01-30,1d,fail,"arg must be a list, tuple, 1-d array, or Series"
+2026-02-03,EQH574759cac33d626d,UNF,UNF,2026-01-31,1d,fail,"arg must be a list, tuple, 1-d array, or Series"
+2026-02-03,EQH57f251f2d5f83e9b,APLS,APLS,2026-01-31,1d,fail,"arg must be a list, tuple, 1-d array, or Series"
+2026-02-03,EQH596625cbf78b66be,RMD,RMD,2026-01-31,1d,fail,"arg must be a list, tuple, 1-d array, or Series"
+2026-02-03,EQH630c91b49e40c490,SAP,SAP,2026-01-31,1d,fail,"arg must be a list, tuple, 1-d array, or Series"
+2026-02-03,EQH641f52edf07d54b8,PARA,PARA,2010-01-01,1d,fail,"arg must be a list, tuple, 1-d array, or Series"
+2026-02-03,EQH69f44f1320aa20c5,NEP,NEP,2010-01-01,1d,fail,"arg must be a list, tuple, 1-d array, or Series"
+2026-02-03,EQH71a0030c3be42f88,ZI,ZI,2010-01-01,1d,empty,
+2026-02-03,EQH7317b47e32fc6760,LEGN,LEGN,2026-01-31,1d,fail,"arg must be a list, tuple, 1-d array, or Series"
+2026-02-03,EQH797ed8fa21dbf0b3,LOW,LOW,2026-01-31,1d,fail,"arg must be a list, tuple, 1-d array, or Series"
+2026-02-03,EQH7d51d3af19b78864,AMT,AMT,2026-01-31,1d,fail,"arg must be a list, tuple, 1-d array, or Series"
+2026-02-03,EQH7da9d95b16336431,SIE,SIE.DE,2026-01-31,1d,fail,"arg must be a list, tuple, 1-d array, or Series"
+2026-02-03,EQH88af7684c827ea0e,FIZZ,FIZZ,2026-01-31,1d,fail,"arg must be a list, tuple, 1-d array, or Series"
+2026-02-03,EQHa1f5d41f02403b57,TEO,TEO,2026-01-31,1d,fail,"arg must be a list, tuple, 1-d array, or Series"
+2026-02-03,EQHa235919a505383e9,VOYA,VOYA,2026-01-31,1d,fail,"arg must be a list, tuple, 1-d array, or Series"
+2026-02-03,EQHadad5c7d6ae36432,IGT,IGT,2010-01-01,1d,empty,
+2026-02-03,EQHade95717675da7bf,NEXI,NEXI,2026-01-30,1d,fail,"arg must be a list, tuple, 1-d array, or Series"
+2026-02-03,EQHb800b971b86408b1,D,D,2026-01-31,1d,fail,"arg must be a list, tuple, 1-d array, or Series"
+2026-02-03,EQHcaa24a3efdba259a,CGCBV,CGCBV,2010-01-01,1d,empty,
+2026-02-03,EQHd461a82034756d37,FDJ,FDJ,2010-01-01,1d,empty,
+2026-02-03,EQHd5ebee995767931f,SCI,SCI,2026-01-31,1d,fail,"arg must be a list, tuple, 1-d array, or Series"
+2026-02-03,EQHd673ea264dcbcea4,CDW,CDW,2026-01-31,1d,fail,"arg must be a list, tuple, 1-d array, or Series"
+2026-02-03,EQHdc0096799dac954b,BRFS,BRFS,2010-01-01,1d,empty,
+2026-02-03,EQHdd228ec55bb383d5,VCIT,VCIT,2010-01-01,1d,fail,"arg must be a list, tuple, 1-d array, or Series"
+2026-02-03,EQHdfe0a56ee49c37f8,ZM,ZM,2026-01-31,1d,fail,"arg must be a list, tuple, 1-d array, or Series"
+2026-02-03,EQHe924f2056ab133df,WMS,WMS,2026-01-31,1d,fail,"arg must be a list, tuple, 1-d array, or Series"
+2026-02-03,EQHed09f9b74b09755a,KMPR,KMPR,2026-01-31,1d,fail,"arg must be a list, tuple, 1-d array, or Series"
+2026-02-03,EQHf5b9321b3d2a2ee3,TOTS3,TOTS3.SA,2026-01-30,1d,fail,"arg must be a list, tuple, 1-d array, or Series"
+2026-02-03,EQHfcb5e3e58be67973,PNR,PNR,2026-01-31,1d,fail,"arg must be a list, tuple, 1-d array, or Series"
+2026-02-03,EQHfea5913eb2d64308,BIIB,BIIB,2026-01-31,1d,fail,"arg must be a list, tuple, 1-d array, or Series"

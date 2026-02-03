@@ -11,9 +11,9 @@ import pyarrow.dataset as ds
 
 from alpha_edge.core.market_store import MarketStore
 from alpha_edge.core.data_loader import s3_init, s3_write_json_event
-from regime_filter import RegimeFilterState
-from regime_leverage import leverage_from_hmm
-from hmm_engine import (
+from alpha_edge.market.regime_filter import RegimeFilterState
+from alpha_edge.market.regime_leverage import leverage_from_hmm
+from alpha_edge.market.hmm_engine import (
     GaussianHMM,
     compute_state_diagnostics,
     label_states_4,
@@ -28,7 +28,7 @@ ENGINE_ROOT_PREFIX = "engine/v1"
 OHLCV_USD_ROOT = "s3://alpha-edge-algo/market/ohlcv_usd/v1"
 
 # Option B: composite proxy (equal-weight)
-PROXY_TICKERS = ["VT", "SPY", "QQQ", "IWM", "TLT", "HYG", "GLD"]
+PROXY_TICKERS = ["VT", "SPY", "QQQ", "IWM", "TLT", "VCIT", "GLD"]
 
 # history window for regime fitting
 START_HISTORY = "2015-01-01"

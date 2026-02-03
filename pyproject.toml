@@ -41,13 +41,13 @@ alphaedge-ingest = "alpha_edge.cli.ingest:main"
 alphaedge-returns-cache = "alpha_edge.cli.returns_cache:main"
 alphaedge-market-regime = "alpha_edge.cli.market_regime:main"
 alphaedge-daily-report = "alpha_edge.cli.daily_report:main"
-alphaedge-portfolio-search = "alpha_edge.cli.portfolio_search:main"
-alphaedge-universe-update = "alpha_edge.cli.universe_update:main"
+alphaedge-universe-update = "alpha_edge.cli.commands.universe_cmd:update"
 alphaedge-universe-triage = "alpha_edge.cli.universe_triage:main"
 
 # pipelines (all-in-one)
-alphaedge-morning = "alpha_edge.cli.pipelines:morning"
-alphaedge-after-close = "alpha_edge.cli.pipelines:after_close"
+alphaedge-morning = "alpha_edge.cli.commands.pipeline_cmd:morning_entry"
+alphaedge-after-close = "alpha_edge.cli.commands.pipeline_cmd:close_entry"
+alphaedge-portfolio-search = "alpha_edge.cli.commands.pipeline_cmd:search_entry"
 
 [tool.poetry]
 # IMPORTANT: make the package importable

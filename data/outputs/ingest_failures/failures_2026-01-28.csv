@@ -1,0 +1,21 @@
+as_of,asset_id,ticker,yahoo_ticker,start,interval,reason,error
+2026-01-28,EQH4bbd443cc1d0e216,AC.PA,AC.PA,2010-01-01,1d,fail,"arg must be a list, tuple, 1-d array, or Series"
+2026-01-28,EQHe9167d31bec1159d,AZUL4,AZUL4.SA,2010-01-01,1d,no_fx,
+2026-01-28,EQH55b9944367e9812c,DTG,DTG.DE,2026-01-27,1d,fail,"arg must be a list, tuple, 1-d array, or Series"
+2026-01-28,EQHf1b759efb321f613,ENTG,ENTG,2026-01-27,1d,fail,"arg must be a list, tuple, 1-d array, or Series"
+2026-01-28,EQH641128282849ae88,EXR,EXR,2026-01-27,1d,fail,"arg must be a list, tuple, 1-d array, or Series"
+2026-01-28,EQH81def1cfa189255c,GCO,GCO.MC,2010-01-01,1d,no_fx,
+2026-01-28,EQH18c13cca79f1823f,HAL,HAL,2026-01-27,1d,fail,"arg must be a list, tuple, 1-d array, or Series"
+2026-01-28,EQH79a60f2aa1ece046,KRX,KRX.DE,2026-01-27,1d,empty,
+2026-01-28,EQH15865ea9ac67f4be,LDO,LDO.MI,2026-01-27,1d,fail,"arg must be a list, tuple, 1-d array, or Series"
+2026-01-28,EQHd98d6c6f5953b963,MMC,MMC,2026-01-27,1d,fail,"arg must be a list, tuple, 1-d array, or Series"
+2026-01-28,EQH784881f3bf661be5,NDA__52235D,NDA,2010-01-01,1d,empty,
+2026-01-28,EQH95ab5334f03a0f70,PINC,PINC,2025-11-26,1d,empty,
+2026-01-28,EQH2088bd5b5cd59942,S,S,2026-01-27,1d,fail,"arg must be a list, tuple, 1-d array, or Series"
+2026-01-28,EQH72fd8270018056b9,SAM,SAM,2026-01-27,1d,fail,"arg must be a list, tuple, 1-d array, or Series"
+2026-01-28,EQH20e30aee703d50bd,SANB11,SANB11.SA,2026-01-27,1d,fail,"arg must be a list, tuple, 1-d array, or Series"
+2026-01-28,EQHb264b0dfe97dee9b,SBS,SBS,2026-01-27,1d,fail,"arg must be a list, tuple, 1-d array, or Series"
+2026-01-28,EQHe13e265e1ec85870,SFM,SFM,2026-01-27,1d,fail,"arg must be a list, tuple, 1-d array, or Series"
+2026-01-28,EQHadb635afd26c5295,U,U,2026-01-27,1d,fail,"arg must be a list, tuple, 1-d array, or Series"
+2026-01-28,EQH7f9c112e423273bb,URBN,URBN,2026-01-27,1d,fail,"arg must be a list, tuple, 1-d array, or Series"
+2026-01-28,EQH1b7479749e01fabd,XLRE,XLRE,2026-01-27,1d,fail,"arg must be a list, tuple, 1-d array, or Series"

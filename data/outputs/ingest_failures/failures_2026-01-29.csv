@@ -1,0 +1,17 @@
+as_of,asset_id,ticker,yahoo_ticker,start,interval,reason,error
+2026-01-29,EQH159c8e703890a481,PGNY,PGNY,2010-01-01,1d,fail,"arg must be a list, tuple, 1-d array, or Series"
+2026-01-29,EQH1cd05f5c9bb25f2a,HOT,HOT.DE,2010-01-01,1d,fail,"arg must be a list, tuple, 1-d array, or Series"
+2026-01-29,EQH2979912a756aa726,ISRG,ISRG,2010-01-01,1d,fail,"arg must be a list, tuple, 1-d array, or Series"
+2026-01-29,EQH3fc563347d23745e,NAN,AC,2010-01-01,1d,fail,"arg must be a list, tuple, 1-d array, or Series"
+2026-01-29,EQH40450681f3d9f61f,TPL,TPL,2010-01-01,1d,fail,"arg must be a list, tuple, 1-d array, or Series"
+2026-01-29,EQH48fbe4c9a7bf89d4,TNL,TNL,2010-01-01,1d,fail,"arg must be a list, tuple, 1-d array, or Series"
+2026-01-29,EQH49f09e7f601307e1,NAN,NDA,2010-01-01,1d,empty,
+2026-01-29,EQH4a3a0282d0f4690f,KMB,KMB,2010-01-01,1d,fail,"arg must be a list, tuple, 1-d array, or Series"
+2026-01-29,EQH4e15a66fb83055af,RAIL3,RAIL3.SA,2010-01-01,1d,fail,"arg must be a list, tuple, 1-d array, or Series"
+2026-01-29,EQH50407450b69c0185,BKR,BKR,2010-01-01,1d,fail,"arg must be a list, tuple, 1-d array, or Series"
+2026-01-29,EQH5a636765dc3f9407,AMG,AMG,2010-01-01,1d,fail,"arg must be a list, tuple, 1-d array, or Series"
+2026-01-29,EQH6b295f0a1e19b231,MGY,MGY,2010-01-01,1d,fail,"arg must be a list, tuple, 1-d array, or Series"
+2026-01-29,EQH6beda5f2e201914f,IEP,IEP,2010-01-01,1d,fail,"arg must be a list, tuple, 1-d array, or Series"
+2026-01-29,EQH703353af64b0f7bc,TDC,TDC,2010-01-01,1d,fail,"arg must be a list, tuple, 1-d array, or Series"
+2026-01-29,EQH74606b5fc7ac67f2,XLC,XLC,2010-01-01,1d,fail,"arg must be a list, tuple, 1-d array, or Series"
+2026-01-29,EQH87143b8108d743b8,CARR,CARR,2010-01-01,1d,fail,"arg must be a list, tuple, 1-d array, or Series"

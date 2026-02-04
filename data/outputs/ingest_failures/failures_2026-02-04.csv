@@ -1,0 +1,10 @@
+as_of,asset_id,ticker,yahoo_ticker,start,interval,reason,error
+2026-02-04,EQH0125004479d192c5,CAP,CAP.PA,2026-02-03,1d,fail,"arg must be a list, tuple, 1-d array, or Series"
+2026-02-04,EQH0ffd6bca76b4d55b,A5G,A5G.DE,2026-02-03,1d,empty,
+2026-02-04,EQH2fc2c7a7219c2090,CAT,CAT,2026-02-03,1d,fail,"arg must be a list, tuple, 1-d array, or Series"
+2026-02-04,EQH641f52edf07d54b8,PARA,PARA,2010-01-01,1d,empty,
+2026-02-04,EQH69f44f1320aa20c5,NEP,NEP,2010-01-01,1d,empty,
+2026-02-04,EQH6a15e22620a34b4e,XLU,XLU,2026-02-03,1d,fail,"arg must be a list, tuple, 1-d array, or Series"
+2026-02-04,EQH71a0030c3be42f88,ZI,GTM,2010-01-01,1d,fail,"arg must be a list, tuple, 1-d array, or Series"
+2026-02-04,EQH903de6b3e6e68db9,ANDE,ANDE,2026-02-03,1d,fail,"arg must be a list, tuple, 1-d array, or Series"
+2026-02-04,EQHdc0096799dac954b,BRFS,BRFS,2010-01-01,1d,empty,

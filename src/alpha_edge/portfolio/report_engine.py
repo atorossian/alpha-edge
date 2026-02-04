@@ -381,6 +381,7 @@ def print_decision_addendum(
     plan=None,                 # RescalePlan | None
     top_n: int = 8,
     show_full_alpha_blob: bool = False,
+    take_profit: dict | None = None,
 ) -> None:
     # decision: RebalanceDecision
     # health: PortfolioHealth
@@ -428,6 +429,30 @@ def print_decision_addendum(
     reasons = getattr(decision, "reasons", None)
     if reasons:
         print(f"  reasons: {', '.join(reasons)}")
+        
+    # --- TAKE PROFIT ---
+    if take_profit is not None:
+        print("\nTake Profit")
+        do_tp = bool(take_profit.get("do_harvest", False))
+        m_star = take_profit.get("m_star", None)
+        r_anchor = take_profit.get("r_anchor", None)
+        dd = take_profit.get("dd", None)
+        sharpe_tp = take_profit.get("sharpe", None)
+        cooldown = take_profit.get("cooldown_days", None)
+
+        print(f"▶ do_harvest: {do_tp}")
+        print(
+            f"  m_star={num(m_star, 3)}  "
+            f"r_anchor={pct(r_anchor)}  "
+            f"dd={pct(dd)}  "
+            f"sharpe={num(sharpe_tp, 2)}"
+        )
+        if cooldown is not None:
+            print(f"  cooldown_days={cooldown}")
+
+        tp_reasons = take_profit.get("reasons", None)
+        if tp_reasons:
+            print(f"  reasons: {', '.join(tp_reasons)}")
 
     # --- HEALTH ---
     print("\nHealth")

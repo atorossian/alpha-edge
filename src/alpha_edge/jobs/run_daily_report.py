@@ -15,6 +15,11 @@ import boto3
 
 from alpha_edge import paths  # you already have this in other scripts
 
+from alpha_edge.portfolio.take_profit import (
+    TakeProfitConfig,
+    TakeProfitState,
+    take_profit_policy,
+)
 from alpha_edge.market.regime_filter import RegimeFilterState
 from alpha_edge.core.schemas import ScoreConfig, Position
 from alpha_edge.market.regime_leverage import leverage_from_hmm
@@ -22,7 +27,7 @@ from alpha_edge.portfolio.report_engine import (
     build_portfolio_report,
     summarize_report,
     print_hmm_summary,
-    print_decision_addendum
+    print_decision_addendum,
 )
 from alpha_edge.market.hmm_engine import (
     GaussianHMM,
@@ -57,6 +62,9 @@ ENGINE_BUCKET = "alpha-edge-algo"
 ENGINE_REGION = "eu-west-1"
 ENGINE_ROOT_PREFIX = "engine/v1"
 
+TAKE_PROFIT_STATE_TABLE = "take_profit/state"
+TAKE_PROFIT_PLAN_TABLE = "take_profit/plan"
+
 RETURNS_WIDE_CACHE_PATH = "s3://alpha-edge-algo/market/cache/v1/returns_wide_min5y.parquet"
 OHLCV_USD_ROOT = "s3://alpha-edge-algo/market/ohlcv_usd/v1"  # long parquet, partitioned (ticker/year)
 
@@ -66,7 +74,9 @@ def _resolve_root_prefix(*, backtest_run_id: str | None) -> str:
         return f"{ENGINE_ROOT_PREFIX}/backtests/{backtest_run_id}"
     return ENGINE_ROOT_PREFIX
 
+
 UNIVERSE_CSV_LOCAL = paths.universe_dir() / "universe.csv"
+
 
 def _load_universe_ticker_to_asset_id() -> dict[str, str]:
     """
@@ -77,7 +87,6 @@ def _load_universe_ticker_to_asset_id() -> dict[str, str]:
     if df is None or df.empty:
         raise RuntimeError(f"Universe is empty: {UNIVERSE_CSV_LOCAL}")
 
-    # normalize
     for c in ["ticker", "asset_id"]:
         if c not in df.columns:
             raise RuntimeError(f"Universe missing required column '{c}': {UNIVERSE_CSV_LOCAL}")
@@ -136,11 +145,11 @@ def _load_closes_usd_from_ohlcv(
     """
     Loads adj_close_usd for given *tickers* from S3 OHLCV dataset that is partitioned by asset_id/year.
 
-    Expected layout (Hive-style):
+    Layout:
       s3://<bucket>/<root_prefix>/asset_id=<ASSET_ID>/year=<YYYY>/...parquet
 
     Returns:
-      DataFrame indexed by date, columns are tickers, values are adj_close_usd (ffilled).
+      DataFrame indexed by date, columns=tickers, values are adj_close_usd (ffilled).
     """
     tickers = [str(t).strip().upper() for t in tickers if str(t).strip()]
     if not tickers:
@@ -159,20 +168,18 @@ def _load_closes_usd_from_ohlcv(
             + ", ".join(missing[:20])
         )
 
-    # Map tickers to asset_ids
     ticker_asset = [(t, t2aid[t]) for t in tickers]
     asset_to_ticker = {aid: t for (t, aid) in ticker_asset}
 
     s3 = boto3.client("s3", region_name=s3_region)
 
-    # List keys
-    all_keys: list[tuple[str, str]] = []  # (asset_id, key)
+    all_keys: list[tuple[str, str]] = []
     total_prefixes = len(ticker_asset) * len(years)
     seen_prefixes = 0
 
     print(f"[ohlcv] listing parquet keys assets={len(ticker_asset)} years={years[0]}..{years[-1]}")
 
-    for (t, aid) in ticker_asset:
+    for (_, aid) in ticker_asset:
         for y in years:
             seen_prefixes += 1
             prefix = f"{s3_root_prefix}/asset_id={aid}/year={y}/"
@@ -181,7 +188,6 @@ def _load_closes_usd_from_ohlcv(
                 for k in keys:
                     all_keys.append((aid, k))
 
-            # lightweight progress print every ~20 prefixes
             if seen_prefixes % 20 == 0:
                 print(f"[ohlcv] listed prefixes={seen_prefixes}/{total_prefixes} keys_so_far={len(all_keys)}")
 
@@ -191,23 +197,18 @@ def _load_closes_usd_from_ohlcv(
             f"for tickers={tickers[:5]}... years={years}"
         )
 
-    # Read parquet files
     frames: list[pd.DataFrame] = []
     for (aid, key) in all_keys:
         df = _read_parquet_s3_bytes(s3, s3_bucket, key)
         if df is None or df.empty:
             continue
 
-        # normalize columns (be defensive)
         cols = {c.lower(): c for c in df.columns}
-        # try typical names
         date_col = cols.get("date")
         px_col = cols.get("adj_close_usd") or cols.get("close_usd") or cols.get("adj_close") or cols.get("close")
         if date_col is None or px_col is None:
-            # if schema is unexpected, skip but don’t silently “succeed”
             raise RuntimeError(
-                f"Unexpected OHLCV parquet schema in s3://{s3_bucket}/{key}. "
-                f"Columns={list(df.columns)}"
+                f"Unexpected OHLCV parquet schema in s3://{s3_bucket}/{key}. Columns={list(df.columns)}"
             )
 
         out = df[[date_col, px_col]].copy()
@@ -229,21 +230,15 @@ def _load_closes_usd_from_ohlcv(
     long["adj_close_usd"] = pd.to_numeric(long["adj_close_usd"], errors="coerce")
     long = long.dropna(subset=["adj_close_usd"])
 
-    # Map asset_id -> ticker for columns
     long["ticker"] = long["asset_id"].map(asset_to_ticker).fillna(long["asset_id"])
 
-    # Deduplicate (date,ticker) if multiple parquet shards overlap
     long = long.sort_values(["date", "ticker"])
     if long.duplicated(subset=["date", "ticker"]).any():
         n_dup = int(long.duplicated(subset=["date", "ticker"], keep=False).sum())
         sample = long.loc[long.duplicated(subset=["date", "ticker"], keep=False), ["date", "ticker"]].head(10)
         print(f"[ohlcv][warn] found {n_dup} duplicate (date,ticker) rows; collapsing by last()")
         print(sample.to_string(index=False))
-
-        long = (
-            long.groupby(["date", "ticker"], as_index=False)["adj_close_usd"]
-            .last()
-        )
+        long = long.groupby(["date", "ticker"], as_index=False)["adj_close_usd"].last()
 
     closes = (
         long.set_index(["date", "ticker"])["adj_close_usd"]
@@ -251,19 +246,8 @@ def _load_closes_usd_from_ohlcv(
         .sort_index()
         .ffill()
     )
-
     return closes
 
-def _fmt_pct(x: float | None) -> str:
-    if x is None or (isinstance(x, float) and not np.isfinite(x)):
-        return "n/a"
-    return f"{100.0 * float(x):.2f}%"
-
-
-def _fmt_num(x: float | None, *, nd: int = 4) -> str:
-    if x is None or (isinstance(x, float) and not np.isfinite(x)):
-        return "n/a"
-    return f"{float(x):.{nd}f}"
 
 def _fetch_spot_prices_usd(
     *,
@@ -274,9 +258,8 @@ def _fetch_spot_prices_usd(
     """
     Fetch spot-ish prices at runtime (best effort) using yfinance.
 
-    IMPORTANT:
-      - Use intraday bars for "price at report generation time".
-      - Fallback to last close (from S3 OHLCV) if missing.
+    - Uses intraday bars for "price at report generation time".
+    - Fallback to last close if missing.
     """
     provider_map = provider_map or {}
     tickers = [str(t).upper().strip() for t in tickers if str(t).strip()]
@@ -330,7 +313,7 @@ def _fetch_spot_prices_usd(
                             if not s.dropna().empty:
                                 spot_by_yahoo[y] = float(s.dropna().iloc[-1])
             else:
-                # Single ticker case
+                # Single ticker
                 if "Close" in df.columns and not df["Close"].dropna().empty:
                     spot_by_yahoo[yahoo_list[0]] = float(df["Close"].dropna().iloc[-1])
                 elif "Adj Close" in df.columns and not df["Adj Close"].dropna().empty:
@@ -346,8 +329,7 @@ def _fetch_spot_prices_usd(
             v = float(fallback_prices.loc[t])
         out[t] = v
 
-    s = pd.Series(out, dtype="float64")
-    s = s.replace([np.inf, -np.inf], np.nan)
+    s = pd.Series(out, dtype="float64").replace([np.inf, -np.inf], np.nan)
     return s
 
 
@@ -357,7 +339,6 @@ def run_daily_cycle_asof(
     backtest_run_id: str | None = None,
     write_outputs: bool = True,
     update_latest: bool = True,
-    # backtest knobs (optional)
     equity_override: float | None = None,
     goals_override: list[float] | None = None,
     main_goal_override: float | None = None,
@@ -365,10 +346,8 @@ def run_daily_cycle_asof(
     """
     One daily report cycle for a given AS_OF date.
 
-    - live (backtest_run_id=None): writes to engine/v1/...
-    - backtest: writes to engine/v1/backtests/<run_id>/...
-
-    Returns a dict of key decisions + metrics for the backtest driver.
+    Ordering (important):
+      positions/prices -> HMM/market leverage -> report -> benchmark -> health -> take profit -> rebalance -> persist
     """
     root_prefix = _resolve_root_prefix(backtest_run_id=backtest_run_id)
     mode = "backtest" if backtest_run_id else "live"
@@ -376,28 +355,27 @@ def run_daily_cycle_asof(
     as_of_ts = pd.Timestamp(as_of).tz_localize(None).normalize()
     as_of_date = as_of_ts.strftime("%Y-%m-%d")
 
-    # output partition date
     run_dt = pd.Timestamp(dt.date.today()).normalize() if mode == "live" else as_of_ts
     as_of_run_date = run_dt.strftime("%Y-%m-%d")
 
-    # IMPORTANT: avoid “silent wrong backtest”
     if mode == "backtest" and equity_override is None:
         raise ValueError("backtest requires equity_override (do not rely on hardcoded equity).")
 
     s3 = s3_init(ENGINE_REGION)
-    market = MarketStore(bucket=ENGINE_BUCKET)  # market data stays global
+    market = MarketStore(bucket=ENGINE_BUCKET)
 
     BENCH_PROXY = ["VT", "SPY", "QQQ", "IWM", "TLT", "VCIT", "GLD"]
     BENCH_NAME = "EQW(VT,SPY,QQQ,IWM,TLT,VCIT,GLD)"
     START_HISTORY = "2015-01-01"
+
     RESCALE_STATE_TABLE = "rescale/state"
     RESCALE_PLAN_TABLE = "rescale/plan"
 
     GOALS = goals_override if goals_override is not None else [7500.0, 10000.0, 12500.0]
     MAIN_GOAL = float(main_goal_override if main_goal_override is not None else 10000.0)
-    equity = float(equity_override) if equity_override is not None else 5543.10  # live fallback only
+    equity = float(equity_override) if equity_override is not None else 5543.10
 
-    # ---------- Load MARKET regime (GLOBAL path, not backtest root) ----------
+    # ---------- Load MARKET regime (GLOBAL path) ----------
     market_hmm_payload = s3_load_latest_json(
         s3, bucket=ENGINE_BUCKET, root_prefix=ENGINE_ROOT_PREFIX, table="regimes/market_hmm"
     ) or {}
@@ -415,7 +393,7 @@ def run_daily_cycle_asof(
 
     print(f"[market regime] as_of={market_as_of} target_leverage={market_lev:.2f}x")
 
-    # ---------- Inputs (FROM root_prefix: live or backtest) ----------
+    # ---------- Inputs (FROM root_prefix) ----------
     raw_ledger_positions = s3_load_latest_json(
         s3, bucket=ENGINE_BUCKET, root_prefix=root_prefix, table="ledger/positions"
     )
@@ -450,14 +428,12 @@ def run_daily_cycle_asof(
     if not tickers_all:
         raise RuntimeError("No tickers in ledger positions.")
 
-    # ---------- Load closes USD (as_of!) ----------
+    # ---------- Load closes USD (as_of) ----------
     end_date = as_of_date
     closes_all = _load_closes_usd_from_ohlcv(tickers=tickers_all, start=START_HISTORY, end=end_date)
     latest_close_prices = closes_all.iloc[-1]
 
     # ---------- Prices for valuation ----------
-    # Backtest: do NOT peek intraday, use last close.
-    # Live: allow yfinance intraday.
     pricing_as_of_utc = (
         f"{as_of_date}T23:59:59Z"
         if mode == "backtest"
@@ -491,7 +467,6 @@ def run_daily_cycle_asof(
         entry_price = None if entry is None else float(entry)
         positions[t] = Position(ticker=t, quantity=float(qty), entry_price=entry_price, currency="USD")
 
-    # Derivatives/notional -> synthetic qty using valuation price
     for r in deriv_rows:
         t = str(r.get("ticker") or "").upper().strip()
         if not t:
@@ -517,23 +492,18 @@ def run_daily_cycle_asof(
     closes = closes_all[tickers].copy()
     rets_assets = closes.pct_change().dropna(how="any")
 
-    # IMPORTANT for shorts: use signed exposure weights normalized by GROSS
-    values = np.array(
-        [float(prices_for_valuation[t]) * float(positions[t].quantity) for t in tickers],
-        dtype=np.float64,
-    )
+    values = np.array([float(prices_for_valuation[t]) * float(positions[t].quantity) for t in tickers], dtype=np.float64)
     gross = float(np.sum(np.abs(values)))
     if not np.isfinite(gross) or gross <= 0:
         raise ValueError("Gross exposure == 0 (or non-finite) from positions/prices")
     w_vec = values / gross
 
-    # Portfolio returns for HMM: history-based, weighted by current (gross-normalized signed) exposures
     port_rets = (rets_assets[tickers] * w_vec).sum(axis=1).dropna()
     as_of_market_dt = pd.Timestamp(port_rets.index[-1]).normalize()
     as_of_market_date = as_of_market_dt.strftime("%Y-%m-%d")
     print(f"[dates] as_of_market_date={as_of_market_date} | as_of_run_date={as_of_run_date}")
 
-    # ---------- Portfolio HMM (unchanged logic, just no duplication) ----------
+    # ---------- Portfolio HMM ----------
     r = port_rets.to_numpy(dtype=np.float64)
     vol20 = pd.Series(r, index=port_rets.index).rolling(20).std().to_numpy(dtype=np.float64)
     mask = np.isfinite(vol20)
@@ -547,26 +517,21 @@ def run_daily_cycle_asof(
 
         filtered = hmm.predict_proba(X)
         p_today = filtered[-1]
-        # --- regime labels time-series aligned to X (for regime-aware alpha later) ---
-        regime_labels = None
-        try:
-            # X corresponds to r[mask] and vol20[mask]
-            idx = port_rets.index[mask]  # same length/order as filtered rows
-
-            # map state -> label using mapping computed from diagnostics
-            # filtered rows correspond to idx
-            labs = []
-            for p_state in filtered:
-                k = int(np.argmax(p_state))
-                labs.append(mapping.get(k, "UNKNOWN"))
-
-            regime_labels = pd.Series(labs, index=idx, name="regime")
-        except Exception:
-            regime_labels = None
 
         r_aligned = r[mask]
         diags = compute_state_diagnostics(r_aligned, filtered)
         mapping = label_states_4(diags)
+
+        try:
+            idx = port_rets.index[mask]
+            labs = []
+            for p_state in filtered:
+                k = int(np.argmax(p_state))
+                labs.append(mapping.get(k, "UNKNOWN"))
+            regime_labels = pd.Series(labs, index=idx, name="regime")
+        except Exception:
+            regime_labels = None
+
         p_label_today = regime_probs_from_state_probs(p_today, mapping)
         label_commit = select_regime_label(p_label_today, commit_threshold=0.65)
 
@@ -629,36 +594,6 @@ def run_daily_cycle_asof(
     if isinstance(lev_rec.get("filter_state"), dict):
         market.write_regime_filter_state(lev_rec["filter_state"])
 
-    # ---------- Rebalance planning ----------
-    raw_reb_state = s3_load_latest_json(
-        s3, bucket=ENGINE_BUCKET, root_prefix=root_prefix, table=RESCALE_STATE_TABLE
-    )
-    reb_state = RebalanceState(
-        last_rebalance_date=(raw_reb_state or {}).get("last_rebalance_date"),
-        last_rebalance_equity=(raw_reb_state or {}).get("last_rebalance_equity"),
-    )
-
-    positions_qty = {t: float(p.quantity) for t, p in positions.items()}
-
-    gross_now = compute_gross_notional_from_positions(
-        positions_qty=positions_qty,
-        prices_usd=prices_for_valuation,
-    )
-
-    lev_target = float(market_lev)
-
-    decision = should_rebalance(
-        as_of=as_of_market_date,
-        equity=float(equity),
-        gross_notional=float(gross_now),
-        recommended_leverage=float(lev_target),
-        state=reb_state,
-        drift_threshold=0.15,
-        min_days_between=3,
-        time_rule_days=30,
-        equity_band=None,
-    )
-
     # ---------- Report ----------
     report = build_portfolio_report(
         closes=closes,
@@ -672,12 +607,10 @@ def run_daily_cycle_asof(
     print(summarize_report(report))
 
     # ---------- Benchmark ----------
-
     bench_rets = None
     bench_ann_ret = None
     bench_meta = {"name": BENCH_NAME, "tickers": BENCH_PROXY, "method": "equal_weight_daily_rebalanced"}
-
-    cols: list[str] = []  # IMPORTANT: avoid UnboundLocalError in logs/except paths
+    cols: list[str] = []
 
     try:
         bench_closes_df = _load_closes_usd_from_ohlcv(
@@ -712,7 +645,6 @@ def run_daily_cycle_asof(
     if bench_rets is not None:
         print(f"[bench] rets_len={len(bench_rets)} first={bench_rets.index.min()} last={bench_rets.index.max()}")
 
-
     # ---------- Health snapshot & reopt ----------
     current_health = build_portfolio_health(
         report.eval,
@@ -723,7 +655,6 @@ def run_daily_cycle_asof(
         regime_labels=regime_labels,
     )
 
-    # optional: print alpha report
     if getattr(current_health, "alpha_report_json", None):
         try:
             ar = json.loads(current_health.alpha_report_json)
@@ -738,6 +669,96 @@ def run_daily_cycle_asof(
     else:
         reopt = should_reoptimize(baseline, current_health)
 
+    # ---------- Take Profit planning (NOW current_health exists) ----------
+    raw_tp_state = s3_load_latest_json(
+        s3, bucket=ENGINE_BUCKET, root_prefix=root_prefix, table=TAKE_PROFIT_STATE_TABLE
+    ) or {}
+
+    tp_state = TakeProfitState(
+        anchor_date=raw_tp_state.get("anchor_date"),
+        anchor_equity=raw_tp_state.get("anchor_equity"),
+        hwm_equity=raw_tp_state.get("hwm_equity"),
+        harvest_mode=bool(raw_tp_state.get("harvest_mode", False)),
+        last_harvest_date=raw_tp_state.get("last_harvest_date"),
+        current_multiplier=float(raw_tp_state.get("current_multiplier", 1.0) or 1.0),
+    )
+
+    tp_cfg = TakeProfitConfig(
+        enter_profit=0.10,
+        exit_profit=0.07,
+        max_dd=0.05,
+        min_sharpe=0.75,
+        max_harvest=0.25,
+        k=8.0,
+        m_min=0.60,
+        cooldown_days=10,
+        use_stability=False,
+    )
+
+    tp_res = take_profit_policy(
+        cfg=tp_cfg,
+        state=tp_state,
+        as_of=as_of_market_date,
+        equity=float(equity),
+        sharpe_value=getattr(current_health, "sharpe", None),
+        stability=None,
+    )
+
+    # Effective leverage target (market * take-profit multiplier)
+    lev_target = float(market_lev) * float(tp_res.m_star)
+
+    print(
+        f"\n[take_profit] {'HARVEST' if tp_res.do_harvest else 'no_harvest'} "
+        f"m={tp_res.m_star:.3f} "
+        f"r_anchor={tp_res.r_anchor if tp_res.r_anchor is not None else 'n/a'} "
+        f"dd={tp_res.dd if tp_res.dd is not None else 'n/a'} "
+        f"sharpe={tp_res.sharpe if tp_res.sharpe is not None else 'n/a'}"
+    )
+    if tp_res.reasons:
+        print("[take_profit] reasons:", ", ".join(tp_res.reasons))
+
+    # ---------- Rebalance planning (uses TP-adjusted lev_target) ----------
+    raw_reb_state = s3_load_latest_json(
+        s3, bucket=ENGINE_BUCKET, root_prefix=root_prefix, table=RESCALE_STATE_TABLE
+    )
+    reb_state = RebalanceState(
+        last_rebalance_date=(raw_reb_state or {}).get("last_rebalance_date"),
+        last_rebalance_equity=(raw_reb_state or {}).get("last_rebalance_equity"),
+    )
+
+    positions_qty = {t: float(p.quantity) for t, p in positions.items()}
+
+    gross_now = compute_gross_notional_from_positions(
+        positions_qty=positions_qty,
+        prices_usd=prices_for_valuation,
+    )
+
+    decision = should_rebalance(
+        as_of=as_of_market_date,
+        equity=float(equity),
+        gross_notional=float(gross_now),
+        recommended_leverage=float(lev_target),
+        state=reb_state,
+        drift_threshold=0.15,
+        min_days_between=3,
+        time_rule_days=30,
+        equity_band=None,
+    )
+
+    # Force rescale when TP harvest triggers (even if drift doesn't)
+    if tp_res.do_harvest and not decision.should_rebalance:
+        from alpha_edge.portfolio.rebalance_engine import RebalanceDecision
+        L_real = float(gross_now) / float(equity) if float(equity) > 0 else float("inf")
+        drift_ratio = (L_real / float(lev_target)) if float(lev_target) > 0 else float("inf")
+
+        decision = RebalanceDecision(
+            should_rebalance=True,
+            reasons=["take_profit_force_rescale"] + list(tp_res.reasons),
+            leverage_real=float(L_real),
+            leverage_target=float(lev_target),
+            drift_ratio=float(drift_ratio),
+        )
+
     # ---------- Rescale plan persistence ----------
     if decision.should_rebalance:
         plan = build_rescale_plan(
@@ -748,13 +769,24 @@ def run_daily_cycle_asof(
             prices_usd=prices_for_valuation,
             max_notional_cap=None,
         )
+
         print_decision_addendum(
             decision=decision,
             health=current_health,
             bench_ann_ret=bench_ann_ret,
             reopt=reopt,
             plan=plan,
+            take_profit={
+                "do_harvest": bool(tp_res.do_harvest),
+                "m_star": float(tp_res.m_star),
+                "r_anchor": tp_res.r_anchor,
+                "dd": tp_res.dd,
+                "sharpe": tp_res.sharpe,
+                "reasons": tp_res.reasons,
+                "cooldown_days": int(tp_cfg.cooldown_days),
+            },
         )
+
         plan_df = plan.targets.copy()
         plan_df["as_of"] = plan.as_of
         plan_df["equity"] = plan.equity
@@ -765,6 +797,14 @@ def run_daily_cycle_asof(
         plan_df["gross_current"] = plan.gross_current
         plan_df["leverage_current"] = plan.leverage_current
         plan_df["decision_reasons"] = ", ".join(decision.reasons)
+
+        tp_plan_df = None
+        if tp_res.do_harvest:
+            tp_plan_df = plan_df.copy()
+            tp_plan_df["take_profit_m_star"] = float(tp_res.m_star)
+            tp_plan_df["take_profit_r_anchor"] = tp_res.r_anchor
+            tp_plan_df["take_profit_dd"] = tp_res.dd
+            tp_plan_df["take_profit_sharpe"] = tp_res.sharpe
 
         if write_outputs:
             s3_write_parquet_partition(
@@ -796,6 +836,18 @@ def run_daily_cycle_asof(
                 },
                 update_latest=update_latest,
             )
+
+            if tp_plan_df is not None:
+                s3_write_parquet_partition(
+                    s3,
+                    bucket=ENGINE_BUCKET,
+                    root_prefix=root_prefix,
+                    table=TAKE_PROFIT_PLAN_TABLE,
+                    dt=run_dt,
+                    filename="plan.parquet",
+                    df=tp_plan_df,
+                )
+
     else:
         print_decision_addendum(
             decision=decision,
@@ -803,7 +855,17 @@ def run_daily_cycle_asof(
             bench_ann_ret=bench_ann_ret,
             reopt=reopt,
             plan=None,
+            take_profit={
+                "do_harvest": bool(tp_res.do_harvest),
+                "m_star": float(tp_res.m_star),
+                "r_anchor": tp_res.r_anchor,
+                "dd": tp_res.dd,
+                "sharpe": tp_res.sharpe,
+                "reasons": tp_res.reasons,
+                "cooldown_days": int(tp_cfg.cooldown_days),
+            },
         )
+
     # ---------- Persist outputs ----------
     if write_outputs:
         s3_write_json_event(
@@ -855,7 +917,10 @@ def run_daily_cycle_asof(
                     },
                     "tickers": tickers,
                     "start_history": START_HISTORY,
-                    "spot_prices_usd": {k: (None if not np.isfinite(v) else float(v)) for k, v in prices_for_valuation.items()},
+                    "spot_prices_usd": {
+                        k: (None if not np.isfinite(v) else float(v))
+                        for k, v in prices_for_valuation.items()
+                    },
                     "market_regime": {"target_leverage": float(market_lev), "source_table": "regimes/market_hmm"},
                 },
                 "flags": {
@@ -910,7 +975,29 @@ def run_daily_cycle_asof(
             update_latest=update_latest,
         )
 
-        print("\n[S3] Saved daily report + holdings + health + score_config + positions + regimes.")
+        s3_write_json_event(
+            s3,
+            bucket=ENGINE_BUCKET,
+            root_prefix=root_prefix,
+            table=TAKE_PROFIT_STATE_TABLE,
+            dt=run_dt,
+            filename="state.json",
+            payload={
+                **asdict(tp_res.next_state),
+                "as_of": as_of_market_date,
+                "meta": {
+                    "m_star": float(tp_res.m_star),
+                    "do_harvest": bool(tp_res.do_harvest),
+                    "r_anchor": tp_res.r_anchor,
+                    "dd": tp_res.dd,
+                    "sharpe": tp_res.sharpe,
+                    "reasons": tp_res.reasons,
+                },
+            },
+            update_latest=update_latest,
+        )
+
+        print("\n[S3] Saved daily report + holdings + health + score_config + positions + regimes + take_profit_state.")
 
     return {
         "mode": mode,
@@ -924,6 +1011,14 @@ def run_daily_cycle_asof(
         "should_reoptimize": bool(reopt),
         "health": asdict(current_health),
         "bench_ann_return": None if bench_ann_ret is None else float(bench_ann_ret),
+        "take_profit": {
+            "do_harvest": bool(tp_res.do_harvest),
+            "m_star": float(tp_res.m_star),
+            "r_anchor": tp_res.r_anchor,
+            "dd": tp_res.dd,
+            "sharpe": tp_res.sharpe,
+            "reasons": tp_res.reasons,
+        },
     }
 
 

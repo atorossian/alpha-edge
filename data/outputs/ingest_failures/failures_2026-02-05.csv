@@ -1,0 +1,22 @@
+as_of,asset_id,ticker,yahoo_ticker,start,interval,reason,error
+2026-02-05,CRYPTO:AAVE-USD,AAVE-USD,AAVE-USD,2026-02-04,1d,fail,"arg must be a list, tuple, 1-d array, or Series"
+2026-02-05,EQH120cf43742b7eef8,VRTS,VRTS,2026-02-04,1d,fail,"arg must be a list, tuple, 1-d array, or Series"
+2026-02-05,EQH2d34aad2caa3ca6a,LANC,LANC,2026-01-31,1d,empty,
+2026-02-05,EQH3570a3d837144713,GIB,GIB,2026-02-04,1d,fail,"arg must be a list, tuple, 1-d array, or Series"
+2026-02-05,EQH3fb23fbe3dc5c9b7,CSAN3,CSAN3.SA,2026-02-04,1d,fail,"arg must be a list, tuple, 1-d array, or Series"
+2026-02-05,EQH423810e84c014cbb,SQ,SQ.MX,2026-02-04,1d,empty,
+2026-02-05,EQH480c88d0d1098a77,REC,REC,2025-06-12,1d,empty,
+2026-02-05,EQH4883d9f5d8e87345,HBI,HBI,2025-12-03,1d,empty,
+2026-02-05,EQH603209c08e1a544e,STERV,STERV.HE,2026-02-04,1d,fail,"arg must be a list, tuple, 1-d array, or Series"
+2026-02-05,EQH69f44f1320aa20c5,NEP,NEP,2010-01-01,1d,empty,
+2026-02-05,EQH88509d749d8d9c77,SAF,SAF,2021-08-31,1d,empty,
+2026-02-05,EQH90186d44cf71e7cc,CADE,CADE,2026-01-31,1d,empty,
+2026-02-05,EQH9c6779f31dc21cc7,IPN,IPN,2017-07-25,1d,empty,
+2026-02-05,EQHa3a1c99d199cf5da,CIVI,CIVI,2026-01-30,1d,empty,
+2026-02-05,EQHa4cd53ac8751b882,CMA,CMA,2026-01-31,1d,empty,
+2026-02-05,EQHa4f8e373b4b3367d,SAB,SAB,2020-01-09,1d,empty,
+2026-02-05,EQHc1b0003c7f39da02,CMS,CMS,2026-02-04,1d,fail,"arg must be a list, tuple, 1-d array, or Series"
+2026-02-05,EQHc3ebdc6cd67ff500,AIXA,AIXA.DE,2026-02-04,1d,fail,"arg must be a list, tuple, 1-d array, or Series"
+2026-02-05,EQHc5920c397dd7999f,VTLE,VTLE,2025-12-20,1d,empty,
+2026-02-05,EQHd691916f5c42c121,CHKP,CHKP,2026-02-04,1d,fail,"arg must be a list, tuple, 1-d array, or Series"
+2026-02-05,EQHdd56cdf910a40261,DAY,DAY,2026-02-04,1d,empty,

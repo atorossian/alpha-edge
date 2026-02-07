@@ -25,14 +25,51 @@ def _quantize_qty(ticker: str, qty: float, *, crypto_decimals: int) -> float:
     return float(int(np.trunc(qty)))
 
 
+def _step_size(ticker: str, *, crypto_decimals: int) -> float:
+    return float(10.0 ** (-int(crypto_decimals))) if is_crypto_ticker(ticker) else 1.0
+
+
+def _quantize_toward_zero_steps(ticker: str, qty: float, *, crypto_decimals: int) -> float:
+    """
+    Explicit toward-zero quantization in "steps" (1 share or crypto step).
+    """
+    step = _step_size(ticker, crypto_decimals=crypto_decimals)
+    if step <= 0:
+        return 0.0
+    steps = float(qty) / step
+    steps_q = float(np.trunc(steps))
+    out = steps_q * step
+    if is_crypto_ticker(ticker):
+        out = float(np.round(out, int(crypto_decimals)))
+    return float(out)
+
+
+def _quantize_nearest_steps(ticker: str, qty: float, *, crypto_decimals: int) -> float:
+    """
+    Nearest-step quantization (can overshoot per-ticker), but we still enforce gross <= notional.
+    """
+    step = _step_size(ticker, crypto_decimals=crypto_decimals)
+    if step <= 0:
+        return 0.0
+    steps = float(qty) / step
+    steps_q = float(np.round(steps))
+    out = steps_q * step
+    if is_crypto_ticker(ticker):
+        out = float(np.round(out, int(crypto_decimals)))
+    return float(out)
+
+
 def weights_to_discrete_shares(
     weights: Dict[str, float],
     prices: Dict[str, float],
     notional: float,
     *,
-    min_units: float = 1.0,
     min_weight: float = 0.01,
+    min_units_equity: float = 1.0,
+    min_units_crypto: float = 0.0,
+    min_units_weight_thr: float = 0.03,
     crypto_decimals: int = DEFAULT_CRYPTO_DECIMALS,
+    nearest_step_remaining_frac: float = 0.10,
 ) -> DiscreteAllocation:
     """
     Supports LONG/SHORT weights by targeting *gross* notional.
@@ -43,28 +80,34 @@ def weights_to_discrete_shares(
       - realized_value is SIGNED exposure (price * qty).
       - total_spent is GROSS used notional (sum abs exposures).
       - cash_left is remaining gross capacity (notional - gross_used).
-
-    Notes:
-      - Applies min_units per included ticker when feasible.
-      - Drops tiny weights by abs(weight) < min_weight (unless that would drop all).
-      - Quantizes equity shares to integers (toward zero) and crypto to decimals.
     """
     notional = float(notional)
     if not np.isfinite(notional) or notional <= 0:
         raise ValueError("notional must be finite and > 0")
 
     # keep only tickers with finite positive prices
-    px = {
-        str(t).upper().strip(): float(prices[t])
-        for t in prices
-        if t is not None and np.isfinite(float(prices[t])) and float(prices[t]) > 0
-    }
+    px: Dict[str, float] = {}
+    for t, p in (prices or {}).items():
+        tt = str(t).upper().strip()
+        if not tt:
+            continue
+        try:
+            pf = float(p)
+        except Exception:
+            continue
+        if np.isfinite(pf) and pf > 0:
+            px[tt] = pf
 
     # sanitize weights: keep only tickers with prices and finite weights, non-zero
     w_raw: Dict[str, float] = {}
+    missing_px: list[str] = []
+
     for t, x in (weights or {}).items():
         tt = str(t).upper().strip()
-        if not tt or tt not in px:
+        if not tt:
+            continue
+        if tt not in px:
+            missing_px.append(tt)
             continue
         try:
             xv = float(x)
@@ -77,154 +120,176 @@ def weights_to_discrete_shares(
     if not w_raw:
         raise ValueError("No valid weights/prices overlap")
 
+    # SAFE gross_in calculation (avoids crashing on non-numeric original weights)
+    gross_in = 0.0
+    for v in (weights or {}).values():
+        try:
+            vf = float(v)
+        except Exception:
+            continue
+        if np.isfinite(vf):
+            gross_in += abs(vf)
+
+    gross_kept = float(sum(abs(v) for v in w_raw.values()))
+
+    # if more than 20% of gross weights got dropped due to missing prices -> fail loudly
+    if gross_in > 0 and (gross_kept / gross_in) < 0.80:
+        missing_preview = ", ".join(sorted(set(missing_px))[:20])
+        raise ValueError(
+            f"Too many weights missing prices (kept={gross_kept/gross_in:.1%}). "
+            f"Missing_px sample: {missing_preview}"
+        )
+
     # drop tiny ABS weights (keeps sign)
     w = {t: v for t, v in w_raw.items() if abs(v) >= float(min_weight)}
     if not w:
-        # keep the largest |w|
         t0 = max(w_raw.items(), key=lambda kv: abs(kv[1]))[0]
         w = {t0: w_raw[t0]}
 
-    # normalize by gross weight
+    # normalize by gross abs weights (signed preserved)
     denom = float(sum(abs(v) for v in w.values()))
-    if denom <= 0:
+    if not np.isfinite(denom) or denom <= 0:
         raise ValueError("Sum(abs(weights)) <= 0")
-    w_norm = {t: float(v) / denom for t, v in w.items()}
+    w_norm = {t: float(v) / denom for t, v in w.items()}  # signed, gross=1
 
-    # helper: min qty (signed) should follow weight sign
-    def signed_min_qty(t: str) -> float:
-        base = float(min_units)
-        if is_crypto_ticker(t):
-            q = _quantize_qty(t, base, crypto_decimals=crypto_decimals)
-            return float(q if abs(q) > 0 else (10.0 ** (-int(crypto_decimals))))
-        # equities must be >= 1 share magnitude
-        return 1.0
+    # --- target signed exposure per ticker (gross notional basis) ---
+    tgt_exp = {t: float(w_norm[t]) * notional for t in w_norm}  # signed USD exposure
 
-    # Allocate baseline min_units per ticker if affordable in gross terms.
-    # For shorts, min is negative shares.
-    qty: Dict[str, float] = {t: 0.0 for t in w_norm}
+    def q_safe(t: str, q: float) -> float:
+        return _quantize_toward_zero_steps(t, q, crypto_decimals=crypto_decimals)
 
-    # Build signed mins
-    min_qty_map: Dict[str, float] = {}
-    for t, wt in w_norm.items():
-        sgn = 1.0 if wt >= 0 else -1.0
-        min_qty_map[t] = sgn * signed_min_qty(t)
+    def q_nearest(t: str, q: float) -> float:
+        return _quantize_nearest_steps(t, q, crypto_decimals=crypto_decimals)
 
-    def gross_cost_of(qty_map: Dict[str, float]) -> float:
-        return float(sum(abs(float(qty_map[t]) * px[t]) for t in qty_map))
-
-    # Check min allocation feasibility; if too expensive, drop smallest |w| / most expensive until feasible
-    if gross_cost_of(min_qty_map) > notional:
-        # drop by (abs(weight), -price) => drop low conviction first, expensive first
-        order = sorted(w_norm.keys(), key=lambda t: (abs(w_norm[t]), -px[t]))
-        kept = dict(w_norm)
-        kept_min = dict(min_qty_map)
-        while kept and gross_cost_of(kept_min) > notional:
-            drop = order.pop(0)
-            kept.pop(drop, None)
-            kept_min.pop(drop, None)
-
-        if not kept:
-            # fallback: keep the cheapest instrument only
-            cheapest = min(w_norm.keys(), key=lambda t: px[t])
-            if px[cheapest] > notional:
-                raise ValueError(f"Notional {notional:.2f} cannot buy/sell minimum unit of any selected asset")
-            kept = {cheapest: w_norm[cheapest]}
-            kept_min = {cheapest: min_qty_map[cheapest]}
-
-        # renormalize by gross abs weights
-        denom2 = float(sum(abs(v) for v in kept.values()))
-        w_norm = {t: kept[t] / denom2 for t in kept}
-        min_qty_map = kept_min
-        qty = {t: 0.0 for t in w_norm}
-
-    # apply minimums
+    qty: Dict[str, float] = {}
     for t in w_norm:
-        qty[t] = float(min_qty_map[t])
+        q_raw = float(tgt_exp[t]) / float(px[t])
+        qty[t] = q_safe(t, q_raw)
 
-    used_gross = gross_cost_of(qty)
-    remaining = float(max(0.0, notional - used_gross))
+    def gross_used(qmap: Dict[str, float]) -> float:
+        return float(sum(abs(float(qmap[t]) * float(px[t])) for t in qmap))
 
-    # Phase 1: proportional fill toward target exposures (signed)
-    # target gross exposure per ticker
-    tgt_exp = {t: w_norm[t] * notional for t in w_norm}  # signed
-    cur_exp = {t: qty[t] * px[t] for t in w_norm}        # signed
+    # --- enforce gross cap (rare overshoot due to crypto rounding) ---
+    g0 = gross_used(qty)
+    if g0 > notional:
+        scale = float(notional / g0) if g0 > 0 else 0.0
+        qty2: Dict[str, float] = {}
+        for t in qty:
+            qty2[t] = q_safe(t, float(qty[t]) * scale)
+        qty = qty2
 
-    # Allocate remaining gross by closing the gap in abs exposure toward target
-    if remaining > 0:
-        # sort by largest desired abs exposure first
-        for t in sorted(w_norm.keys(), key=lambda k: -abs(tgt_exp[k])):
-            p = px[t]
-            if remaining <= 0:
-                break
+    # --- conditional min-units baseline (asset-type aware) ---
+    def baseline_min_qty(t: str, wt: float) -> float:
+        if abs(float(wt)) < float(min_units_weight_thr):
+            return 0.0
 
-            # desired additional signed exposure (can be +/-)
-            gap = float(tgt_exp[t] - cur_exp[t])
-            if gap == 0:
+        sgn = 1.0 if wt >= 0 else -1.0
+
+        if is_crypto_ticker(t):
+            mu = float(min_units_crypto)
+            if mu <= 0:
+                return 0.0
+            q = _quantize_toward_zero_steps(t, mu, crypto_decimals=crypto_decimals)
+            if abs(q) <= 0:
+                q = _step_size(t, crypto_decimals=crypto_decimals)
+            return float(sgn * q)
+
+        mu = float(min_units_equity)
+        if mu <= 0:
+            return 0.0
+        return float(sgn * max(1.0, float(int(mu))))
+
+    qty_min_add = {t: baseline_min_qty(t, w_norm[t]) for t in w_norm}
+    qty_with_min = {t: float(qty.get(t, 0.0)) for t in w_norm}
+
+    for t, qmin in qty_min_add.items():
+        if qmin == 0.0:
+            continue
+        if np.sign(qmin) == np.sign(qty_with_min[t]) and abs(qty_with_min[t]) >= abs(qmin):
+            continue
+        qty_with_min[t] = float(qmin)
+
+    if gross_used(qty_with_min) <= notional:
+        qty = qty_with_min
+
+    used = gross_used(qty)
+    remaining = float(max(0.0, notional - used))
+
+    # --- nearest-step improve tracking (only when remaining is plenty) ---
+    if remaining >= float(nearest_step_remaining_frac) * notional:
+        cur_exp = {t: float(qty[t]) * float(px[t]) for t in qty}
+
+        def abs_shortfall(t: str) -> float:
+            return float(abs(tgt_exp[t]) - abs(cur_exp[t]))
+
+        order = sorted(w_norm.keys(), key=lambda t: abs_shortfall(t), reverse=True)
+
+        for t in order:
+            q_raw = float(tgt_exp[t]) / float(px[t])
+            q_prop = q_nearest(t, q_raw)
+            if q_prop == qty[t]:
                 continue
 
-            # gross budget chunk proportional to abs target weight
-            # (simple approach, avoids solving knapsack)
-            budget = remaining * (abs(w_norm[t]) / float(sum(abs(v) for v in w_norm.values())))
-            desired_exp_add = np.sign(gap) * min(abs(gap), budget)
+            prop_qty = dict(qty)
+            prop_qty[t] = float(q_prop)
+            g_prop = gross_used(prop_qty)
+            if g_prop > notional:
+                continue
 
-            raw_add_qty = desired_exp_add / p
-            add_qty = _quantize_qty(t, raw_add_qty, crypto_decimals=crypto_decimals)
+            cur_sf = abs(float(abs(tgt_exp[t]) - abs(cur_exp[t])))
+            prop_exp = float(prop_qty[t]) * float(px[t])
+            prop_sf = abs(float(abs(tgt_exp[t]) - abs(prop_exp)))
 
-            if add_qty != 0.0:
-                qty[t] += add_qty
-                cur_exp[t] = qty[t] * p
-                used_gross = float(sum(abs(cur_exp[k]) for k in cur_exp))
-                remaining = float(max(0.0, notional - used_gross))
+            if prop_sf <= cur_sf + 1e-12:
+                qty = prop_qty
+                used = g_prop
+                remaining = float(max(0.0, notional - used))
+                cur_exp[t] = prop_exp
 
-    # Phase 2: greedy spend remaining gross in 1-unit steps
-    # choose ticker with largest abs exposure shortfall vs target
+    # --- final greedy top-up (1-step increments), BUT only if there is positive shortfall ---
+    cur_exp = {t: float(qty[t]) * float(px[t]) for t in qty}
     max_iter = 200000
     it = 0
+
     while remaining > 0 and it < max_iter:
         it += 1
 
-        # which tickers can afford one step in gross terms?
         affordable = []
         for t in w_norm:
-            p = px[t]
-            if is_crypto_ticker(t):
-                step = 10.0 ** (-int(crypto_decimals))
-                if p * step <= remaining:
-                    affordable.append(t)
-            else:
-                if p <= remaining:
-                    affordable.append(t)
-
+            p = float(px[t])
+            step = _step_size(t, crypto_decimals=crypto_decimals)
+            if p * step <= remaining + 1e-12:
+                affordable.append(t)
         if not affordable:
             break
 
-        # pick ticker with biggest abs shortfall: |target|-|current|
         def shortfall(t: str) -> float:
-            return abs(tgt_exp[t]) - abs(cur_exp[t])
+            return float(abs(tgt_exp[t]) - abs(cur_exp[t]))
 
+        # NEW: stop if there's no positive shortfall anywhere (don't waste remaining)
         best_t = max(affordable, key=shortfall)
-        p = px[best_t]
-        sgn = 1.0 if tgt_exp[best_t] >= 0 else -1.0
+        best_sf = float(shortfall(best_t))
+        if not np.isfinite(best_sf) or best_sf <= 1e-12:
+            break
 
+        p = float(px[best_t])
+        step = _step_size(best_t, crypto_decimals=crypto_decimals)
+        sgn = 1.0 if float(tgt_exp[best_t]) >= 0 else -1.0
+
+        if p * step > remaining + 1e-12:
+            break
+
+        qty[best_t] = float(qty[best_t] + sgn * step)
         if is_crypto_ticker(best_t):
-            step = 10.0 ** (-int(crypto_decimals))
-            if p * step > remaining:
-                break
-            qty[best_t] += sgn * step
             qty[best_t] = float(np.round(qty[best_t], int(crypto_decimals)))
-        else:
-            if p > remaining:
-                break
-            qty[best_t] += sgn * 1.0
 
-        cur_exp[best_t] = qty[best_t] * p
-        used_gross = float(sum(abs(cur_exp[k]) for k in cur_exp))
-        remaining = float(max(0.0, notional - used_gross))
+        cur_exp[best_t] = float(qty[best_t]) * p
+        used = float(sum(abs(v) for v in cur_exp.values()))
+        remaining = float(max(0.0, notional - used))
 
-    # Build realized outputs
     realized_value = {t: float(qty[t]) * float(px[t]) for t in qty}  # SIGNED
-    gross_used = float(sum(abs(v) for v in realized_value.values()))
-    cash_left = float(max(0.0, notional - gross_used))
+    gross_used_final = float(sum(abs(v) for v in realized_value.values()))
+    cash_left = float(max(0.0, notional - gross_used_final))
 
     denom_notional = notional if notional > 0 else 1.0
     realized_weights = {t: float(realized_value[t]) / denom_notional for t in realized_value}  # SIGNED
@@ -233,10 +298,10 @@ def weights_to_discrete_shares(
     target_value = {t: float(tgt_exp[t]) for t in tgt_exp}  # SIGNED target exposure
 
     return DiscreteAllocation(
-        shares=qty,  # signed quantities
-        target_value=target_value,
+        shares=qty,                  # signed quantities
+        target_value=target_value,   # signed exposure targets
         realized_value=realized_value,
-        realized_weights=realized_weights,  # signed
-        total_spent=gross_used,             # gross used
-        cash_left=cash_left,                # gross remaining
+        realized_weights=realized_weights,
+        total_spent=gross_used_final,  # gross used
+        cash_left=cash_left,           # gross remaining
     )

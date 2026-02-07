@@ -1,0 +1,7 @@
+as_of,asset_id,ticker,yahoo_ticker,start,interval,reason,error
+2026-02-06,CRYPTO:AAVE-USD,AAVE-USD,AAVE-USD,2026-02-04,1d,fail,"arg must be a list, tuple, 1-d array, or Series"
+2026-02-06,EQH08dd609cb7fabe5a,QCOM,QCOM,2026-02-05,1d,fail,"arg must be a list, tuple, 1-d array, or Series"
+2026-02-06,EQH4883d9f5d8e87345,HBI,HBI,2025-12-03,1d,empty,
+2026-02-06,EQH6419908084a2c8a8,PCH,PCH,2026-02-05,1d,empty,
+2026-02-06,EQH69f44f1320aa20c5,NEP,NEP,2010-01-01,1d,empty,
+2026-02-06,EQHa4bd49c223d62efb,AOS,AOS,2026-02-05,1d,fail,"arg must be a list, tuple, 1-d array, or Series"

@@ -31,7 +31,7 @@ B972C7BE6FBE4984,VER,VER.VI,1,VERBUND AG,triage:add_suffix_by_region_hint;conf=L
 4D17A4279D74F09E,XPBR31,XPBR31.SA,1,XP Inc,triage:add_suffix_by_region_hint;conf=HIGH
 DBC2021D1A130B4D,BF,BF-B,1,Brown-Forman Corporation,triage:add_suffix_by_region_hint;conf=HIGH
 15D96E79DC2C85AE,OR,OR.PA,1,L'Oréal S.A.,triage:add_suffix_by_region_hint;conf=HIGH
-2FC621173E5C4908,PSKY,PSKY,1,Paramount Skydance Corp,triage:add_suffix_by_region_hint;conf=HIGH
+2FC621173E5C4908,PARA,PSKY,1,Paramount Skydance Corp,triage:add_suffix_by_region_hint;conf=HIGH
 E26BFB917A4AFB4A,PUMD,PUM.DE,1,Puma SE,triage:add_suffix_by_region_hint;conf=HIGH
 329A893CD0AE91F0,REE,RED.MC,1,Redeia Corporación S.A.,triage:add_suffix_by_region_hint;conf=HIGH
 3DDA62820293F619,TEF,TEF.MC,1,Telefonica SA,triage:add_suffix_by_region_hint;conf=HIGH
@@ -43,7 +43,7 @@ DF503B401813E565,AXIA3,AXIA3.SA,1,Centrais Elétricas Brasileiras S.A. - Eletrob
 814262829364F3FD,EBS,EBS.VI,1,Erste Group Bank AG,triage:add_suffix_by_region_hint;conf=HIGH
 92142F95A81167FA,GLE,GLE.PA,1,Societe Generale S.A.,triage:add_suffix_by_region_hint;conf=HIGH
 0BD26A219816D281,HESM,HESM,1,Hess Corp.,Asset changed ticker
-F8D97A05558A8754,NEE,NEE,1,Nextera Energy Partners LP,Asset changed ticker
+65E2A320295E61F9,NEP,NEE,1,Nextera Energy Partners LP,Asset changed ticker
 870A50FD62405317,NVG,NVG.LS,1,The Navigator Company SA,triage:add_suffix_by_region_hint;conf=HIGH
 26C9E4625ACA86CE,TRN,TRN.MI,1,Terna Rete Elettrica Nazionale SpA,triage:add_suffix_by_region_hint;conf=HIGH
 16551232D6D8BC35,VOE,VOE.VI,1,Voestalpine AG,triage:add_suffix_by_region_hint;conf=HIGH
@@ -102,3 +102,4 @@ CC92C44071979482,IGT,BRSL,1,Brightstar Lottery PLC,Rebranding
 4E3FF6CCFD160123,BOSS,BOSS.DE,1,Hugo Boss AG,triage:add_suffix_by_region_hint;conf=HIGH
 3AE9AF92F2A9FE01,SESG,SESG.PA,1,SES SA,triage:add_suffix_by_region_hint;conf=HIGH
 92F437A7E50D72CE,BRK,BRK-B,1,Berkshire Hathaway Inc.,Manual addition
+BC319EC9570DFF9A,A5G,A5G.IR,1,AIB Group plc,triage:add_suffix_by_region_hint;conf=HIGH

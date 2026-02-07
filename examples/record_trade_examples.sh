@@ -1,17 +1,17 @@
-total_value=521.02
-price=1.4422
+total_value=5000.00
+price=63414.68
 result=$(awk "BEGIN { printf \"%.8f\", $total_value / $price }")
 
 poetry run python src/alpha_edge/operations/record_trade.py \
-  --as-of 2026-01-26 \
-  --ts-utc "2026-01-26T14:07:26Z" \
-  --ticker SUI-USD \
+  --as-of 2026-02-06 \
+  --ts-utc "2026-02-06T00:56:45Z" \
+  --ticker BTC-USD \
   --side BUY \
   --quantity $result \
   --price $price \
   --currency USD \
-  --action-tag close \
-  --quantity-unit sui \
+  --action-tag open \
+  --quantity-unit btc \
   --value $total_value
 
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import datetime as dt
 from dataclasses import asdict
-from typing import Dict
+from typing import Dict, Any
 
 import numpy as np
 import pandas as pd
@@ -13,7 +13,7 @@ import json
 import io
 import boto3
 
-from alpha_edge import paths  # you already have this in other scripts
+from alpha_edge import paths
 
 from alpha_edge.portfolio.take_profit import (
     TakeProfitConfig,
@@ -29,6 +29,8 @@ from alpha_edge.portfolio.report_engine import (
     print_hmm_summary,
     print_decision_addendum,
 )
+from alpha_edge.portfolio.reinvest_engine import reinvest_leftover_with_frozen_core
+
 from alpha_edge.market.hmm_engine import (
     GaussianHMM,
     compute_state_diagnostics,
@@ -36,6 +38,8 @@ from alpha_edge.market.hmm_engine import (
     regime_probs_from_state_probs,
     select_regime_label,
 )
+from alpha_edge.market.build_returns_wide_cache import build_returns_wide_cache, CacheConfig
+
 from alpha_edge.portfolio.portfolio_health import (
     build_portfolio_health,
     should_reoptimize,
@@ -50,6 +54,7 @@ from alpha_edge.core.data_loader import (
     s3_write_parquet_partition,
     parse_portfolio_health,
     parse_ledger_positions_obj,
+    clean_returns_matrix,
 )
 from alpha_edge.portfolio.rebalance_engine import (
     RebalanceState,
@@ -65,8 +70,14 @@ ENGINE_ROOT_PREFIX = "engine/v1"
 TAKE_PROFIT_STATE_TABLE = "take_profit/state"
 TAKE_PROFIT_PLAN_TABLE = "take_profit/plan"
 
+# per-asset TP state/plan
+TAKE_PROFIT_ASSETS_STATE_TABLE = "take_profit/assets_state"
+TAKE_PROFIT_ASSETS_PLAN_TABLE = "take_profit/assets_plan"
+
+MARKET_RESCALE_STATE_TABLE = "regimes/market_rescale_state"
+
 RETURNS_WIDE_CACHE_PATH = "s3://alpha-edge-algo/market/cache/v1/returns_wide_min5y.parquet"
-OHLCV_USD_ROOT = "s3://alpha-edge-algo/market/ohlcv_usd/v1"  # long parquet, partitioned (ticker/year)
+OHLCV_USD_ROOT = "s3://alpha-edge-algo/market/ohlcv_usd/v1"
 
 
 def _resolve_root_prefix(*, backtest_run_id: str | None) -> str:
@@ -79,10 +90,6 @@ UNIVERSE_CSV_LOCAL = paths.universe_dir() / "universe.csv"
 
 
 def _load_universe_ticker_to_asset_id() -> dict[str, str]:
-    """
-    Loads local universe.csv and returns {TICKER -> ASSET_ID}.
-    Uses include==1 preference if duplicates exist.
-    """
     df = pd.read_csv(UNIVERSE_CSV_LOCAL)
     if df is None or df.empty:
         raise RuntimeError(f"Universe is empty: {UNIVERSE_CSV_LOCAL}")
@@ -93,6 +100,7 @@ def _load_universe_ticker_to_asset_id() -> dict[str, str]:
 
     df["ticker"] = df["ticker"].astype(str).str.strip().str.upper()
     df["asset_id"] = df["asset_id"].astype(str).str.strip()
+
     if "include" in df.columns:
         df["include"] = pd.to_numeric(df["include"], errors="coerce").fillna(1).astype(int)
     else:
@@ -102,10 +110,8 @@ def _load_universe_ticker_to_asset_id() -> dict[str, str]:
     if df.empty:
         raise RuntimeError("Universe has no (ticker,asset_id) pairs after normalization.")
 
-    # If duplicates exist for a ticker, prefer include=1 then last
     df = df.sort_values(["ticker", "include"], ascending=[True, False])
     df = df.drop_duplicates(subset=["ticker"], keep="first")
-
     return dict(zip(df["ticker"].tolist(), df["asset_id"].tolist()))
 
 
@@ -142,15 +148,6 @@ def _load_closes_usd_from_ohlcv(
     s3_root_prefix: str = "market/ohlcv_usd/v1",
     s3_region: str = "eu-west-1",
 ) -> pd.DataFrame:
-    """
-    Loads adj_close_usd for given *tickers* from S3 OHLCV dataset that is partitioned by asset_id/year.
-
-    Layout:
-      s3://<bucket>/<root_prefix>/asset_id=<ASSET_ID>/year=<YYYY>/...parquet
-
-    Returns:
-      DataFrame indexed by date, columns=tickers, values are adj_close_usd (ffilled).
-    """
     tickers = [str(t).strip().upper() for t in tickers if str(t).strip()]
     if not tickers:
         raise RuntimeError("No tickers provided to _load_closes_usd_from_ohlcv()")
@@ -160,7 +157,6 @@ def _load_closes_usd_from_ohlcv(
     years = list(range(int(start_ts.year), int(end_ts.year) + 1))
 
     t2aid = _load_universe_ticker_to_asset_id()
-
     missing = [t for t in tickers if t not in t2aid]
     if missing:
         raise RuntimeError(
@@ -255,12 +251,6 @@ def _fetch_spot_prices_usd(
     provider_map: dict[str, str] | None = None,
     fallback_prices: pd.Series | None = None,
 ) -> pd.Series:
-    """
-    Fetch spot-ish prices at runtime (best effort) using yfinance.
-
-    - Uses intraday bars for "price at report generation time".
-    - Fallback to last close if missing.
-    """
     provider_map = provider_map or {}
     tickers = [str(t).upper().strip() for t in tickers if str(t).strip()]
     if not tickers:
@@ -287,7 +277,6 @@ def _fetch_spot_prices_usd(
                 lvl0 = list(df.columns.get_level_values(0))
                 lvl1 = list(df.columns.get_level_values(1))
 
-                # Case A: (ticker, field)
                 if any(y in lvl0 for y in yahoo_list):
                     for y in yahoo_list:
                         if y not in df.columns.get_level_values(0):
@@ -298,7 +287,6 @@ def _fetch_spot_prices_usd(
                         elif ("Adj Close" in sub.columns) and (not sub["Adj Close"].dropna().empty):
                             spot_by_yahoo[y] = float(sub["Adj Close"].dropna().iloc[-1])
 
-                # Case B: (field, ticker)
                 elif any(y in lvl1 for y in yahoo_list):
                     for y in yahoo_list:
                         if y not in df.columns.get_level_values(1):
@@ -313,7 +301,6 @@ def _fetch_spot_prices_usd(
                             if not s.dropna().empty:
                                 spot_by_yahoo[y] = float(s.dropna().iloc[-1])
             else:
-                # Single ticker
                 if "Close" in df.columns and not df["Close"].dropna().empty:
                     spot_by_yahoo[yahoo_list[0]] = float(df["Close"].dropna().iloc[-1])
                 elif "Adj Close" in df.columns and not df["Adj Close"].dropna().empty:
@@ -329,8 +316,338 @@ def _fetch_spot_prices_usd(
             v = float(fallback_prices.loc[t])
         out[t] = v
 
-    s = pd.Series(out, dtype="float64").replace([np.inf, -np.inf], np.nan)
-    return s
+    return pd.Series(out, dtype="float64").replace([np.inf, -np.inf], np.nan)
+
+
+# =========================
+# Take profit by asset
+# =========================
+
+def _load_asset_tp_anchors(raw: dict | None) -> dict[str, dict[str, Any]]:
+    """
+    raw expected:
+      {"as_of": "...", "anchors": {"TICK": {"anchor_price": 123.4, "anchor_date": "YYYY-MM-DD"}}}
+    """
+    if not isinstance(raw, dict):
+        return {}
+    anchors = raw.get("anchors")
+    if not isinstance(anchors, dict):
+        return {}
+    out: dict[str, dict[str, Any]] = {}
+    for k, v in anchors.items():
+        if not isinstance(k, str):
+            continue
+        if not isinstance(v, dict):
+            continue
+        ap = v.get("anchor_price")
+        ad = v.get("anchor_date")
+        try:
+            apf = float(ap)
+        except Exception:
+            apf = np.nan
+        out[str(k).upper().strip()] = {
+            "anchor_price": (apf if np.isfinite(apf) and apf > 0 else None),
+            "anchor_date": (str(ad) if ad else None),
+        }
+    return out
+
+
+def _directional_return_series(
+    *,
+    prices: pd.Series,
+    anchor_price: float,
+    side_sign: float,
+) -> pd.Series:
+    """
+    Monotone "profit-directional" curve starting at 1:
+      long : rel = price / anchor
+      short: rel = anchor / price
+    """
+    p = pd.to_numeric(prices, errors="coerce").replace([np.inf, -np.inf], np.nan).dropna()
+    if p.empty or (not np.isfinite(anchor_price)) or anchor_price <= 0:
+        return pd.Series(dtype="float64")
+
+    if side_sign >= 0:
+        rel = p / float(anchor_price)
+    else:
+        rel = float(anchor_price) / p
+    rel = rel.replace([np.inf, -np.inf], np.nan).dropna()
+    return rel
+
+
+def _max_drawdown(rel: pd.Series) -> float | None:
+    if rel is None or rel.empty:
+        return None
+    x = rel.astype(float)
+    peak = x.cummax()
+    dd = 1.0 - (x / peak)
+    mdd = float(dd.max())
+    return mdd if np.isfinite(mdd) else None
+
+
+def build_take_profit_by_asset_plan(
+    *,
+    as_of: str,
+    positions: dict[str, Position],
+    closes: pd.DataFrame,
+    exec_prices_usd: pd.Series,
+    anchors_state: dict[str, dict[str, Any]],
+    gross_target: float,
+    min_trade_usd: float = 25.0,
+    min_position_usd: float = 0.0,
+    tp_return_thr: float = 0.15,
+    dd_window_days: int = 63,
+    dd_max: float = 0.08,
+) -> tuple[pd.DataFrame, dict[str, dict[str, Any]], dict[str, float]]:
+    """
+    Option-2 behavior:
+      - First try strict eligibility: r_anchor>=thr AND dd<=max
+      - If nobody eligible BUT you need to reduce gross:
+          fallback to profit-first trims:
+            - choose tickers with r_anchor>0 (profitable vs anchor)
+            - allocate reduction budget proportional to gross within that set
+          if still empty:
+            - proportional trim across ALL positions
+
+    Returns:
+      plan_df
+      next_anchors_state
+      positions_qty_target
+    """
+    tickers = sorted([t for t in positions.keys() if t in exec_prices_usd.index])
+    if not tickers:
+        empty = pd.DataFrame()
+        return empty, anchors_state, {t: float(p.quantity) for t, p in positions.items()}
+
+    px = pd.to_numeric(exec_prices_usd.reindex(tickers), errors="coerce").replace([np.inf, -np.inf], np.nan)
+    qty = pd.Series({t: float(positions[t].quantity) for t in tickers}, dtype="float64")
+
+    exp_signed = px * qty
+    exp_gross = exp_signed.abs()
+    gross_now = float(exp_gross.sum(skipna=True))
+
+    need_reduce = float(max(0.0, gross_now - float(gross_target)))
+    if need_reduce <= 0:
+        plan = pd.DataFrame(
+            {
+                "ticker": tickers,
+                "eligible": False,
+                "reason": "gross_already<=target",
+                "qty_current": qty.values,
+                "qty_target": qty.values,
+                "delta_qty": np.zeros(len(tickers)),
+                "exp_gross_current": exp_gross.values,
+                "exp_gross_reduce": np.zeros(len(tickers)),
+                "exec_price_usd": px.values,
+                "anchor_price_usd": [None] * len(tickers),
+                "r_anchor": [None] * len(tickers),
+                "dd_63": [None] * len(tickers),
+                "meta_need_reduce": [0.0] * len(tickers),
+            }
+        )
+        return plan, anchors_state, {t: float(positions[t].quantity) for t in positions.items()}
+
+    rows: list[dict[str, Any]] = []
+    eligible_strict: list[str] = []
+    profitable_soft: list[str] = []
+
+    for t in tickers:
+        p_now = float(px.loc[t]) if np.isfinite(px.loc[t]) else np.nan
+        q_now = float(qty.loc[t])
+        side_sign = 1.0 if q_now >= 0 else -1.0
+
+        entry_ok = positions[t].entry_price is not None and np.isfinite(float(positions[t].entry_price))
+        if not entry_ok:
+            rows.append(
+                dict(
+                    ticker=t,
+                    eligible=False,
+                    reason="missing_entry_price",
+                    qty_current=q_now,
+                    exec_price_usd=p_now,
+                    anchor_price_usd=None,
+                    r_anchor=None,
+                    dd_63=None,
+                    exp_gross_current=float(abs(p_now * q_now)) if np.isfinite(p_now) else np.nan,
+                )
+            )
+            continue
+
+        st = anchors_state.get(t, {})
+        anchor_price = st.get("anchor_price")
+        if anchor_price is None or (not np.isfinite(float(anchor_price))) or float(anchor_price) <= 0:
+            anchor_price = float(positions[t].entry_price)
+
+        if (not np.isfinite(p_now)) or p_now <= 0:
+            rows.append(
+                dict(
+                    ticker=t,
+                    eligible=False,
+                    reason="missing_exec_price",
+                    qty_current=q_now,
+                    exec_price_usd=p_now,
+                    anchor_price_usd=float(anchor_price),
+                    r_anchor=None,
+                    dd_63=None,
+                    exp_gross_current=float(abs(p_now * q_now)) if np.isfinite(p_now) else np.nan,
+                )
+            )
+            continue
+
+        if side_sign >= 0:
+            r_anchor = (p_now / float(anchor_price)) - 1.0
+        else:
+            r_anchor = (float(anchor_price) / p_now) - 1.0
+
+        dd_63 = None
+        try:
+            if t in closes.columns:
+                hist = closes[t].dropna()
+                hist_tail = hist.iloc[-int(dd_window_days):] if len(hist) > dd_window_days else hist
+                rel = _directional_return_series(prices=hist_tail, anchor_price=float(anchor_price), side_sign=side_sign)
+                dd_63 = _max_drawdown(rel)
+        except Exception:
+            dd_63 = None
+
+        ok_ret_strict = np.isfinite(r_anchor) and float(r_anchor) >= float(tp_return_thr)
+        ok_dd_strict = (dd_63 is not None) and np.isfinite(float(dd_63)) and float(dd_63) <= float(dd_max)
+
+        # Strict eligible
+        if ok_ret_strict and ok_dd_strict:
+            eligible_strict.append(t)
+            rows.append(
+                dict(
+                    ticker=t,
+                    eligible=True,
+                    reason="eligible_strict",
+                    qty_current=q_now,
+                    exec_price_usd=p_now,
+                    anchor_price_usd=float(anchor_price),
+                    r_anchor=float(r_anchor),
+                    dd_63=float(dd_63),
+                    exp_gross_current=float(abs(p_now * q_now)),
+                )
+            )
+            continue
+
+        # Soft "profit-first" set (Option-2 fallback): any positive r_anchor
+        is_prof = np.isfinite(r_anchor) and float(r_anchor) > 0.0
+        if is_prof:
+            profitable_soft.append(t)
+
+        reason = []
+        if not ok_ret_strict:
+            reason.append(f"r_anchor<{tp_return_thr:.2f}")
+        if not ok_dd_strict:
+            reason.append(f"dd_63>{dd_max:.2f}" if dd_63 is not None else "dd_63_missing")
+
+        rows.append(
+            dict(
+                ticker=t,
+                eligible=False,
+                reason=";".join(reason) if reason else "not_eligible",
+                qty_current=q_now,
+                exec_price_usd=p_now,
+                anchor_price_usd=float(anchor_price),
+                r_anchor=(None if not np.isfinite(r_anchor) else float(r_anchor)),
+                dd_63=dd_63,
+                exp_gross_current=float(abs(p_now * q_now)),
+            )
+        )
+
+    # Choose reduction universe:
+    #   1) strict eligible
+    #   2) profitable soft (r_anchor>0)
+    #   3) all tickers (last resort)
+    if eligible_strict:
+        reduce_set = eligible_strict
+        reduce_mode = "strict"
+    elif profitable_soft:
+        reduce_set = profitable_soft
+        reduce_mode = "profit_fallback"
+    else:
+        reduce_set = list(tickers)
+        reduce_mode = "proportional_fallback"
+
+    exp_set = exp_gross.reindex(reduce_set).fillna(0.0)
+    denom = float(exp_set.sum())
+    if denom <= 0:
+        plan_df = pd.DataFrame(rows)
+        plan_df["qty_target"] = plan_df["qty_current"]
+        plan_df["delta_qty"] = 0.0
+        plan_df["exp_gross_reduce"] = 0.0
+        plan_df["meta_need_reduce"] = need_reduce
+        plan_df["meta_reduce_mode"] = reduce_mode
+        return plan_df, anchors_state, {t: float(p.quantity) for t, p in positions.items()}
+
+    reduce_by = (exp_set / denom) * float(need_reduce)
+
+    qty_target = qty.copy()
+    reduce_used = 0.0
+    traded: set[str] = set()
+
+    for t in reduce_set:
+        p = float(px.loc[t])
+        q = float(qty.loc[t])
+        if not np.isfinite(p) or p <= 0:
+            continue
+
+        exp_abs = float(abs(p * q))
+        budget = float(min(float(reduce_by.loc[t]), exp_abs))
+
+        if budget < float(min_trade_usd):
+            continue
+
+        dq = -float(np.sign(q) if q != 0 else 1.0) * (budget / p)
+        q_new = q + dq
+
+        if float(min_position_usd) > 0:
+            rem_abs = float(abs(p * q_new))
+            if rem_abs < float(min_position_usd):
+                q_new = 0.0
+
+        if q > 0 and q_new < 0:
+            q_new = 0.0
+        if q < 0 and q_new > 0:
+            q_new = 0.0
+
+        realized_budget = float(abs(p * (q - q_new)))
+        if realized_budget < float(min_trade_usd):
+            continue
+
+        qty_target.loc[t] = float(q_new)
+        reduce_used += realized_budget
+        traded.add(t)
+
+    plan_df = pd.DataFrame(rows).set_index("ticker", drop=False)
+    plan_df["qty_target"] = plan_df["ticker"].map(lambda t: float(qty_target.get(t, np.nan)))
+    plan_df["delta_qty"] = plan_df["qty_target"] - plan_df["qty_current"]
+
+    plan_df["exp_gross_reduce"] = plan_df.apply(
+        lambda r: (
+            float(abs(float(r["exec_price_usd"]) * float(r["qty_current"])))
+            - float(abs(float(r["exec_price_usd"]) * float(r["qty_target"])))
+        )
+        if np.isfinite(r.get("exec_price_usd", np.nan)) else np.nan,
+        axis=1,
+    )
+
+    plan_df["meta_gross_now"] = gross_now
+    plan_df["meta_gross_target"] = float(gross_target)
+    plan_df["meta_need_reduce"] = float(need_reduce)
+    plan_df["meta_reduce_used"] = float(reduce_used)
+    plan_df["meta_reduce_mode"] = reduce_mode
+    plan_df["as_of"] = as_of
+
+    next_anchors = {k: dict(v) for k, v in anchors_state.items()}
+    for t in traded:
+        p_exec = float(px.loc[t])
+        if not np.isfinite(p_exec) or p_exec <= 0:
+            continue
+        next_anchors[t] = {"anchor_price": float(p_exec), "anchor_date": str(as_of)}
+
+    qty_target_dict = {t: float(qty_target.get(t, float(p.quantity))) for t, p in positions.items()}
+    return plan_df.reset_index(drop=True), next_anchors, qty_target_dict
 
 
 def run_daily_cycle_asof(
@@ -343,12 +660,6 @@ def run_daily_cycle_asof(
     goals_override: list[float] | None = None,
     main_goal_override: float | None = None,
 ) -> dict:
-    """
-    One daily report cycle for a given AS_OF date.
-
-    Ordering (important):
-      positions/prices -> HMM/market leverage -> report -> benchmark -> health -> take profit -> rebalance -> persist
-    """
     root_prefix = _resolve_root_prefix(backtest_run_id=backtest_run_id)
     mode = "backtest" if backtest_run_id else "live"
 
@@ -357,6 +668,27 @@ def run_daily_cycle_asof(
 
     run_dt = pd.Timestamp(dt.date.today()).normalize() if mode == "live" else as_of_ts
     as_of_run_date = run_dt.strftime("%Y-%m-%d")
+
+    # --- RETURNS_WIDE (universe-wide) ---
+    u = pd.read_csv(UNIVERSE_CSV_LOCAL)
+    u = u[u.get("include", 1).fillna(1).astype(int) == 1].copy()
+    u["asset_id"] = u["asset_id"].astype(str).str.strip()
+    u["ticker"] = u.get("ticker", u["asset_id"]).astype(str).str.upper().str.strip()
+    asset_to_ticker = dict(zip(u["asset_id"], u["ticker"]))
+
+    cache_cfg = CacheConfig(bucket=ENGINE_BUCKET, min_years=float(5.0))
+    build_returns_wide_cache(cache_cfg)
+
+    returns_wide = pd.read_parquet(RETURNS_WIDE_CACHE_PATH, engine="pyarrow").sort_index()
+    returns_wide, _ = clean_returns_matrix(returns_wide)
+
+    returns_wide.index = pd.to_datetime(returns_wide.index, errors="coerce").tz_localize(None).normalize()
+    returns_wide = returns_wide.loc[returns_wide.index <= as_of_ts]
+    if returns_wide.shape[0] < 252:
+        raise RuntimeError(f"Not enough returns history up to as_of={as_of_date}: rows={returns_wide.shape[0]}")
+
+    returns_wide = returns_wide.rename(columns=lambda c: asset_to_ticker.get(str(c).strip(), str(c).strip()))
+    returns_wide.columns = [str(c).upper().strip() for c in returns_wide.columns]
 
     if mode == "backtest" and equity_override is None:
         raise ValueError("backtest requires equity_override (do not rely on hardcoded equity).")
@@ -373,7 +705,7 @@ def run_daily_cycle_asof(
 
     GOALS = goals_override if goals_override is not None else [7500.0, 10000.0, 12500.0]
     MAIN_GOAL = float(main_goal_override if main_goal_override is not None else 10000.0)
-    equity = float(equity_override) if equity_override is not None else 5543.10
+    equity = float(equity_override) if equity_override is not None else 6054.72
 
     # ---------- Load MARKET regime (GLOBAL path) ----------
     market_hmm_payload = s3_load_latest_json(
@@ -393,7 +725,7 @@ def run_daily_cycle_asof(
 
     print(f"[market regime] as_of={market_as_of} target_leverage={market_lev:.2f}x")
 
-    # ---------- Inputs (FROM root_prefix) ----------
+    # ---------- Inputs ----------
     raw_ledger_positions = s3_load_latest_json(
         s3, bucket=ENGINE_BUCKET, root_prefix=root_prefix, table="ledger/positions"
     )
@@ -411,9 +743,7 @@ def run_daily_cycle_asof(
         raise RuntimeError("Missing S3 latest score_config.")
     score_cfg = ScoreConfig(**raw_score_cfg)
 
-    raw_baseline = s3_load_latest_json(
-        s3, bucket=ENGINE_BUCKET, root_prefix=root_prefix, table="health"
-    )
+    raw_baseline = s3_load_latest_json(s3, bucket=ENGINE_BUCKET, root_prefix=root_prefix, table="health")
     baseline = parse_portfolio_health(raw_baseline) if raw_baseline else None
 
     last_score = s3_load_latest_report_score(s3, bucket=ENGINE_BUCKET, root_prefix=root_prefix)
@@ -433,7 +763,6 @@ def run_daily_cycle_asof(
     closes_all = _load_closes_usd_from_ohlcv(tickers=tickers_all, start=START_HISTORY, end=end_date)
     latest_close_prices = closes_all.iloc[-1]
 
-    # ---------- Prices for valuation ----------
     pricing_as_of_utc = (
         f"{as_of_date}T23:59:59Z"
         if mode == "backtest"
@@ -452,6 +781,8 @@ def run_daily_cycle_asof(
 
     prices_for_valuation = pd.to_numeric(spot_prices, errors="coerce").replace([np.inf, -np.inf], np.nan)
     prices_for_valuation = prices_for_valuation.reindex(latest_close_prices.index).combine_first(latest_close_prices)
+
+    exec_prices = latest_close_prices.copy() if mode == "backtest" else prices_for_valuation.copy()
 
     # ---------- Build Position objects ----------
     positions: dict[str, Position] = {}
@@ -594,6 +925,32 @@ def run_daily_cycle_asof(
     if isinstance(lev_rec.get("filter_state"), dict):
         market.write_regime_filter_state(lev_rec["filter_state"])
 
+    # ---------- Market RESCALE trigger (ONLY on regime / leverage change) ----------
+    raw_mkt_state = s3_load_latest_json(
+        s3, bucket=ENGINE_BUCKET, root_prefix=root_prefix, table=MARKET_RESCALE_STATE_TABLE
+    ) or {}
+    prev_label = raw_mkt_state.get("label")
+    prev_lev = raw_mkt_state.get("leverage")
+
+    cur_label = str(
+        (lev_rec or {}).get("filter_state", {}).get("chosen_label")
+        or (hmm_res or {}).get("label_commit")
+        or "UNKNOWN"
+    )
+    cur_lev = float(market_lev)
+
+    market_regime_changed = (prev_label is not None and cur_label != prev_label)
+    market_lev_changed = (
+        prev_lev is not None
+        and abs(cur_lev - float(prev_lev)) / max(1e-9, abs(float(prev_lev))) >= 0.10
+    )
+    should_rescale_market = bool(market_regime_changed or market_lev_changed)
+
+    print(
+        f"[market rescale] should_rescale={should_rescale_market} "
+        f"prev_label={prev_label} cur_label={cur_label} prev_lev={prev_lev} cur_lev={cur_lev:.2f}"
+    )
+
     # ---------- Report ----------
     report = build_portfolio_report(
         closes=closes,
@@ -611,7 +968,6 @@ def run_daily_cycle_asof(
     bench_ann_ret = None
     bench_meta = {"name": BENCH_NAME, "tickers": BENCH_PROXY, "method": "equal_weight_daily_rebalanced"}
     cols: list[str] = []
-
     try:
         bench_closes_df = _load_closes_usd_from_ohlcv(
             tickers=BENCH_PROXY,
@@ -625,7 +981,6 @@ def run_daily_cycle_asof(
         if len(cols) >= 2:
             x = bench_closes_df[cols].copy()
             r_b = x.pct_change().dropna(how="any")
-
             bench_rets = r_b.mean(axis=1).dropna()
             bench_ann_ret = float(bench_rets.mean() * 252.0)
 
@@ -669,7 +1024,7 @@ def run_daily_cycle_asof(
     else:
         reopt = should_reoptimize(baseline, current_health)
 
-    # ---------- Take Profit planning (NOW current_health exists) ----------
+    # ---------- Take Profit (portfolio-level) ----------
     raw_tp_state = s3_load_latest_json(
         s3, bucket=ENGINE_BUCKET, root_prefix=root_prefix, table=TAKE_PROFIT_STATE_TABLE
     ) or {}
@@ -704,8 +1059,13 @@ def run_daily_cycle_asof(
         stability=None,
     )
 
-    # Effective leverage target (market * take-profit multiplier)
+    # Effective leverage target (market * TP multiplier)
     lev_target = float(market_lev) * float(tp_res.m_star)
+
+    # Precedence rule:
+    # - REOPT blocks REINVEST
+    # - REINVEST only allowed when TP harvest is active AND not reopt
+    do_reinvest = bool(tp_res.do_harvest) and (not bool(reopt))
 
     print(
         f"\n[take_profit] {'HARVEST' if tp_res.do_harvest else 'no_harvest'} "
@@ -717,23 +1077,176 @@ def run_daily_cycle_asof(
     if tp_res.reasons:
         print("[take_profit] reasons:", ", ".join(tp_res.reasons))
 
-    # ---------- Rebalance planning (uses TP-adjusted lev_target) ----------
+    # ---------- Take Profit by asset (ONLY when tp_res.do_harvest=True) ----------
+    asset_tp_plan_df = None
+    next_asset_anchors = None
+    positions_qty_for_rebalance = {t: float(p.quantity) for t, p in positions.items()}  # default
+
+    if tp_res.do_harvest:
+        raw_asset_state = s3_load_latest_json(
+            s3, bucket=ENGINE_BUCKET, root_prefix=root_prefix, table=TAKE_PROFIT_ASSETS_STATE_TABLE
+        )
+        anchors_state = _load_asset_tp_anchors(raw_asset_state)
+
+        gross_target_tp = float(equity) * float(lev_target)
+
+        asset_tp_plan_df, next_asset_anchors, positions_qty_for_rebalance = build_take_profit_by_asset_plan(
+            as_of=as_of_market_date,
+            positions=positions,
+            closes=closes,
+            exec_prices_usd=exec_prices.reindex(sorted(exec_prices.index)).copy(),
+            anchors_state=anchors_state,
+            gross_target=gross_target_tp,
+            min_trade_usd=25.0,
+            min_position_usd=0.0,
+            tp_return_thr=0.15,
+            dd_window_days=63,
+            dd_max=0.08,
+        )
+
+        if asset_tp_plan_df is not None and not asset_tp_plan_df.empty:
+            used = float(asset_tp_plan_df["meta_reduce_used"].iloc[0]) if "meta_reduce_used" in asset_tp_plan_df.columns else 0.0
+            need = float(asset_tp_plan_df["meta_need_reduce"].iloc[0]) if "meta_need_reduce" in asset_tp_plan_df.columns else 0.0
+            mode_red = str(asset_tp_plan_df.get("meta_reduce_mode", pd.Series(["?"])).iloc[0]) if "meta_reduce_mode" in asset_tp_plan_df.columns else "?"
+            n_traded = int((asset_tp_plan_df["exp_gross_reduce"].fillna(0.0) >= 25.0).sum()) if "exp_gross_reduce" in asset_tp_plan_df.columns else 0
+            print(f"\n[take_profit_by_asset] need_reduce={need:,.2f} used={used:,.2f} traded_assets={n_traded} mode={mode_red}")
+
+        if write_outputs and asset_tp_plan_df is not None and not asset_tp_plan_df.empty:
+            s3_write_parquet_partition(
+                s3,
+                bucket=ENGINE_BUCKET,
+                root_prefix=root_prefix,
+                table=TAKE_PROFIT_ASSETS_PLAN_TABLE,
+                dt=run_dt,
+                filename="asset_tp_plan.parquet",
+                df=asset_tp_plan_df,
+            )
+
+        if write_outputs and (next_asset_anchors is not None):
+            s3_write_json_event(
+                s3,
+                bucket=ENGINE_BUCKET,
+                root_prefix=root_prefix,
+                table=TAKE_PROFIT_ASSETS_STATE_TABLE,
+                dt=run_dt,
+                filename="state.json",
+                payload={
+                    "as_of": as_of_market_date,
+                    "anchors": next_asset_anchors,
+                    "meta": {
+                        "mode": mode,
+                        "pricing_as_of_utc": pricing_as_of_utc,
+                        "exec_price_source": ("close" if mode == "backtest" else "spot"),
+                        "rule": {
+                            "tp_return_thr": 0.15,
+                            "dd_window_days": 63,
+                            "dd_max": 0.08,
+                            "min_trade_usd": 25.0,
+                            "min_position_usd": 0.0,
+                        },
+                    },
+                },
+                update_latest=update_latest,
+            )
+
+    # ---------- RESCALE (market-regime only) then REINVEST (if allowed) ----------
+    gross_target = float(equity) * float(lev_target)
+
+    qty_base = dict(positions_qty_for_rebalance)
+
+    # Apply RESCALE first if market says so (composition unchanged, only amounts)
+    rescale_plan = None
+    if should_rescale_market:
+        rescale_plan = build_rescale_plan(
+            as_of=as_of_market_date,
+            equity=float(equity),
+            recommended_leverage=float(lev_target),
+            positions_qty=qty_base,
+            prices_usd=prices_for_valuation,
+            max_notional_cap=None,
+        )
+
+        if rescale_plan is not None and getattr(rescale_plan, "targets", None) is not None:
+            df_t = rescale_plan.targets.copy()
+            if "ticker" in df_t.columns and "qty_target" in df_t.columns:
+                qty_base = {str(r["ticker"]).upper().strip(): float(r["qty_target"]) for _, r in df_t.iterrows()}
+            else:
+                print("[rescale][warn] plan.targets missing (ticker,qty_target); keeping qty_base unchanged")
+        else:
+            print("[rescale][warn] rescale_plan is None or missing targets; keeping qty_base unchanged")
+
+    # Now REINVEST only if allowed (TP harvest + not reopt)
+    if do_reinvest:
+        qty_after, reinvest_meta = reinvest_leftover_with_frozen_core(
+            as_of=as_of_market_date,
+            returns_wide=returns_wide,
+            exec_prices_usd=exec_prices,
+            equity=float(equity),
+            gross_target=float(gross_target),
+            positions=positions,
+            positions_qty_after_tp=qty_base,
+            asset_tp_plan_df=asset_tp_plan_df,
+            score_cfg=score_cfg,
+            goals=list(GOALS),
+            main_goal=float(MAIN_GOAL),
+            max_assets_total=10,
+            min_assets_sleeve=2,
+            pop_size=60,
+            generations=25,
+            elite_frac=0.15,
+            n_paths_init=4000,
+            n_paths_final=20000,
+            block_size=(8, 12),
+            min_trade_usd=25.0,
+            seed=123,
+        )
+    else:
+        qty_after = dict(qty_base)
+        reinvest_meta = {
+            "status": "skip_reinvest",
+            "reason": ("reopt" if bool(reopt) else "tp_not_active"),
+            "as_of": as_of_market_date,
+            "gross_target": float(gross_target),
+        }
+
+    positions_qty_for_rebalance = dict(qty_after)
+
+    print(
+        f"\n[reinvest] status={reinvest_meta.get('status')} "
+        f"reason={reinvest_meta.get('reason', '')} "
+        f"leftover={float(reinvest_meta.get('leftover', 0.0) or 0.0):.2f} "
+        f"impr={float(reinvest_meta.get('improvement', 0.0) or 0.0):+.6f}"
+    )
+
+    if write_outputs:
+        s3_write_json_event(
+            s3,
+            bucket=ENGINE_BUCKET,
+            root_prefix=root_prefix,
+            table="reinvest/runs",
+            dt=run_dt,
+            filename="reinvest.json",
+            payload=reinvest_meta,
+            update_latest=update_latest,
+        )
+
+    # ---------- Rebalance planning (market-rescale only) ----------
+    # FIX: reb_state was missing in your latest version
     raw_reb_state = s3_load_latest_json(
-        s3, bucket=ENGINE_BUCKET, root_prefix=root_prefix, table=RESCALE_STATE_TABLE
+        s3, bucket=ENGINE_BUCKET, root_prefix=root_prefix, table="rescale/state"
     )
     reb_state = RebalanceState(
         last_rebalance_date=(raw_reb_state or {}).get("last_rebalance_date"),
         last_rebalance_equity=(raw_reb_state or {}).get("last_rebalance_equity"),
     )
 
-    positions_qty = {t: float(p.quantity) for t, p in positions.items()}
-
     gross_now = compute_gross_notional_from_positions(
-        positions_qty=positions_qty,
+        positions_qty=positions_qty_for_rebalance,
         prices_usd=prices_for_valuation,
     )
 
-    decision = should_rebalance(
+    # Diagnostics (optional logging)
+    _diag = should_rebalance(
         as_of=as_of_market_date,
         equity=float(equity),
         gross_notional=float(gross_now),
@@ -745,19 +1258,21 @@ def run_daily_cycle_asof(
         equity_band=None,
     )
 
-    # Force rescale when TP harvest triggers (even if drift doesn't)
-    if tp_res.do_harvest and not decision.should_rebalance:
-        from alpha_edge.portfolio.rebalance_engine import RebalanceDecision
-        L_real = float(gross_now) / float(equity) if float(equity) > 0 else float("inf")
-        drift_ratio = (L_real / float(lev_target)) if float(lev_target) > 0 else float("inf")
+    from alpha_edge.portfolio.rebalance_engine import RebalanceDecision
+    L_real = float(gross_now) / float(equity) if float(equity) > 0 else float("inf")
+    drift_ratio = (L_real / float(lev_target)) if float(lev_target) > 0 else float("inf")
 
-        decision = RebalanceDecision(
-            should_rebalance=True,
-            reasons=["take_profit_force_rescale"] + list(tp_res.reasons),
-            leverage_real=float(L_real),
-            leverage_target=float(lev_target),
-            drift_ratio=float(drift_ratio),
-        )
+    decision = RebalanceDecision(
+        should_rebalance=bool(should_rescale_market),
+        reasons=(
+            (["market_regime_change"] if market_regime_changed else [])
+            + (["market_leverage_change"] if market_lev_changed else [])
+            + ([] if should_rescale_market else ["no_market_rescale"])
+        ),
+        leverage_real=float(L_real),
+        leverage_target=float(lev_target),
+        drift_ratio=float(drift_ratio),
+    )
 
     # ---------- Rescale plan persistence ----------
     if decision.should_rebalance:
@@ -765,7 +1280,7 @@ def run_daily_cycle_asof(
             as_of=as_of_market_date,
             equity=float(equity),
             recommended_leverage=float(lev_target),
-            positions_qty=positions_qty,
+            positions_qty=positions_qty_for_rebalance,
             prices_usd=prices_for_valuation,
             max_notional_cap=None,
         )
@@ -811,7 +1326,7 @@ def run_daily_cycle_asof(
                 s3,
                 bucket=ENGINE_BUCKET,
                 root_prefix=root_prefix,
-                table=RESCALE_PLAN_TABLE,
+                table="rescale/plan",
                 dt=run_dt,
                 filename="plan.parquet",
                 df=plan_df,
@@ -821,7 +1336,7 @@ def run_daily_cycle_asof(
                 s3,
                 bucket=ENGINE_BUCKET,
                 root_prefix=root_prefix,
-                table=RESCALE_STATE_TABLE,
+                table="rescale/state",
                 dt=run_dt,
                 filename="state.json",
                 payload={
@@ -968,6 +1483,17 @@ def run_daily_cycle_asof(
             s3,
             bucket=ENGINE_BUCKET,
             root_prefix=root_prefix,
+            table=MARKET_RESCALE_STATE_TABLE,
+            dt=run_dt,
+            filename="state.json",
+            payload={"as_of": as_of_market_date, "label": cur_label, "leverage": float(cur_lev)},
+            update_latest=update_latest,
+        )
+
+        s3_write_json_event(
+            s3,
+            bucket=ENGINE_BUCKET,
+            root_prefix=root_prefix,
             table="inputs/positions",
             dt=run_dt,
             filename="positions.json",
@@ -997,7 +1523,7 @@ def run_daily_cycle_asof(
             update_latest=update_latest,
         )
 
-        print("\n[S3] Saved daily report + holdings + health + score_config + positions + regimes + take_profit_state.")
+        print("\n[S3] Saved daily report + holdings + health + score_config + positions + regimes + take_profit_state (+ asset_tp if triggered).")
 
     return {
         "mode": mode,
@@ -1019,6 +1545,11 @@ def run_daily_cycle_asof(
             "sharpe": tp_res.sharpe,
             "reasons": tp_res.reasons,
         },
+        "take_profit_by_asset": None if asset_tp_plan_df is None else {
+            "n_rows": int(len(asset_tp_plan_df)),
+            "gross_target": float(equity) * float(lev_target),
+        },
+        "reinvest": reinvest_meta,
     }
 
 

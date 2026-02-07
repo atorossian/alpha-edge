@@ -1,10 +1,2 @@
 as_of,ticker,yahoo_ticker,reason,error,asset_class,role,region,currency,quoteType,yahoo_ok,classification,suggested_action,suggested_yahoo_ticker,confidence,why
-2026-02-04,CAP,CAP.PA,fail,"arg must be a list, tuple, 1-d array, or Series",equity,stock,Cboe Europe,NAN,NAN,,INVESTIGATE,inspect reason/error; decide override or exclusion,,LOW,"reason=fail; error=arg must be a list, tuple, 1-d array, or Series"
-2026-02-04,A5G,A5G.DE,empty,,equity,stock,Cboe Europe,NAN,NAN,,RETRY,"retry later; if repeats, investigate or exclude",,LOW,empty OHLCV but no safe deterministic override candidate (region=Cboe Europe)
-2026-02-04,CAT,CAT,fail,"arg must be a list, tuple, 1-d array, or Series",equity,stock,NYSE,NAN,NAN,,INVESTIGATE,inspect reason/error; decide override or exclusion,,LOW,"reason=fail; error=arg must be a list, tuple, 1-d array, or Series"
-2026-02-04,PARA,PARA,empty,,equity,stock,NASDAQ,NAN,NAN,,OVERRIDABLE,add override: yahoo_ticker=PARA.DE (then re-run ingest),PARA.DE,LOW,empty OHLCV; region-based suffix guess from region=NASDAQ
-2026-02-04,NEP,NEP,empty,,equity,stock,NYSE,NAN,NAN,,OVERRIDABLE,add override: yahoo_ticker=NEP.DE (then re-run ingest),NEP.DE,LOW,empty OHLCV; region-based suffix guess from region=NYSE
-2026-02-04,XLU,XLU,fail,"arg must be a list, tuple, 1-d array, or Series",equity,etf,NYSE,NAN,NAN,,INVESTIGATE,inspect reason/error; decide override or exclusion,,LOW,"reason=fail; error=arg must be a list, tuple, 1-d array, or Series"
-2026-02-04,ZI,GTM,fail,"arg must be a list, tuple, 1-d array, or Series",equity,stock,NASDAQ,USD,EQUITY,True,OVERRIDE,no-op (already overridden to GTM),GTM,HIGH,ticker has locked yahoo_ticker in universe_overrides.csv
-2026-02-04,ANDE,ANDE,fail,"arg must be a list, tuple, 1-d array, or Series",equity,stock,NASDAQ,NAN,NAN,,INVESTIGATE,inspect reason/error; decide override or exclusion,,LOW,"reason=fail; error=arg must be a list, tuple, 1-d array, or Series"
-2026-02-04,BRFS,BRFS,empty,,equity,stock,NYSE,NAN,NAN,,EXCLUDE,no-op (already excluded),,HIGH,ticker is in asset_excluded.csv
+

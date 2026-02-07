@@ -445,7 +445,28 @@ def run_portfolio_search_asof(
     )
 
     # ---------- Discretize into shares ----------
-    prices_ticker = {asset_to_ticker.get(aid, aid): px for aid, px in px_map.items()}
+    # Build a reliable ticker->price map
+    u2 = u[["asset_id", "ticker"]].copy()
+    u2["asset_id"] = u2["asset_id"].astype(str).str.strip()
+    u2["ticker"] = u2["ticker"].astype(str).str.upper().str.strip()
+
+    p2 = latest_prices_df[["asset_id", "adj_close_usd"]].copy()
+    p2["asset_id"] = p2["asset_id"].astype(str).str.strip()
+    p2["adj_close_usd"] = pd.to_numeric(p2["adj_close_usd"], errors="coerce")
+
+    m = u2.merge(p2, on="asset_id", how="left")
+    m = m.dropna(subset=["adj_close_usd"])
+    m = m[m["adj_close_usd"] > 0]
+
+    prices_ticker = dict(zip(m["ticker"], m["adj_close_usd"]))
+    
+    w = dict(best_refined.weights)
+    missing = [t for t, wt in w.items() if abs(float(wt)) >= 0.02 and t not in prices_ticker]
+    if missing:
+        raise RuntimeError(
+            f"Missing prices for {len(missing)} tickers with abs(weight)>=2% "
+            f"(sample={missing[:10]}). Price-map coverage bug upstream."
+        )
 
     alloc = weights_to_discrete_shares(
         weights=dict(best_refined.weights),

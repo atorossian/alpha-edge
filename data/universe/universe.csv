@@ -142,7 +142,7 @@ A284E0A105A012E8,TAK,TAK,TAK,Takeda Pharmaceutical Co. Ltd.,equity,stock,NYSE,0.
 76D4CF5FCDD035BF,EMN,EMN,EMN,Eastman Chemical Co.,equity,stock,NYSE,0.25,0.0,1,EQH0f83ac33a8902921,0,EMN,,,,,,,,,,,,
 907A7FFE6559AC10,EVD,EVD,EVD.DE,CTS Eventim AG & Co. KGaA,equity,stock,Cboe Europe,0.25,0.0,1,EQH0fd0d2784cc45009,0,EVD.DE,"{""resolved"": ""EVD.DE"", ""best_score"": 1.0, ""best_rank"": 0, ""best_reason"": ""ok"", ""best_meta_quoteType"": ""EQUITY"", ""best_meta_exchange"": ""GER"", ""best_meta_country"": ""Germany""}",,,,,,,,,,,
 4E0AF625AF25717A,RDDT,RDDT,RDDT,Reddit Inc,equity,stock,NYSE,0.25,0.0,1,EQH0fe80233651805d1,0,RDDT,,,,,,,,,,,,
-BC319EC9570DFF9A,A5G,A5G,A5G.IR,AIB Group plc,equity,stock,Cboe Europe,0.25,0.0,1,EQH0ffd6bca76b4d55b,1,A5G.DE,"{""resolved"": ""A5G.DE"", ""best_score"": 1.0, ""best_rank"": 0, ""best_reason"": ""ok"", ""best_meta_quoteType"": ""EQUITY"", ""best_meta_exchange"": ""GER"", ""best_meta_country"": ""Ireland""}",AIB GROUP PLC,AIB Group plc,EQUITY,ISE,Irish,EUR,ie_market,Ireland,True,A5G.IR,A5G.IR
+BC319EC9570DFF9A,A5G,A5G,A5G.IR,AIB Group plc,equity,stock,Cboe Europe,0.25,0.0,1,EQH0ffd6bca76b4d55b,1,A5G.DE,"{""resolved"": ""A5G.DE"", ""best_score"": 1.0, ""best_rank"": 0, ""best_reason"": ""ok"", ""best_meta_quoteType"": ""EQUITY"", ""best_meta_exchange"": ""GER"", ""best_meta_country"": ""Ireland""}",,,,,,,,,,,
 0C6B1B31AE76B30C,ZD,ZD,ZD,Ziff Davis Inc.,equity,stock,NASDAQ,0.25,0.0,1,EQH10243e20e862d8f6,0,ZD,,,,,,,,,,,,
 0AFCF22CA4813BC9,GATX,GATX,GATX,GATX Corporation,equity,stock,NYSE,0.25,0.0,1,EQH102b6ecae6c1c689,0,GATX,,,,,,,,,,,,
 259A1263CF68CBDC,MO,MO,MO,Altria Group Inc.,equity,stock,NYSE,0.25,0.0,1,EQH102fb0f7e9e4570e,0,MO,,,,,,,,,,,,
@@ -308,7 +308,7 @@ D62505FDF4C873E8,LYB,LYB,LYB,Lyondellbasell Industries N.V.,equity,stock,NYSE,0.
 37F2E3DB2DAC7601,PRY,PRY,PRY.MI,Prysmian S.p.A.,equity,stock,Cboe Europe,0.25,0.0,1,EQH24071980b5b7521f,0,PRY.MI,"{""resolved"": ""PRY.MI"", ""best_score"": 1.0, ""best_rank"": 3, ""best_reason"": ""ok"", ""best_meta_quoteType"": ""EQUITY"", ""best_meta_exchange"": ""MIL"", ""best_meta_country"": ""Italy""}",,,,,,,,,,,
 2F6C2835867C3590,CCL,CCL,CCL,Carnival Corp.,equity,stock,NYSE,0.25,0.0,1,EQH241905aca55171f4,0,CCL,,,,,,,,,,,,
 9F421AF2C24B3248,PCG,PCG,PCG,PG&E Corporation,equity,stock,NYSE,0.25,0.0,1,EQH24336c6607ce9dc3,0,PCG,,,,,,,,,,,,
-F8D97A05558A8754,NEE,NEE,NEE,NextEra Energy Inc.,equity,stock,NYSE,0.25,0.0,1,EQH2442dee0e741c0c6,1,NEE,,"NextEra Energy, Inc.","NextEra Energy, Inc.",EQUITY,NYQ,NYSE,USD,us_market,United States,True,NEE,NEE
+F8D97A05558A8754,NEE,NEE,NEE,NextEra Energy Inc.,equity,stock,NYSE,0.25,0.0,1,EQH2442dee0e741c0c6,1,NEE,,,,,,,,,,,,
 30BDD00060714E6B,PLXS,PLXS,PLXS,Plexus Corp.,equity,stock,NASDAQ,0.25,0.0,1,EQH24d3211c9159aa93,0,PLXS,,,,,,,,,,,,
 F324037F7658E78D,CBT,CBT,CBT,Cabot Corp.,equity,stock,NYSE,0.25,0.0,1,EQH2504b5769b1af7d2,0,CBT,,,,,,,,,,,,
 732EEA25D0497D0A,HQY,HQY,HQY,Healthequity Inc.,equity,stock,NASDAQ,0.25,0.0,1,EQH2521ac8638bb5663,0,HQY,,,,,,,,,,,,
@@ -558,7 +558,7 @@ B143164C291DE27C,HII,HII,HII,Huntington Ingalls Industries Inc.,equity,stock,NYS
 2AAE74130946EFC3,BMA,BMA,BMA,Banco Macro SA,equity,stock,NYSE,0.25,0.0,1,EQH480184271836f3ff,0,BMA,,,,,,,,,,,,
 68501C9A13BCCE91,REC,REC,REC,Recordati Industria Chimica e Farmaceutica SpA,equity,stock,Cboe Europe,0.25,0.0,1,EQH480c88d0d1098a77,0,REC,,,,,,,,,,,,
 DCB4551E913F4C30,AGN,AGN,AGN.AS,AEGON N.V.,equity,stock,Cboe Europe,0.25,0.0,1,EQH48351e16754b04b8,0,AGN.AS,"{""resolved"": ""AGN.AS"", ""best_score"": 1.0, ""best_rank"": 4, ""best_reason"": ""ok"", ""best_meta_quoteType"": ""EQUITY"", ""best_meta_exchange"": ""AMS"", ""best_meta_country"": ""Netherlands""}",,,,,,,,,,,
-66CAFE2A0689E09D,HBI,HBI,HBI,Hanesbrands Inc.,equity,stock,NYSE,0.25,0.0,1,EQH4883d9f5d8e87345,0,HBI,,,,,,,,,,,,
+66CAFE2A0689E09D,HBI,HBI,HBI,Hanesbrands Inc.,equity,stock,NYSE,0.25,0.0,0,EQH4883d9f5d8e87345,0,HBI,"{""resolved"": null, ""best_score"": null, ""best_rank"": null, ""best_reason"": null, ""best_meta_quoteType"": null, ""best_meta_exchange"": null, ""best_meta_country"": null}",,,,,,,,,False,,HBI
 7EC8F2ADABE1848F,VALE3,VALE3,VALE3.SA,Vale SA,equity,stock,B3,0.25,0.0,1,EQH48927c97ac845fc2,0,VALE3.SA,"{""resolved"": ""VALE3.SA"", ""best_score"": 1.0, ""best_rank"": 9, ""best_reason"": ""ok"", ""best_meta_quoteType"": ""EQUITY"", ""best_meta_exchange"": ""SAO"", ""best_meta_country"": ""Brazil""}",,,,,,,,,,,
 CA46C9D716566DC1,CARR,CARR,CARR,Carrier Global Corp.,equity,stock,NYSE,0.25,0.0,1,EQH48ef85574e06e366,0,CARR,,,,,,,,,,,,
 753DFD17EC6453C2,CME,CME,CME,CME Group Inc.,equity,stock,NASDAQ,0.25,0.0,1,EQH491185e6c97fc4e3,0,CME,,,,,,,,,,,,
@@ -765,9 +765,9 @@ BBAE720FA002D6FF,WDAY,WDAY,WDAY,Workday Inc.,equity,stock,NASDAQ,0.25,0.0,1,EQH6
 C06FF75D9838A72D,BCP,BCP,BCP.LS,Banco Comercial Português SA,equity,stock,Cboe Europe,0.25,0.0,1,EQH638e9072f386a91c,1,BCP.LS,,,,,,,,,,,,
 71A5B6A0E86247CE,RHM,RHM,RHM.DE,Rheinmetall AG,equity,stock,Cboe Europe,0.25,0.0,1,EQH63d9dfe3bdcfaae0,0,RHM.DE,"{""resolved"": ""RHM.DE"", ""best_score"": 1.0, ""best_rank"": 0, ""best_reason"": ""ok"", ""best_meta_quoteType"": ""EQUITY"", ""best_meta_exchange"": ""GER"", ""best_meta_country"": ""Germany""}",,,,,,,,,,,
 2690DC3DAB5CBCF1,BE,BE,BE,Bloom Energy Corp.,equity,stock,NYSE,0.25,0.0,1,EQH63eb854c3dce81ee,0,BE,,,,,,,,,,,,
-B15139EE076A86F4,PCH,PCH,PCH,Potlatchdeltic Corp.,equity,stock,NASDAQ,0.25,0.0,1,EQH6419908084a2c8a8,0,PCH,,,,,,,,,,,,
+B15139EE076A86F4,PCH,PCH,PCH,Potlatchdeltic Corp.,equity,stock,NASDAQ,0.25,0.0,0,EQH6419908084a2c8a8,0,PCH,,PotlatchDeltic Corporation - Co,PotlatchDeltic Corporation,EQUITY,NMS,,USD,,United States,True,PCH,PCH
 230F515B63679C2F,APPN,APPN,APPN,Appian Corp.,equity,stock,NASDAQ,0.25,0.0,1,EQH641991a02fd45b47,0,APPN,,,,,,,,,,,,
-2FC621173E5C4908,PARA,PARA,PSKY,Paramount Global,equity,stock,NASDAQ,0.25,0.0,1,EQH641f52edf07d54b8,1,,"{""resolved"": null, ""best_score"": null, ""best_rank"": null, ""best_reason"": null, ""best_meta_quoteType"": null, ""best_meta_exchange"": null, ""best_meta_country"": null}",Paramount Skydance Corporation,Paramount Skydance Corporation,EQUITY,NMS,NasdaqGS,USD,us_market,United States,True,PSKY,PSKY
+2FC621173E5C4908,PARA,PARA,PSKY,Paramount Global,equity,stock,NASDAQ,0.25,0.0,1,EQH641f52edf07d54b8,1,,"{""resolved"": null, ""best_score"": null, ""best_rank"": null, ""best_reason"": null, ""best_meta_quoteType"": null, ""best_meta_exchange"": null, ""best_meta_country"": null}",,,,,,,,,,,
 2C38217FD87EB4AA,SLM,SLM,SLM,SLM Corp.,equity,stock,NASDAQ,0.25,0.0,1,EQH6436b9b32121a910,0,SLM,,,,,,,,,,,,
 2807A38D6D84E2F6,WIE,WIE,WIE.VI,Wienerberger AG,equity,stock,Cboe Europe,0.25,0.0,1,EQH644314703dfa9704,1,WIE.VI,,,,,,,,,,,,
 56E03CAB5A65B9D4,TEL,TEL,TEL,TE Connectivity Ltd.,equity,stock,NYSE,0.25,0.0,1,EQH6468affb8bbe5a3a,0,TEL,,,,,,,,,,,,
@@ -818,7 +818,7 @@ FF0A7DCCAD810D5A,URA,URA,URA,Global X Uranium ETF,equity,etf,NYSE,0.25,0.0,1,EQH
 8FB439A4778C981D,SMAR,SMAR,SMAR,Smartsheet Inc.,equity,stock,NYSE,0.25,0.0,0,EQH69a667319fc1eea9,0,SMAR,,,,,,,,,,,,
 EBA744B4587C2666,UNFI,UNFI,UNFI,United Natural Foods Inc.,equity,stock,NYSE,0.25,0.0,1,EQH69c547eaf1ed68e4,0,UNFI,,,,,,,,,,,,
 0B3617EEA2CED7DC,EWP,EWP,EWP,iShares MSCI Spain ETF,equity,etf,NYSE,0.25,0.0,1,EQH69e01a89e75ab04c,0,EWP,,,,,,,,,,,,
-65E2A320295E61F9,NEP,NEP,NEP,Nextera Energy Partners LP,equity,stock,NYSE,0.25,0.0,1,EQH69f44f1320aa20c5,0,,"{""resolved"": null, ""best_score"": null, ""best_rank"": null, ""best_reason"": null, ""best_meta_quoteType"": null, ""best_meta_exchange"": null, ""best_meta_country"": null}",,,NONE,,,,,,True,NEP,NEP
+65E2A320295E61F9,NEP,NEP,NEE,Nextera Energy Partners LP,equity,stock,NYSE,0.25,0.0,1,EQH69f44f1320aa20c5,1,,"{""resolved"": null, ""best_score"": null, ""best_rank"": null, ""best_reason"": null, ""best_meta_quoteType"": null, ""best_meta_exchange"": null, ""best_meta_country"": null}","NextEra Energy, Inc.","NextEra Energy, Inc.",EQUITY,NYQ,NYSE,USD,us_market,United States,True,NEE,NEE
 BC39BBC29981D618,XLU,XLU,XLU,Utilities Select Sector SPDR Fund,equity,etf,NYSE,0.25,0.0,1,EQH6a15e22620a34b4e,0,XLU,,,,,,,,,,,,
 F252F0DF5591BAD8,FUL,FUL,FUL,H.B. Fuller Company,equity,stock,NYSE,0.25,0.0,1,EQH6a23185db2095fe0,0,FUL,,,,,,,,,,,,
 C546E7F7D1A7E7C5,CSCO,CSCO,CSCO,Cisco Systems Inc.,equity,stock,NASDAQ,0.25,0.0,1,EQH6a249aba4a4c72c5,0,CSCO,,,,,,,,,,,,

@@ -1,3 +1,2 @@
 ticker,yahoo_ticker,lock_yahoo_ticker,exclude,exclude_reason,expected_name,note
-PARA,PARA.DE,1,0,,Paramount Global,auto-suggest from failures(empty); base=PARA; region=NASDAQ
-NEP,NEP.DE,1,0,,Nextera Energy Partners LP,auto-suggest from failures(empty); base=NEP; region=NYSE
+

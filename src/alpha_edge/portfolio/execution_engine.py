@@ -14,17 +14,6 @@ def is_crypto_ticker(ticker: str) -> bool:
     return t.endswith("-USD") and len(t) > 4
 
 
-def _quantize_qty(ticker: str, qty: float, *, crypto_decimals: int) -> float:
-    """
-    Signed quantization:
-      - Crypto: round to allowed decimals
-      - Non-crypto: integer shares, truncate toward zero (keeps sign)
-    """
-    if is_crypto_ticker(ticker):
-        return float(np.round(qty, int(crypto_decimals)))
-    return float(int(np.trunc(qty)))
-
-
 def _step_size(ticker: str, *, crypto_decimals: int) -> float:
     return float(10.0 ** (-int(crypto_decimals))) if is_crypto_ticker(ticker) else 1.0
 
@@ -32,6 +21,7 @@ def _step_size(ticker: str, *, crypto_decimals: int) -> float:
 def _quantize_toward_zero_steps(ticker: str, qty: float, *, crypto_decimals: int) -> float:
     """
     Explicit toward-zero quantization in "steps" (1 share or crypto step).
+    Keeps sign; truncates steps toward zero.
     """
     step = _step_size(ticker, crypto_decimals=crypto_decimals)
     if step <= 0:
@@ -64,12 +54,18 @@ def weights_to_discrete_shares(
     prices: Dict[str, float],
     notional: float,
     *,
+    # inclusion / filtering
     min_weight: float = 0.01,
+    # baseline mins (asset-aware)
     min_units_equity: float = 1.0,
     min_units_crypto: float = 0.0,
     min_units_weight_thr: float = 0.03,
+    # quantization
     crypto_decimals: int = DEFAULT_CRYPTO_DECIMALS,
     nearest_step_remaining_frac: float = 0.10,
+    # greedy top-up controls
+    max_topup_iters: int = 200000,
+    topup_chunk_max_steps: int = 5000,
 ) -> DiscreteAllocation:
     """
     Supports LONG/SHORT weights by targeting *gross* notional.
@@ -80,6 +76,14 @@ def weights_to_discrete_shares(
       - realized_value is SIGNED exposure (price * qty).
       - total_spent is GROSS used notional (sum abs exposures).
       - cash_left is remaining gross capacity (notional - gross_used).
+
+    Key behaviors:
+      1) Safe weight sanitization + missing-price fail-fast using a robust gross_in calc.
+      2) Base quantization is toward-zero steps (equities: int shares, crypto: decimals).
+      3) Baseline min-units are applied BEST-EFFORT in priority order (not all-or-nothing).
+      4) Optional nearest-step pass when remaining gross is “plenty”.
+      5) Final greedy top-up uses chunked steps to avoid crypto micro-step slowdowns,
+         and stops if there is no positive shortfall anywhere.
     """
     notional = float(notional)
     if not np.isfinite(notional) or notional <= 0:
@@ -161,6 +165,7 @@ def weights_to_discrete_shares(
     def q_nearest(t: str, q: float) -> float:
         return _quantize_nearest_steps(t, q, crypto_decimals=crypto_decimals)
 
+    # initial safe target qty
     qty: Dict[str, float] = {}
     for t in w_norm:
         q_raw = float(tgt_exp[t]) / float(px[t])
@@ -200,17 +205,27 @@ def weights_to_discrete_shares(
         return float(sgn * max(1.0, float(int(mu))))
 
     qty_min_add = {t: baseline_min_qty(t, w_norm[t]) for t in w_norm}
-    qty_with_min = {t: float(qty.get(t, 0.0)) for t in w_norm}
 
-    for t, qmin in qty_min_add.items():
+    # BEST-EFFORT: apply mins in priority order without exceeding gross cap
+    # (avoids all-or-nothing dropping shorts when notional is tight)
+    qty_try = dict(qty)
+    for t in sorted(w_norm.keys(), key=lambda k: abs(w_norm[k]), reverse=True):
+        qmin = float(qty_min_add.get(t, 0.0))
         if qmin == 0.0:
             continue
-        if np.sign(qmin) == np.sign(qty_with_min[t]) and abs(qty_with_min[t]) >= abs(qmin):
-            continue
-        qty_with_min[t] = float(qmin)
 
-    if gross_used(qty_with_min) <= notional:
-        qty = qty_with_min
+        qcur = float(qty_try.get(t, 0.0))
+
+        # already meets min in correct direction
+        if np.sign(qmin) == np.sign(qcur) and abs(qcur) >= abs(qmin):
+            continue
+
+        prop = dict(qty_try)
+        prop[t] = float(qmin)
+        if gross_used(prop) <= notional:
+            qty_try = prop
+
+    qty = qty_try
 
     used = gross_used(qty)
     remaining = float(max(0.0, notional - used))
@@ -219,15 +234,16 @@ def weights_to_discrete_shares(
     if remaining >= float(nearest_step_remaining_frac) * notional:
         cur_exp = {t: float(qty[t]) * float(px[t]) for t in qty}
 
-        def abs_shortfall(t: str) -> float:
-            return float(abs(tgt_exp[t]) - abs(cur_exp[t]))
+        def signed_shortfall(t: str) -> float:
+            # >0 means under-allocated (abs); <0 means over-allocated (abs)
+            return float(abs(tgt_exp[t]) - abs(cur_exp.get(t, 0.0)))
 
-        order = sorted(w_norm.keys(), key=lambda t: abs_shortfall(t), reverse=True)
+        order = sorted(w_norm.keys(), key=lambda t: signed_shortfall(t), reverse=True)
 
         for t in order:
             q_raw = float(tgt_exp[t]) / float(px[t])
             q_prop = q_nearest(t, q_raw)
-            if q_prop == qty[t]:
+            if q_prop == qty.get(t, 0.0):
                 continue
 
             prop_qty = dict(qty)
@@ -236,7 +252,7 @@ def weights_to_discrete_shares(
             if g_prop > notional:
                 continue
 
-            cur_sf = abs(float(abs(tgt_exp[t]) - abs(cur_exp[t])))
+            cur_sf = abs(float(abs(tgt_exp[t]) - abs(cur_exp.get(t, 0.0))))
             prop_exp = float(prop_qty[t]) * float(px[t])
             prop_sf = abs(float(abs(tgt_exp[t]) - abs(prop_exp)))
 
@@ -246,12 +262,14 @@ def weights_to_discrete_shares(
                 remaining = float(max(0.0, notional - used))
                 cur_exp[t] = prop_exp
 
-    # --- final greedy top-up (1-step increments), BUT only if there is positive shortfall ---
+    # --- final greedy top-up (chunked steps), BUT only if there is positive shortfall ---
     cur_exp = {t: float(qty[t]) * float(px[t]) for t in qty}
-    max_iter = 200000
     it = 0
 
-    while remaining > 0 and it < max_iter:
+    def signed_shortfall_abs(t: str) -> float:
+        return float(abs(tgt_exp[t]) - abs(cur_exp.get(t, 0.0)))
+
+    while remaining > 0 and it < int(max_topup_iters):
         it += 1
 
         affordable = []
@@ -263,12 +281,8 @@ def weights_to_discrete_shares(
         if not affordable:
             break
 
-        def shortfall(t: str) -> float:
-            return float(abs(tgt_exp[t]) - abs(cur_exp[t]))
-
-        # NEW: stop if there's no positive shortfall anywhere (don't waste remaining)
-        best_t = max(affordable, key=shortfall)
-        best_sf = float(shortfall(best_t))
+        best_t = max(affordable, key=signed_shortfall_abs)
+        best_sf = float(signed_shortfall_abs(best_t))
         if not np.isfinite(best_sf) or best_sf <= 1e-12:
             break
 
@@ -276,10 +290,16 @@ def weights_to_discrete_shares(
         step = _step_size(best_t, crypto_decimals=crypto_decimals)
         sgn = 1.0 if float(tgt_exp[best_t]) >= 0 else -1.0
 
-        if p * step > remaining + 1e-12:
+        step_cost = float(p * step)
+        if step_cost <= 0 or step_cost > remaining + 1e-12:
             break
 
-        qty[best_t] = float(qty[best_t] + sgn * step)
+        # CHUNK the number of steps to reduce iterations (especially for crypto)
+        max_steps_by_cash = int(remaining / step_cost)
+        max_steps_by_sf = int(best_sf / step_cost)  # only fill up to the abs-target
+        n_steps = max(1, min(max_steps_by_cash, max_steps_by_sf, int(topup_chunk_max_steps)))
+
+        qty[best_t] = float(qty.get(best_t, 0.0) + sgn * step * n_steps)
         if is_crypto_ticker(best_t):
             qty[best_t] = float(np.round(qty[best_t], int(crypto_decimals)))
 
@@ -298,8 +318,8 @@ def weights_to_discrete_shares(
     target_value = {t: float(tgt_exp[t]) for t in tgt_exp}  # SIGNED target exposure
 
     return DiscreteAllocation(
-        shares=qty,                  # signed quantities
-        target_value=target_value,   # signed exposure targets
+        shares=qty,                    # signed quantities
+        target_value=target_value,     # signed exposure targets
         realized_value=realized_value,
         realized_weights=realized_weights,
         total_spent=gross_used_final,  # gross used

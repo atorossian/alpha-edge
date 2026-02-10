@@ -8,6 +8,7 @@ from alpha_edge.market.build_returns_wide_cache import build_returns_wide_cache,
 from alpha_edge.market.compute_market_regime import compute_market_regime as compute_market_regime_main
 from alpha_edge.jobs.run_daily_report import main as run_daily_report_main
 from alpha_edge.jobs.run_portfolio_search import main as run_portfolio_search_main
+from alpha_edge.jobs.run_quarantine_analysis import main as run_quarantine_analysis_main
 from alpha_edge import paths
 
 
@@ -60,11 +61,17 @@ def morning_entry(
 
     print("\n[DONE] pipeline morning\n")
 
-
 def close_entry() -> None:
     print("\n=== PIPELINE: close ===")
+    print("\n[1/2] run_daily_report")
+
     run_daily_report_main()
+
+    print("\n[2/2] run_quarantine_analysis")
+    run_quarantine_analysis_main()
+
     print("\n[DONE] pipeline close\n")
+
 
 
 def search_entry() -> None:

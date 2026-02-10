@@ -20,6 +20,7 @@ from alpha_edge.portfolio.take_profit import (
     TakeProfitState,
     take_profit_policy,
 )
+from alpha_edge.portfolio.execution_engine import weights_to_discrete_shares
 from alpha_edge.market.regime_filter import RegimeFilterState
 from alpha_edge.core.schemas import ScoreConfig, Position
 from alpha_edge.market.regime_leverage import leverage_from_hmm
@@ -705,7 +706,7 @@ def run_daily_cycle_asof(
 
     GOALS = goals_override if goals_override is not None else [7500.0, 10000.0, 12500.0]
     MAIN_GOAL = float(main_goal_override if main_goal_override is not None else 10000.0)
-    equity = float(equity_override) if equity_override is not None else 6054.72
+    equity = float(equity_override) if equity_override is not None else 7019.61
 
     # ---------- Load MARKET regime (GLOBAL path) ----------
     market_hmm_payload = s3_load_latest_json(
@@ -1152,39 +1153,46 @@ def run_daily_cycle_asof(
     # ---------- RESCALE (market-regime only) then REINVEST (if allowed) ----------
     gross_target = float(equity) * float(lev_target)
 
-    qty_base = dict(positions_qty_for_rebalance)
+    # Start from post-asset-TP quantities (THIS is current)
+    qty_current = {str(t).upper().strip(): float(q) for t, q in (positions_qty_for_rebalance or {}).items()}
 
-    # Apply RESCALE first if market says so (composition unchanged, only amounts)
+    # Build RESCALE PLAN (do NOT apply it yet)
     rescale_plan = None
+    qty_target_rescale = None
+
     if should_rescale_market:
         rescale_plan = build_rescale_plan(
             as_of=as_of_market_date,
             equity=float(equity),
             recommended_leverage=float(lev_target),
-            positions_qty=qty_base,
+            positions_qty=qty_current,              # IMPORTANT: current quantities
             prices_usd=prices_for_valuation,
             max_notional_cap=None,
         )
 
-        if rescale_plan is not None and getattr(rescale_plan, "targets", None) is not None:
-            df_t = rescale_plan.targets.copy()
-            if "ticker" in df_t.columns and "qty_target" in df_t.columns:
-                qty_base = {str(r["ticker"]).upper().strip(): float(r["qty_target"]) for _, r in df_t.iterrows()}
-            else:
-                print("[rescale][warn] plan.targets missing (ticker,qty_target); keeping qty_base unchanged")
+        df_t = rescale_plan.targets
+        if ("ticker" in df_t.columns) and ("qty_target" in df_t.columns):
+            qty_target_rescale = {
+                str(r["ticker"]).upper().strip(): float(r["qty_target"])
+                for _, r in df_t.iterrows()
+            }
         else:
-            print("[rescale][warn] rescale_plan is None or missing targets; keeping qty_base unchanged")
+            print("[rescale][warn] plan.targets missing (ticker,qty_target); cannot build qty_target_rescale")
+
+
+    # Base for reinvest = current holdings (post-TP), NOT rescale targets
+    qty_for_reinvest = dict(qty_current)
 
     # Now REINVEST only if allowed (TP harvest + not reopt)
     if do_reinvest:
-        qty_after, reinvest_meta = reinvest_leftover_with_frozen_core(
+        qty_after_continuous, reinvest_meta = reinvest_leftover_with_frozen_core(
             as_of=as_of_market_date,
             returns_wide=returns_wide,
             exec_prices_usd=exec_prices,
             equity=float(equity),
             gross_target=float(gross_target),
             positions=positions,
-            positions_qty_after_tp=qty_base,
+            positions_qty_after_tp=qty_for_reinvest,   # <-- FIX: use current, not qty_base
             asset_tp_plan_df=asset_tp_plan_df,
             score_cfg=score_cfg,
             goals=list(GOALS),
@@ -1200,16 +1208,90 @@ def run_daily_cycle_asof(
             min_trade_usd=25.0,
             seed=123,
         )
+
+        # ---------------------------------------------------------
+        # Discretize ONLY the sleeve (keep frozen core frozen)
+        # ---------------------------------------------------------
+        sleeve_w = reinvest_meta.get("best_weights_sleeve")
+        leftover = float(reinvest_meta.get("leftover", 0.0) or 0.0)
+
+        # Robust core set:
+        # Prefer reinvest_meta core_active if present, else infer from asset_tp_plan_df core logic is based on.
+        core_set = set(str(t).upper().strip() for t in (reinvest_meta.get("core_active") or []))
+        if not core_set:
+            # Fallback: freeze tickers that exist in the starting qty map AND are NOT in sleeve weights
+            # (This is conservative: it freezes everything except explicit sleeve tickers)
+            if isinstance(sleeve_w, dict) and sleeve_w:
+                core_set = set(qty_for_reinvest.keys()) - set(str(t).upper().strip() for t in sleeve_w.keys())
+
+        if isinstance(sleeve_w, dict) and sleeve_w and np.isfinite(leftover) and leftover >= 25.0:
+            px_dict = {
+                str(t).upper().strip(): float(p)
+                for t, p in exec_prices.items()
+                if p is not None and np.isfinite(float(p)) and float(p) > 0
+            }
+
+            alloc = weights_to_discrete_shares(
+                weights={str(t).upper().strip(): float(w) for t, w in sleeve_w.items()},
+                prices=px_dict,
+                notional=float(leftover),      # <-- critical: sleeve only
+                min_weight=0.01,
+                min_units_equity=1.0,
+                min_units_crypto=0.0,
+                min_units_weight_thr=0.03,
+                crypto_decimals=8,
+                nearest_step_remaining_frac=0.10,
+            )
+
+            sleeve_qty = {str(t).upper().strip(): float(q) for t, q in (alloc.shares or {}).items()}
+
+            # Start from the reinvest base (frozen core quantities)
+            qty_after = dict(qty_for_reinvest)
+
+            # Merge sleeve target quantities as deltas (new sleeve buys)
+            for t, dq in sleeve_qty.items():
+                if t in core_set:
+                    continue  # hard-freeze
+                if not np.isfinite(dq) or abs(dq) <= 0.0:
+                    continue
+                qty_after[t] = float(qty_after.get(t, 0.0) + float(dq))
+
+            reinvest_meta["discrete_allocation"] = {
+                "mode": "sleeve_only_merge",
+                "leftover_budget": float(leftover),
+                "total_spent": float(alloc.total_spent),
+                "cash_left": float(alloc.cash_left),
+                "realized_weights": dict(alloc.realized_weights or {}),
+                "sleeve_shares": sleeve_qty,
+            }
+        else:
+            # If we can't discretize sleeve, keep the continuous qty output (already preserves frozen core)
+            qty_after = {str(t).upper().strip(): float(q) for t, q in (qty_after_continuous or {}).items()}
+            reinvest_meta["discrete_allocation"] = {
+                "status": "skipped",
+                "reason": (
+                    "missing_best_weights_sleeve"
+                    if not (isinstance(sleeve_w, dict) and sleeve_w)
+                    else "leftover_too_small"
+                ),
+                "leftover_budget": float(leftover),
+            }
+
     else:
-        qty_after = dict(qty_base)
+        qty_after = dict(qty_for_reinvest)
         reinvest_meta = {
             "status": "skip_reinvest",
             "reason": ("reopt" if bool(reopt) else "tp_not_active"),
             "as_of": as_of_market_date,
             "gross_target": float(gross_target),
+            "discrete_allocation": {
+                "status": "skipped",
+                "reason": ("reopt" if bool(reopt) else "tp_not_active"),
+            },
         }
 
     positions_qty_for_rebalance = dict(qty_after)
+
 
     print(
         f"\n[reinvest] status={reinvest_meta.get('status')} "

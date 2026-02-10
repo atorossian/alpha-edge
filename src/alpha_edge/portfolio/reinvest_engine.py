@@ -178,12 +178,16 @@ def reinvest_leftover_with_frozen_core(
         bands_days=score_cfg.fft_bands_days,
     )
 
-    # --- helper: evaluate a sleeve candidate by merging with fixed core ---
-    def eval_sleeve(weights_sleeve: dict[str, float], *, n_paths: int) -> Any | None:
-        # sleeve exposures: allocate leftover according to sleeve weights (sum=1)
+    def _build_full_weights_from_sleeve(weights_sleeve: dict[str, float]) -> dict[str, float]:
+        """
+        Gross-signed weights relative to gross_target:
+        w[t] = signed_exposure_usd / gross_target
+
+        Core: fixed via qty0 * px (can be long/short)
+        Sleeve: long-only weights scaled by leftover/gross_target
+        """
         sleeve_scale = float(leftover) / float(gross_target)
 
-        # core exposures: fixed signed exposure / gross_target
         weights_full: dict[str, float] = {}
 
         # core weights from qty*px
@@ -194,13 +198,21 @@ def reinvest_leftover_with_frozen_core(
                 continue
             weights_full[t] = float((q * p) / float(gross_target))
 
-        # sleeve weights (positive)
-        for t, w in weights_sleeve.items():
-            if t not in sleeve_universe:
+        # sleeve weights (positive, long-only)
+        for t, w in (weights_sleeve or {}).items():
+            tt = str(t).upper().strip()
+            if tt not in sleeve_universe:
                 continue
             if not np.isfinite(w) or float(w) <= 0:
                 continue
-            weights_full[t] = float(weights_full.get(t, 0.0) + float(w) * sleeve_scale)
+            weights_full[tt] = float(weights_full.get(tt, 0.0) + float(w) * sleeve_scale)
+
+        return weights_full
+
+
+    # --- helper: evaluate a sleeve candidate by merging with fixed core ---
+    def eval_sleeve(weights_sleeve: dict[str, float], *, n_paths: int) -> Any | None:
+        weights_full = _build_full_weights_from_sleeve(weights_sleeve)
 
         tickers_full = [t for t in weights_full.keys() if t in R.columns]
         if len(tickers_full) < 2:
@@ -223,7 +235,7 @@ def reinvest_leftover_with_frozen_core(
                 tickers=tickers_full,
                 weights=weights_full,
                 equity0=float(equity),
-                notional=float(gross_target),            # IMPORTANT: total notional including core
+                notional=float(gross_target),
                 goals=(float(goals[0]), float(goals[1]), float(goals[2])),
                 main_goal=float(main_goal),
                 score_config=score_cfg,
@@ -232,11 +244,12 @@ def reinvest_leftover_with_frozen_core(
                 n_paths=int(n_paths),
                 days=252,
                 block_size=block_size,
-                weight_mode="gross_signed",              # IMPORTANT: core+sleeve doesn't sum to 1
+                weight_mode="gross_signed",
             )
             return m
         except Exception:
             return None
+
 
     # baseline: evaluate current (core only + current sleeve exposures) for “must improve”
     # We treat current sleeve as "no reinvest": i.e., invest leftover in cash -> not modeled.
@@ -324,10 +337,15 @@ def reinvest_leftover_with_frozen_core(
     best_w = pop_weights[idx[0]]
     best_m = pop_metrics[idx[0]]
 
+    meta["best_weights_sleeve"] = dict(best_w)
+    meta["weights_target"] = dict(_build_full_weights_from_sleeve(best_w))  # optional but useful for logs
+    meta["core"] = sorted(list(core))
+    meta["core_active"] = list(core_active)
+
+
     best_score = float(best_m.score)
     meta["best_score"] = best_score
     meta["improvement"] = float(best_score - baseline_score)
-    meta["best_weights_sleeve"] = dict(best_w)
     meta["best_metrics"] = asdict(best_m)
 
     # enforce improvement

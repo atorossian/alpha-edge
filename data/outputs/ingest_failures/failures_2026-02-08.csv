@@ -1,0 +1,19 @@
+as_of,asset_id,ticker,yahoo_ticker,start,interval,reason,error
+2026-02-08,CRYPTO:AAVE-USD,AAVE-USD,AAVE-USD,2026-02-07,1d,fail,"arg must be a list, tuple, 1-d array, or Series"
+2026-02-08,EQH373e9b28a90567ec,NEOG,NEOG,2026-02-07,1d,fail,"arg must be a list, tuple, 1-d array, or Series"
+2026-02-08,EQH3cab51e5bafa722c,MMC,MMC,2026-02-07,1d,empty,
+2026-02-08,EQH40e5d597ac178c4e,GRF,GRF,2026-02-07,1d,empty,
+2026-02-08,EQH423810e84c014cbb,SQ,SQ.MX,2026-02-07,1d,empty,
+2026-02-08,EQH4b2f4ef528af8662,KRC,KRC,2026-02-07,1d,fail,"arg must be a list, tuple, 1-d array, or Series"
+2026-02-08,EQH5a06e08dbfdee377,INDB,INDB,2026-02-07,1d,fail,"arg must be a list, tuple, 1-d array, or Series"
+2026-02-08,EQH73f584e5d7aed5ac,FR,FR.PA,2026-02-07,1d,fail,"arg must be a list, tuple, 1-d array, or Series"
+2026-02-08,EQH7856be875d35a356,XLF,XLF,2026-02-07,1d,fail,"arg must be a list, tuple, 1-d array, or Series"
+2026-02-08,EQH7b0da63e49f0ea47,KD,KD,2026-02-07,1d,fail,"arg must be a list, tuple, 1-d array, or Series"
+2026-02-08,EQH8b19052cc3c96281,SOF,SOF,2026-02-07,1d,empty,
+2026-02-08,EQH97e470498989a1ff,KAR,KAR,2026-02-07,1d,empty,
+2026-02-08,EQHa0e0d5ec90674560,MODG,MODG,2026-02-07,1d,empty,
+2026-02-08,EQHa70d98e68b7d1378,MPW,MPW,2026-02-07,1d,empty,
+2026-02-08,EQHade95717675da7bf,NEXI,NEXI,2026-02-07,1d,empty,
+2026-02-08,EQHb9730ed0f4fd655b,CMI,CMI,2026-02-07,1d,fail,"arg must be a list, tuple, 1-d array, or Series"
+2026-02-08,EQHd0c941a538951136,MBG,MBG,2026-02-07,1d,empty,
+2026-02-08,EQHe9e81f4b022c3494,AZM,AZM.MI,2026-02-07,1d,fail,"arg must be a list, tuple, 1-d array, or Series"

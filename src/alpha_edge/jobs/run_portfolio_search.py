@@ -472,10 +472,19 @@ def run_portfolio_search_asof(
         weights=dict(best_refined.weights),
         prices=prices_ticker,
         notional=float(notional),
-        min_units=1.0,
+
+        # drop tiny weights
         min_weight=0.01,
+
+        # NEW API (replaces min_units)
+        min_units_equity=1.0,     # old behavior: at least 1 share if meaningful weight
+        min_units_crypto=0.0,     # do NOT force tiny crypto buys
+        min_units_weight_thr=0.03,# only enforce min units if weight >= 3%
+
         crypto_decimals=8,
+        nearest_step_remaining_frac=0.10,
     )
+
 
     # ---------- Persist to S3 ----------
     run_id = f"{run_dt_ts.strftime('%Y%m%d')}-{pd.Timestamp.utcnow().strftime('%H%M%S')}"

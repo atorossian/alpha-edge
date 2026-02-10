@@ -1,0 +1,3 @@
+as_of,asset_id,ticker,yahoo_ticker,start,interval,reason,error
+2026-02-10,EQH0d768ae1d82a8a1a,ANE,ANE.MC,2026-02-07,1d,fail,"arg must be a list, tuple, 1-d array, or Series"
+2026-02-10,EQH1f5ac5c6bacaae7f,JMT,JMT.LS,2026-02-07,1d,fail,"arg must be a list, tuple, 1-d array, or Series"

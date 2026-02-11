@@ -5,6 +5,8 @@ import datetime as dt
 import threading
 from typing import Optional
 from alpha_edge import paths
+import requests
+import requests_cache
 
 import numpy as np
 import pandas as pd
@@ -13,6 +15,40 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from alpha_edge.core.market_store import MarketStore
 from alpha_edge.jobs.run_universe_triage import run_post_ingest_triage
+
+
+def build_shared_yf_session():
+    """
+    Single session shared across all threads for this ingest run.
+    - Stable cookies/crumb behavior
+    - Optional caching (recommended)
+    """
+    ua = (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/122.0 Safari/537.36"
+    )
+
+    # ---- Option A: plain requests.Session (no caching)
+    # session = requests.Session()
+
+    # ---- Option B (recommended): cached session to reduce repeated calls
+    # Note: cache file is local; if running in ephemeral containers, it still helps within-run.
+    session = requests_cache.CachedSession(
+        cache_name="yf_http_cache",
+        backend="sqlite",
+        expire_after=60 * 30,  # 30 minutes
+        stale_if_error=True,
+    )
+
+    session.headers.update(
+        {
+            "User-Agent": ua,
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Connection": "keep-alive",
+        }
+    )
+    return session
 
 
 def _is_up_to_date_for_run(*, start: str, end: str | None) -> bool:
@@ -49,11 +85,11 @@ def safe_end_date_for_interval(interval: str) -> str | None:
     return None
 
 
-def fetch_yahoo_currency(ticker: str) -> dict:
+def fetch_yahoo_currency(ticker: str, session=None) -> dict:
     """
     Lightweight-ish metadata fetch. Still a network call.
     """
-    t = yf.Ticker(ticker)
+    t = yf.Ticker(ticker, session=session)
     out = {"ticker": ticker, "currency": None}
 
     try:
@@ -84,6 +120,7 @@ def download_ohlcv(
     start: str,
     end: str | None = None,
     interval: str = "1d",
+    session=None,
 ) -> pd.DataFrame:
     df = yf.download(
         tickers=ticker,
@@ -93,7 +130,9 @@ def download_ohlcv(
         auto_adjust=False,
         progress=False,
         threads=False,
+        session=session,
     )
+
     if df is None or df.empty:
         return pd.DataFrame()
 
@@ -209,7 +248,11 @@ def _normalize_day_index(idx: pd.Index) -> pd.DatetimeIndex:
     return pd.DatetimeIndex(dti)
 
 
-def download_fx_to_usd_series(ccy: str, start: str) -> pd.Series:
+def download_fx_to_usd_series(
+        ccy: str,
+        start: str,
+        session=None,
+        ) -> pd.Series:
     """
     Returns series: FX rate to convert 1 unit of CCY into USD.
     """
@@ -232,6 +275,7 @@ def download_fx_to_usd_series(ccy: str, start: str) -> pd.Series:
                 progress=False,
                 threads=False,
                 auto_adjust=False,
+                session=session,
             )
             if fx is None or fx.empty:
                 continue
@@ -274,6 +318,7 @@ def get_fx_to_usd_for_dates(
     dates: pd.DatetimeIndex,
     start_base: str,
     fx_cache: dict[str, pd.Series],
+    session=None,
 ) -> pd.Series:
     """
     Returns FX rate series aligned to `dates`, using an in-memory cache.
@@ -287,7 +332,7 @@ def get_fx_to_usd_for_dates(
         return pd.Series(1.0, index=dates_norm, name="USD")
 
     if ccy not in fx_cache:
-        fx_cache[ccy] = download_fx_to_usd_series(ccy, start=start_base)
+        fx_cache[ccy] = download_fx_to_usd_series(ccy, start=start_base, session=session)
 
     s = fx_cache[ccy].copy()
     s.index = _normalize_day_index(s.index)
@@ -389,6 +434,7 @@ def ingest(
     # Shared caches/state (thread-safe access enforced)
     fx_cache: dict[str, pd.Series] = {}
     fx_lock = threading.Lock()
+    yf_session = build_shared_yf_session()
 
     yf_sem = threading.Semaphore(int(yahoo_max_concurrency))
     limiter = RateLimiter(rate_per_sec=float(yahoo_rate_per_sec))
@@ -464,6 +510,7 @@ def ingest(
                 dates=dates,
                 start_base=start_base,
                 fx_cache=fx_cache,
+                session=yf_session,
             )
 
     def _process_one_local(asset_id: str, ticker: str, yahoo_sym: str, currency_hint: str) -> dict:
@@ -488,7 +535,7 @@ def ingest(
         try:
             # 1) Download OHLCV (required)
             df = call_yf_with_retries(
-                lambda: download_ohlcv(yahoo_sym, start=start, end=end, interval=interval),
+                lambda: download_ohlcv(yahoo_sym, start=start, end=end, interval=interval, session=yf_session),
                 sem=yf_sem,
                 limiter=limiter,
             )
@@ -506,7 +553,7 @@ def ingest(
             ccy = currency_hint
             if (not ccy) or (ccy.lower() == "nan"):
                 meta = call_yf_with_retries(
-                    lambda: fetch_yahoo_currency(yahoo_sym),
+                    lambda: fetch_yahoo_currency(yahoo_sym, session=yf_session),
                     sem=yf_sem,
                     limiter=limiter,
                 )

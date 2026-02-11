@@ -26,6 +26,8 @@ dependencies = [
 
   # optional but common in your repo
   "pyyaml>=6.0.2,<7.0.0",
+  "typer (>=0.21.2,<0.22.0)",
+  "requests-cache (>=1.3.0,<2.0.0)",
 ]
 
 [project.optional-dependencies]

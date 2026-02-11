@@ -93,7 +93,7 @@ DE5BBBE1EE3E5235,HO,HO,HO.PA,Thales SA,equity,stock,Cboe Europe,0.25,0.0,1,EQH08
 12C1681BE20B6CAF,NWE,NWE,NWE,NorthWestern Corp.,equity,stock,NASDAQ,0.25,0.0,1,EQH08e3c64195cd1409,0,NWE,,,,,,,,,,,,
 90FF52E1A6A20171,PPBI,PPBI,PPBI,Pacific Premier Bancorp Inc.,equity,stock,NASDAQ,0.25,0.0,0,EQH090e15a8096612f3,0,PPBI,,,,,,,,,,,,
 84B4579B772EA533,BG,BG,BG.VI,BAWAG Group AG,equity,stock,Cboe Europe,0.25,0.0,1,EQH09876e42c6fb7c5f,1,BG,,,,,,,,,,,,
-7652E046579DE20D,APTV,APTV,APTV.IR,Aptiv PLC,equity,stock,NYSE,0.25,0.0,1,EQH09d223fada5ffb6f,1,APTV,,,,,,,,,,False,,APTV.IR
+7652E046579DE20D,APTV,APTV,APTV,Aptiv PLC,equity,stock,NYSE,0.25,0.0,1,EQH09d223fada5ffb6f,1,APTV,,Aptiv PLC,Aptiv PLC,EQUITY,NYQ,NYSE,USD,us_market,Switzerland,True,APTV,APTV
 9B111673CB691E69,VAMO3,VAMO3,VAMO3.SA,"Vamos Locação de Caminhões, Máquinas e Equipamentos S.A.",equity,stock,B3,0.25,0.0,1,EQH09dbac0e89987ccc,0,VAMO3.SA,"{""resolved"": ""VAMO3.SA"", ""best_score"": 1.0, ""best_rank"": 9, ""best_reason"": ""ok"", ""best_meta_quoteType"": ""EQUITY"", ""best_meta_exchange"": ""SAO"", ""best_meta_country"": ""Brazil""}",,,,,,,,,,,
 DF0FB6EC88227BF0,CRSP,CRSP,CRSP,Crispr Therapeutics AG,equity,stock,NASDAQ,0.25,0.0,1,EQH09f3d66d9e570002,0,CRSP,,,,,,,,,,,,
 77BF30DFCB5410A6,PRU,PRU,PRU,Prudential Financial Inc.,equity,stock,NYSE,0.25,0.0,1,EQH0a0b3b7d26c74f97,0,PRU,,,,,,,,,,,,
@@ -734,7 +734,7 @@ C0BCB2257750CD5F,FCX,FCX,FCX,Freeport-McMoRan Inc,equity,stock,NYSE,0.25,0.0,1,E
 7933D65C702176F0,COPX,COPX,COPX,Global X Copper Miners ETF,equity,etf,NYSE,0.25,0.0,1,EQH5f5348516ee9e907,0,COPX,,,,,,,,,,,,
 32BFF7563B8337E2,THC,THC,THC,Tenet Healthcare Corp.,equity,stock,NYSE,0.25,0.0,1,EQH5f7b20571c60c9b3,0,THC,,,,,,,,,,,,
 84C099F52345F31B,ROKU,ROKU,ROKU,Roku Inc.,equity,stock,NASDAQ,0.25,0.0,1,EQH5fb6456f97f402d5,0,ROKU,,,,,,,,,,,,
-B03989F92ABA04FA,ALLE,ALLE,ALLE.IR,Allegion PLC,equity,stock,NYSE,0.25,0.0,1,EQH602162a8018408c6,1,ALLE,,,,,,,,,,False,,ALLE.IR
+B03989F92ABA04FA,ALLE,ALLE,ALLE,Allegion PLC,equity,stock,NYSE,0.25,0.0,1,EQH602162a8018408c6,1,ALLE,,Allegion plc,Allegion plc,EQUITY,NYQ,NYSE,USD,us_market,Ireland,True,ALLE,ALLE
 18CEC4DA14B6AB76,STERV,STERV,STERV.HE,Stora Enso OYJ,equity,stock,Cboe Europe,0.25,0.0,1,EQH603209c08e1a544e,0,STERV.HE,"{""resolved"": ""STERV.HE"", ""best_score"": 1.0, ""best_rank"": 15, ""best_reason"": ""ok"", ""best_meta_quoteType"": ""EQUITY"", ""best_meta_exchange"": ""HEL"", ""best_meta_country"": ""Finland""}",,,,,,,,,,,
 C0254726E7368997,DOW,DOW,DOW,Dow Inc,equity,stock,NYSE,0.25,0.0,1,EQH6088543b57b96592,0,DOW,,,,,,,,,,,,
 3600F10166D161EA,MTCH,MTCH,MTCH,Match Group Inc.,equity,stock,NASDAQ,0.25,0.0,1,EQH608fb90acb4da8f6,0,MTCH,,,,,,,,,,,,
@@ -974,7 +974,7 @@ BBB6F71901377EFC,SIE,SIE,SIE.DE,Siemens AG,equity,stock,Cboe Europe,0.25,0.0,1,E
 6675AE29D142D9CF,STE,STE,STE,Steris PLC.,equity,stock,NYSE,0.25,0.0,1,EQH7e2b3decc7456535,0,STE,,,,,,,,,,,,
 D76B29B752E604FA,CPR,CPR,CPR.MI,Davide Campari Milano NV,equity,stock,Cboe Europe,0.25,0.0,1,EQH7e35cc4c80696c44,0,CPR.MI,"{""resolved"": ""CPR.MI"", ""best_score"": 1.0, ""best_rank"": 3, ""best_reason"": ""ok"", ""best_meta_quoteType"": ""EQUITY"", ""best_meta_exchange"": ""MIL"", ""best_meta_country"": ""Italy""}",,,,,,,,,,,
 2BC9E4E149E4A854,PST,PST,PST,Poste Italiane SPA,equity,stock,Cboe Europe,0.25,0.0,1,EQH7e412265011dc644,0,PST,,,,,,,,,,,,
-D62E7D52B5A45B62,KRZ,KRZ,KRZ.IR,Kerry Group PLC,equity,stock,Cboe Europe,0.25,0.0,1,EQH7e438a7cb07647e5,1,KRZ.MU,"{""resolved"": ""KRZ.MU"", ""best_score"": 1.0, ""best_rank"": 11, ""best_reason"": ""ok"", ""best_meta_quoteType"": ""EQUITY"", ""best_meta_exchange"": ""MUN"", ""best_meta_country"": null}",KERRY GROUP PLC,Kerry Group plc,EQUITY,ISE,Irish,EUR,ie_market,Ireland,True,KRZ.IR,KRZ.IR
+D62E7D52B5A45B62,KRZ,KRZ,KRZ.IR,Kerry Group PLC,equity,stock,Cboe Europe,0.25,0.0,1,EQH7e438a7cb07647e5,1,KRZ.MU,"{""resolved"": ""KRZ.MU"", ""best_score"": 1.0, ""best_rank"": 11, ""best_reason"": ""ok"", ""best_meta_quoteType"": ""EQUITY"", ""best_meta_exchange"": ""MUN"", ""best_meta_country"": null}",,,,,,,,,,,
 BEA67D77D7FB9268,SAPR11,SAPR11,SAPR11.SA,Companhia de Saneamento do Paraná,equity,stock,B3,0.25,0.0,1,EQH7f039664e09c2c82,0,SAPR11.SA,"{""resolved"": ""SAPR11.SA"", ""best_score"": 1.0, ""best_rank"": 9, ""best_reason"": ""ok"", ""best_meta_quoteType"": ""EQUITY"", ""best_meta_exchange"": ""SAO"", ""best_meta_country"": ""Brazil""}",,,,,,,,,,,
 A5A14B95BA37EB17,BHF,BHF,BHF,Brighthouse Financial Inc.,equity,stock,NASDAQ,0.25,0.0,1,EQH7f04960881ac3896,0,BHF,,,,,,,,,,,,
 C7FCB4844A03ED1E,BWXT,BWXT,BWXT,BWX Technologies Inc,equity,stock,NYSE,0.25,0.0,1,EQH7f0add8051fa8e4e,0,BWXT,,,,,,,,,,,,
@@ -1035,7 +1035,7 @@ D4F3552405FDC771,ALGM,ALGM,ALGM,Allegro MicroSystems Inc,equity,stock,NASDAQ,0.2
 917D4E95D66E35F1,AN,AN,AN,AutoNation Inc,equity,stock,NYSE,0.25,0.0,1,EQH85489ec675b1809c,0,AN,,,,,,,,,,,,
 974977A2A63F4B4D,ARCC,ARCC,ARCC,Ares Capital Corporation,equity,stock,NASDAQ,0.25,0.0,1,EQH8554113e01f1b1f2,0,ARCC,,,,,,,,,,,,
 845E2CF0714C4E42,BRKR,BRKR,BRKR,Bruker Corporation,equity,stock,NASDAQ,0.25,0.0,1,EQH855836a79e864327,0,BRKR,,,,,,,,,,,,
-1519C6A4D7CE8ACA,LIN,LIN,LIN.IR,Linde PLC,equity,stock,NASDAQ,0.25,0.0,1,EQH856007907121cff9,1,LIN,,,,,,,,,,False,,LIN.IR
+1519C6A4D7CE8ACA,LIN,LIN,LIN,Linde PLC,equity,stock,NASDAQ,0.25,0.0,1,EQH856007907121cff9,1,LIN,,Linde plc,Linde plc,EQUITY,NMS,NasdaqGS,USD,us_market,United Kingdom,True,LIN,LIN
 4E94D4BDAEB970E3,CXW,CXW,CXW,Corecivic Inc.,equity,stock,NYSE,0.25,0.0,1,EQH85947d0a07f2419e,0,CXW,,,,,,,,,,,,
 198CC306C9E38AD5,TPX,TPX,TPX,Tempur Sealy International Inc,equity,stock,NYSE,0.25,0.0,0,EQH85a6e29a790c112b,0,TPX,,,,,,,,,,,,
 5E1BB541E41CFD61,ARMK,ARMK,ARMK,Aramark,equity,stock,NYSE,0.25,0.0,1,EQH85b2a47755adbb0d,0,ARMK,,,,,,,,,,,,
@@ -1046,7 +1046,7 @@ ACCDB3492BDC87B1,VGK,VGK,VGK,Vanguard FTSE Europe ETF,equity,etf,NYSE,0.25,0.0,1
 B111E9F412F21A10,PKG,PKG,PKG,Packaging Corp Of America,equity,stock,NYSE,0.25,0.0,1,EQH863ae11fbfd84174,0,PKG,,,,,,,,,,,,
 7A68EB14FA2DC693,WH,WH,WH,Wyndham Hotels & Resorts Inc.,equity,stock,NYSE,0.25,0.0,1,EQH8651173584bc623a,0,WH,,,,,,,,,,,,
 A14EE92760ED9586,TXNM,TXNM,TXNM,TXNM Energy Inc,equity,stock,NYSE,0.25,0.0,1,EQH866a48369b43777a,0,TXNM,,,,,,,,,,,,
-6927A28B7BD7719E,JHX,JHX,JHX.IR,James Hardie Industries plc.,equity,stock,NYSE,0.25,0.0,1,EQH86917e377717ae2d,1,JHX,,,,,,,,,,False,,JHX.IR
+6927A28B7BD7719E,JHX,JHX,JHX,James Hardie Industries plc.,equity,stock,NYSE,0.25,0.0,1,EQH86917e377717ae2d,1,JHX,,James Hardie Industries plc.,James Hardie Industries plc,EQUITY,NYQ,NYSE,USD,us_market,Ireland,True,JHX,JHX
 00F111EC5291E085,EXR,EXR,EXR,Extra Space Storage Inc.,equity,stock,NYSE,0.25,0.0,1,EQH86a3934ec4d9a9b9,0,EXR,,,,,,,,,,,,
 1A36AC655B7A0706,ASAN,ASAN,ASAN,Asana Inc.,equity,stock,NYSE,0.25,0.0,1,EQH86d11e5f731a0c0e,0,ASAN,,,,,,,,,,,,
 C335A7C48306D654,FICO,FICO,FICO,Fair Isaac Corp.,equity,stock,NYSE,0.25,0.0,1,EQH86e4a49e25ed269d,0,FICO,,,,,,,,,,,,
@@ -1072,7 +1072,7 @@ EC59715613535A0F,LIVN,LIVN,LIVN,LivaNova PLC,equity,stock,NASDAQ,0.25,0.0,1,EQH8
 BF8BAB3E1483911B,TECH,TECH,TECH,BIO-TECHNE Corp.,equity,stock,NASDAQ,0.25,0.0,1,EQH8a370f16ca9eed79,0,TECH,,,,,,,,,,,,
 597FEA1862D84C1B,ESLT,ESLT,ESLT,Elbit Systems Ltd,equity,stock,NASDAQ,0.25,0.0,1,EQH8a4636a29e5e2e17,0,ESLT,,,,,,,,,,,,
 7C9DD39703158DBF,HRL,HRL,HRL,Hormel Foods Corp.,equity,stock,NYSE,0.25,0.0,1,EQH8a57bb6921d822ef,0,HRL,,,,,,,,,,,,
-6BE3AF71746AF38A,PRGO,PRGO,PRGO.IR,Perrigo Company PLC,equity,stock,NYSE,0.25,0.0,1,EQH8a8597795b5a3c95,1,PRGO,,,,,,,,,,False,,PRGO.IR
+6BE3AF71746AF38A,PRGO,PRGO,PRGO,Perrigo Company PLC,equity,stock,NYSE,0.25,0.0,1,EQH8a8597795b5a3c95,1,PRGO,,Perrigo Company plc,Perrigo Company plc,EQUITY,NYQ,NYSE,USD,us_market,Ireland,True,PRGO,PRGO
 6EC717FA617092E7,BLK,BLK,BLK,BlackRock Inc.,equity,stock,NYSE,0.25,0.0,1,EQH8a8bb4691869ae19,0,BLK,,,,,,,,,,,,
 F39398BA2B27C6DD,WLN,WLN,WLN.PA,Worldline SA,equity,stock,Cboe Europe,0.25,0.0,1,EQH8a8d8da9f0ac2cd1,0,WLN.PA,"{""resolved"": ""WLN.PA"", ""best_score"": 1.0, ""best_rank"": 2, ""best_reason"": ""ok"", ""best_meta_quoteType"": ""EQUITY"", ""best_meta_exchange"": ""PAR"", ""best_meta_country"": ""France""}",,,,,,,,,,,
 7A6F437B63AB1D2C,IX,IX,IX,ORIX Corporation,equity,stock,NYSE,0.25,0.0,1,EQH8aa1abbfe48d1bf3,0,IX,,,,,,,,,,,,
@@ -1082,7 +1082,7 @@ CDF36028DAAA564D,SPCE,SPCE,SPCE,Virgin Galactic Holdings Inc,equity,stock,NYSE,0
 1EC5FA8230D0F21A,STAG,STAG,STAG,Stag Industrial Inc,equity,stock,NYSE,0.25,0.0,1,EQH8b0091c0fa7bd4e2,0,STAG,,,,,,,,,,,,
 8B2D80E51396538C,PYCR,PYCR,PYCR,Paycor HCM Inc.,equity,stock,NASDAQ,0.25,0.0,0,EQH8b091b2fd0965d39,0,PYCR,,,,,,,,,,,,
 81647A33F8FFA57B,SOF,SOF,SOF.BR,Sofina Société Anonyme,equity,stock,Cboe Europe,0.25,0.0,1,EQH8b19052cc3c96281,1,SOF,,,,,,,,,,,,
-17B72FE34DCB25A3,GL9,GL9,GL9.IR,Glanbia plc,equity,stock,Cboe Europe,0.25,0.0,1,EQH8b634f86d5a66dfd,1,GL9.MU,"{""resolved"": ""GL9.MU"", ""best_score"": 1.0, ""best_rank"": 11, ""best_reason"": ""ok"", ""best_meta_quoteType"": ""EQUITY"", ""best_meta_exchange"": ""MUN"", ""best_meta_country"": null}",GLANBIA PLC,Glanbia plc,EQUITY,ISE,Irish,EUR,ie_market,Ireland,True,GL9.IR,GL9.IR
+17B72FE34DCB25A3,GL9,GL9,GL9.IR,Glanbia plc,equity,stock,Cboe Europe,0.25,0.0,1,EQH8b634f86d5a66dfd,1,GL9.MU,"{""resolved"": ""GL9.MU"", ""best_score"": 1.0, ""best_rank"": 11, ""best_reason"": ""ok"", ""best_meta_quoteType"": ""EQUITY"", ""best_meta_exchange"": ""MUN"", ""best_meta_country"": null}",,,,,,,,,,,
 40C635B8E4EDBDD7,IP,IP,IP,International Paper Co,equity,stock,NYSE,0.25,0.0,1,EQH8baaf8ff412fb458,0,IP,,,,,,,,,,,,
 D4D060C4AE023EAD,NBIX,NBIX,NBIX,Neurocrine Biosciences Inc.,equity,stock,NASDAQ,0.25,0.0,1,EQH8bec96d2151ffa43,0,NBIX,,,,,,,,,,,,
 D2F8AFEF40EF5F04,BNL,BNL,BNL,Broadstone Net Lease Inc.,equity,stock,NYSE,0.25,0.0,1,EQH8c3696a32f7fed5b,0,BNL,,,,,,,,,,,,
@@ -1244,7 +1244,7 @@ CD9A9AB6F44ADBAC,AVB,AVB,AVB,AvalonBay Communities Inc.,equity,stock,NYSE,0.25,0
 90BBB85780760012,MPLX,MPLX,MPLX,MPLX LP,equity,stock,NYSE,0.25,0.0,1,EQHa056dad09ebb1ea4,0,MPLX,,,,,,,,,,,,
 8A04CD2198D1A547,MODG,MODG,CALY,Topgolf Callaway Brands Corp,equity,stock,NYSE,0.25,0.0,1,EQHa0e0d5ec90674560,1,MODG,,,,,,,,,,,,
 6829887D28065A6A,FAF,FAF,FAF,First American Financial Corp,equity,stock,NYSE,0.25,0.0,1,EQHa0e154d2e27db95c,0,FAF,,,,,,,,,,,,
-3CACB3B2CDA6380D,JAZZ,JAZZ,JAZZ.IR,Jazz Pharmaceuticals,equity,stock,NASDAQ,0.25,0.0,1,EQHa0f27625835a47b4,1,JAZZ,,,,,,,,,,False,,JAZZ.IR
+3CACB3B2CDA6380D,JAZZ,JAZZ,JAZZ,Jazz Pharmaceuticals,equity,stock,NASDAQ,0.25,0.0,1,EQHa0f27625835a47b4,1,JAZZ,,Jazz Pharmaceuticals plc,Jazz Pharmaceuticals plc,EQUITY,NMS,NasdaqGS,USD,us_market,Ireland,True,JAZZ,JAZZ
 EC4263CF017D9E95,SPGI,SPGI,SPGI,S&P Global Inc,equity,stock,NYSE,0.25,0.0,1,EQHa0fcd7c5e3dd6ea3,0,SPGI,,,,,,,,,,,,
 76E18EE58B446294,RGLD,RGLD,RGLD,Royal Gold Inc,equity,stock,NASDAQ,0.25,0.0,1,EQHa15763b9a508671b,0,RGLD,,,,,,,,,,,,
 BAC0A004D7B13888,SANB11,SANB11,SANB11.SA,Banco Santander (Brasil) S.A.,equity,stock,B3,0.25,0.0,1,EQHa1de8c27ffb4810d,0,SANB11.SA,"{""resolved"": ""SANB11.SA"", ""best_score"": 1.0, ""best_rank"": 9, ""best_reason"": ""ok"", ""best_meta_quoteType"": ""EQUITY"", ""best_meta_exchange"": ""SAO"", ""best_meta_country"": ""Brazil""}",,,,,,,,,,,
@@ -1260,7 +1260,7 @@ DF651CB71C017F69,BILI,BILI,BILI,Bilibili Inc.,equity,stock,NASDAQ,0.25,0.0,1,EQH
 E2D452DDE82A5189,ZION,ZION,ZION,Zions Bancorp,equity,stock,NASDAQ,0.25,0.0,1,EQHa30f1b8494a22870,0,ZION,,,,,,,,,,,,
 DA25AF033968373B,URNM,URNM,URNM,Sprott Uranium Miners ETF,equity,etf,NYSE,0.25,0.0,1,EQHa320b3c197aee689,0,URNM,,,,,,,,,,,,
 EE3BB30512624D53,WTFC,WTFC,WTFC,Wintrust Financial Corp.,equity,stock,NASDAQ,0.25,0.0,1,EQHa3447f2900709039,0,WTFC,,,,,,,,,,,,
-B3E5CB693E33BBEC,TT,TT,TT.IR,Trane Technologies PLC,equity,stock,NYSE,0.25,0.0,1,EQHa365c089d1ac03bf,1,TT,,,,,,,,,,False,,TT.IR
+B3E5CB693E33BBEC,TT,TT,TT,Trane Technologies PLC,equity,stock,NYSE,0.25,0.0,1,EQHa365c089d1ac03bf,1,TT,,Trane Technologies plc,Trane Technologies plc,EQUITY,NYQ,NYSE,USD,us_market,Ireland,True,TT,TT
 E26BFB917A4AFB4A,PUMD,PUMD,PUM.DE,Puma SE,equity,stock,Cboe Europe,0.25,0.0,1,EQHa371cece96b4bb35,1,PUM.DE,,,,,,,,,,,,
 A43431310047E82B,KNSL,KNSL,KNSL,Kinsale Capital Group Inc,equity,stock,NYSE,0.25,0.0,1,EQHa37f810f8a0c68fd,0,KNSL,,,,,,,,,,,,
 CB5D0774FBCAB76C,CIVI,CIVI,CIVI,Civitas Resources Inc,equity,stock,NYSE,0.25,0.0,1,EQHa3a1c99d199cf5da,0,CIVI,,,,,,,,,,,,
@@ -1429,7 +1429,7 @@ F51B439121EEADBE,EPD,EPD,EPD,Enterprise Products Partners LP,equity,stock,NYSE,0
 51C5A576EB811A9E,NSP,NSP,NSP,Insperity Inc.,equity,stock,NYSE,0.25,0.0,1,EQHb7b3f2f03ea8bd34,0,NSP,,,,,,,,,,,,
 B8112671124E6CBC,PLNT,PLNT,PLNT,Planet Fitness Inc.,equity,stock,NYSE,0.25,0.0,1,EQHb7c49fc076b7100c,0,PLNT,,,,,,,,,,,,
 20FB165C8F6D9D33,TPR,TPR,TPR,Tapestry Inc.,equity,stock,NYSE,0.25,0.0,1,EQHb7ce8a6e3fa60456,0,TPR,,,,,,,,,,,,
-76B73E75266B7C28,BIRG,BIRG,BIRG.IR,Bank of Ireland Group plc,equity,stock,Cboe Europe,0.25,0.0,1,EQHb7e823096875ffb8,1,BIRG.DE,"{""resolved"": ""BIRG.DE"", ""best_score"": 1.0, ""best_rank"": 0, ""best_reason"": ""ok"", ""best_meta_quoteType"": ""EQUITY"", ""best_meta_exchange"": ""GER"", ""best_meta_country"": ""Ireland""}",BANK OF IRELAND GROUP PLC,Bank of Ireland Group plc,EQUITY,ISE,Irish,EUR,ie_market,Ireland,True,BIRG.IR,BIRG.IR
+76B73E75266B7C28,BIRG,BIRG,BIRG.IR,Bank of Ireland Group plc,equity,stock,Cboe Europe,0.25,0.0,1,EQHb7e823096875ffb8,1,BIRG.DE,"{""resolved"": ""BIRG.DE"", ""best_score"": 1.0, ""best_rank"": 0, ""best_reason"": ""ok"", ""best_meta_quoteType"": ""EQUITY"", ""best_meta_exchange"": ""GER"", ""best_meta_country"": ""Ireland""}",,,,,,,,,,,
 32D00E41BDCA610C,D,D,D,Dominion Energy Inc.,equity,stock,NYSE,0.25,0.0,1,EQHb800b971b86408b1,0,D,,,,,,,,,,,,
 C93940D1D2C1491D,INTC,INTC,INTC,Intel Corp.,equity,stock,NASDAQ,0.25,0.0,1,EQHb8494d2a3cfdeb75,0,INTC,,,,,,,,,,,,
 BCE8BAA15B1C7DDD,TIMB,TIMB,TIMB,Tim SA,equity,stock,NYSE,0.25,0.0,1,EQHb8594b1138180f01,0,TIMB,,,,,,,,,,,,
@@ -1756,7 +1756,7 @@ EAA638DE5042E77C,GTES,GTES,GTES,Gates Industrial Corp PLC,equity,stock,NYSE,0.25
 792ED2E9A87904B4,VNQ,VNQ,VNQ,Vanguard Real Estate Index Fund,equity,etf,NYSE,0.25,0.0,1,EQHe5196d52eb6d4c53,0,VNQ,,,,,,,,,,,,
 D6DEECDB350FD310,RGA,RGA,RGA,Reinsurance Group of America Inc,equity,stock,NYSE,0.25,0.0,1,EQHe532cc78eab983ff,0,RGA,,,,,,,,,,,,
 4BC89B188E3A2C11,GFNORTEO,GFNORTEO,GFNORTEO.MX,Grupo Financiero Banorte,equity,stock,BMV,0.25,0.0,1,EQHe548b74b1f19d398,0,GFNORTEO.MX,"{""resolved"": ""GFNORTEO.MX"", ""best_score"": 1.0, ""best_rank"": 10, ""best_reason"": ""ok"", ""best_meta_quoteType"": ""EQUITY"", ""best_meta_exchange"": ""MEX"", ""best_meta_country"": ""Mexico""}",,,,,,,,,,,
-C627A9F698F70100,ADNT,ADNT,ADNT.IR,Adient PLC,equity,stock,NYSE,0.25,0.0,1,EQHe5527271563f7f27,1,ADNT,,,,,,,,,,False,,ADNT.IR
+C627A9F698F70100,ADNT,ADNT,ADNT,Adient PLC,equity,stock,NYSE,0.25,0.0,1,EQHe5527271563f7f27,1,ADNT,,Adient plc,Adient plc,EQUITY,NYQ,NYSE,USD,us_market,Ireland,True,ADNT,ADNT
 6570D15D85003D35,LW,LW,LW,Lamb Weston Holdings Inc,equity,stock,NYSE,0.25,0.0,1,EQHe5dfcc697b2a3501,0,LW,,,,,,,,,,,,
 0FD0C17F0E40F7CA,USIM5,USIM5,USIM5.SA,Usinas Siderúrgicas de Minas Gerais S.A.,equity,stock,B3,0.25,0.0,1,EQHe5ed35ed7f14ef2b,0,USIM5.SA,"{""resolved"": ""USIM5.SA"", ""best_score"": 1.0, ""best_rank"": 9, ""best_reason"": ""ok"", ""best_meta_quoteType"": ""EQUITY"", ""best_meta_exchange"": ""SAO"", ""best_meta_country"": ""Brazil""}",,,,,,,,,,,
 0EBE725EF1F01301,CBRE,CBRE,CBRE,CBRE Group Inc.,equity,stock,NYSE,0.25,0.0,1,EQHe628da06b2dbbb7a,0,CBRE,,,,,,,,,,,,
@@ -1799,7 +1799,7 @@ AEFD393AD583A80C,CFLT,CFLT,CFLT,Confluent Inc.,equity,stock,NASDAQ,0.25,0.0,1,EQ
 2A701F43122FDD9B,NGVT,NGVT,NGVT,Ingevity Corp.,equity,stock,NYSE,0.25,0.0,1,EQHeabd40fcde76b30b,0,NGVT,,,,,,,,,,,,
 740F1A8B3FD0D3FE,SKY,SKY,SKY,Skyline Champion Corp.,equity,stock,NYSE,0.25,0.0,1,EQHeae5d442479cd860,0,SKY,,,,,,,,,,,,
 A962AA45B870A260,ULTA,ULTA,ULTA,Ulta Beauty Inc.,equity,stock,NASDAQ,0.25,0.0,1,EQHeb04bede0270f4c6,0,ULTA,,,,,,,,,,,,
-CAF82C099342DEC9,KRX,KRX,KRX.IR,Kingspan Group plc,equity,stock,Cboe Europe,0.25,0.0,1,EQHeb04fec0abba2102,1,KRX.DE,"{""resolved"": ""KRX.DE"", ""best_score"": 1.0, ""best_rank"": 0, ""best_reason"": ""ok"", ""best_meta_quoteType"": ""EQUITY"", ""best_meta_exchange"": ""GER"", ""best_meta_country"": ""Ireland""}",KINGSPAN GROUP PLC,Kingspan Group plc,EQUITY,ISE,Irish,EUR,ie_market,Ireland,True,KRX.IR,KRX.IR
+CAF82C099342DEC9,KRX,KRX,KRX.IR,Kingspan Group plc,equity,stock,Cboe Europe,0.25,0.0,1,EQHeb04fec0abba2102,1,KRX.DE,"{""resolved"": ""KRX.DE"", ""best_score"": 1.0, ""best_rank"": 0, ""best_reason"": ""ok"", ""best_meta_quoteType"": ""EQUITY"", ""best_meta_exchange"": ""GER"", ""best_meta_country"": ""Ireland""}",,,,,,,,,,,
 5EF2B2C3B2222EBB,FER,FER,FER,Ferrovial S.A.,equity,stock,Cboe Europe,0.25,0.0,1,EQHeb60c3b8c138a67d,0,FER,,,,,,,,,,,,
 8BA75FEAEBC25C7E,UNM,UNM,UNM,Unum Group,equity,stock,NYSE,0.25,0.0,1,EQHeb94255d81d06b4f,0,UNM,,,,,,,,,,,,
 B144E3433EBDE70A,IMCD,IMCD,IMCD.AS,Imcd NV,equity,stock,Cboe Europe,0.25,0.0,1,EQHebaf0c479360b7fa,0,IMCD.AS,"{""resolved"": ""IMCD.AS"", ""best_score"": 1.0, ""best_rank"": 4, ""best_reason"": ""ok"", ""best_meta_quoteType"": ""EQUITY"", ""best_meta_exchange"": ""AMS"", ""best_meta_country"": ""Netherlands""}",,,,,,,,,,,

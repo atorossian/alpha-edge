@@ -163,11 +163,10 @@ def compute_row_id(df: pd.DataFrame) -> pd.Series:
         tmp["role"] + "|" +
         tmp["asset_class"]
     )
-    return key.apply(lambda s: hashlib.sha1(s.encode("utf-8")).hexdigest()[:16])
+    return key.apply(lambda s: hashlib.sha1(s.encode("utf-8")).hexdigest()[:16]).astype(str).str.upper()
 
 
 def drop_scr_columns(df: pd.DataFrame) -> pd.DataFrame:
-    # drop any columns created by repeated merges: *_scr, *_scr.1, *_scr.2, ...
     cols = [c for c in df.columns if re.search(r"_scr(\.\d+)?$", c)]
     return df.drop(columns=cols, errors="ignore")
 
@@ -178,10 +177,11 @@ def load_existing_universe(path: Path) -> pd.DataFrame:
     df = pd.read_csv(path)
     if df is None or df.empty:
         return pd.DataFrame()
-    df = drop_scr_columns(df)  # CRITICAL: never carry _scr into next runs
+    df = drop_scr_columns(df)  # never carry _scr into next runs
     df = ensure_columns(df)
     if "row_id" not in df.columns or df["row_id"].astype(str).str.strip().eq("").all():
         df["row_id"] = compute_row_id(df)
+    df["row_id"] = df["row_id"].astype(str).fillna("").str.strip().str.upper()
     return df
 
 
@@ -191,10 +191,6 @@ def _is_empty_series(s: pd.Series) -> pd.Series:
 
 
 def backfill_from_scr(universe: pd.DataFrame, col: str) -> pd.DataFrame:
-    """
-    If merge produced col_scr, fill universe[col] where empty from universe[col_scr],
-    then drop col_scr.
-    """
     sc = f"{col}_scr"
     if sc not in universe.columns:
         return universe
@@ -204,6 +200,81 @@ def backfill_from_scr(universe: pd.DataFrame, col: str) -> pd.DataFrame:
     universe.loc[empty, col] = universe.loc[empty, sc]
     universe = universe.drop(columns=[sc], errors="ignore")
     return universe
+
+
+def _nonempty_series(x: pd.Series) -> pd.Series:
+    s = x.astype(str).fillna("").str.strip()
+    return s.ne("") & ~s.str.lower().isin(["nan", "none"])
+
+
+def dedup_by_row_id(
+    universe: pd.DataFrame,
+    *,
+    existing_asset_id_map: dict[str, str] | None = None,
+    out_path: Path | None = None,
+    context: str = "dedup",
+) -> pd.DataFrame:
+    """
+    Enforce PRIMARY KEY: 1 row per row_id.
+
+    Keep best row deterministically:
+      - Prefer row with asset_id that matches existing_asset_id_map[row_id] if provided
+      - Then prefer row with non-empty asset_id
+      - Then prefer include=1, yahoo_ok=True, non-empty yahoo_ticker/symbol, lock_yahoo_ticker
+      - Then prefer longer name
+    """
+    u = ensure_columns(universe.copy())
+    u["row_id"] = u.get("row_id", "").astype(str).fillna("").str.strip().str.upper()
+
+    rid_empty = u["row_id"].str.strip().eq("")
+    if rid_empty.any():
+        u.loc[rid_empty, "row_id"] = compute_row_id(u.loc[rid_empty].copy())
+    u["row_id"] = u["row_id"].astype(str).fillna("").str.strip().str.upper()
+
+    if not u["row_id"].duplicated(keep=False).any():
+        return u.reset_index(drop=True)
+
+    u["include"] = pd.to_numeric(u.get("include", 1), errors="coerce").fillna(1).astype(int)
+    u["lock_yahoo_ticker"] = pd.to_numeric(u.get("lock_yahoo_ticker", 0), errors="coerce").fillna(0).astype(int)
+
+    yok = u.get("yahoo_ok")
+    u["_yok"] = 0 if yok is None else yok.fillna(False).astype(bool).astype(int)
+
+    u["_has_asset_id"] = _nonempty_series(u.get("asset_id", pd.Series([""] * len(u), index=u.index))).astype(int)
+    u["_has_yahoo"] = _nonempty_series(u.get("yahoo_ticker", pd.Series([""] * len(u), index=u.index))).astype(int)
+    u["_has_symbol"] = _nonempty_series(u.get("symbol", pd.Series([""] * len(u), index=u.index))).astype(int)
+    u["_name_len"] = u.get("name", "").astype(str).fillna("").str.len()
+
+    if existing_asset_id_map:
+        expected = u["row_id"].map(existing_asset_id_map).fillna("")
+        cur = u.get("asset_id", "").astype(str).fillna("").str.strip()
+        u["_asset_id_matches_existing"] = ((expected != "") & (cur == expected)).astype(int)
+    else:
+        u["_asset_id_matches_existing"] = 0
+
+    u["_keep_score"] = (
+        u["_asset_id_matches_existing"] * 1000
+        + u["_has_asset_id"] * 100
+        + u["include"] * 50
+        + u["_yok"] * 10
+        + u["_has_yahoo"] * 5
+        + u["_has_symbol"] * 2
+        + u["lock_yahoo_ticker"] * 1
+        + (u["_name_len"] > 0).astype(int)
+    )
+
+    u = u.sort_values(["row_id", "_keep_score"], ascending=[True, False])
+
+    removed = u[u.duplicated(subset=["row_id"], keep="first")].copy()
+    kept = u.drop_duplicates(subset=["row_id"], keep="first").copy()
+
+    if out_path is not None and not removed.empty:
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        removed.drop(columns=[c for c in removed.columns if c.startswith("_")], errors="ignore").to_csv(out_path, index=False)
+
+    kept = kept.drop(columns=[c for c in kept.columns if c.startswith("_")], errors="ignore")
+    print(f"[{context}] dedup_by_row_id removed={len(removed)} kept={len(kept)}")
+    return kept.reset_index(drop=True)
 
 
 # ----------------------------
@@ -295,11 +366,12 @@ def load_manual_additions(manual_path: Path) -> pd.DataFrame:
     if not bad.empty:
         raise RuntimeError(f"Manual additions have empty ticker. Fix: {manual_path}. Columns={list(manual.columns)}")
 
-    # compute row_id
+    # compute row_id if missing
     rid_empty = manual["row_id"].astype(str).str.strip().eq("")
     if rid_empty.any():
         manual.loc[rid_empty, "row_id"] = compute_row_id(manual.loc[rid_empty].copy())
 
+    manual["row_id"] = manual["row_id"].astype(str).fillna("").str.strip().str.upper()
     return manual
 
 
@@ -440,8 +512,8 @@ def resolve_bad_yahoo_symbols(universe_csv: Path, *, row_ids_subset: list[str] |
         full["resolver_debug"] = None
 
     if row_ids_subset:
-        subset = {str(x).strip() for x in row_ids_subset if str(x).strip()}
-        mask = full["row_id"].astype(str).isin(subset)
+        subset = {str(x).strip().upper() for x in row_ids_subset if str(x).strip()}
+        mask = full["row_id"].astype(str).str.upper().isin(subset)
     else:
         mask = pd.Series([True] * len(full), index=full.index)
 
@@ -492,12 +564,14 @@ def assign_asset_ids(universe: pd.DataFrame, existing: pd.DataFrame | None = Non
 
     if "row_id" not in u.columns or u["row_id"].astype(str).str.strip().eq("").all():
         u["row_id"] = compute_row_id(u)
+    u["row_id"] = u["row_id"].astype(str).fillna("").str.strip().str.upper()
 
     # preserve asset_id by row_id
     if existing is not None and not existing.empty and "asset_id" in existing.columns:
         ex = ensure_columns(existing.copy())
         if "row_id" not in ex.columns or ex["row_id"].astype(str).str.strip().eq("").all():
             ex["row_id"] = compute_row_id(ex)
+        ex["row_id"] = ex["row_id"].astype(str).fillna("").str.strip().str.upper()
 
         ex["asset_id"] = ex.get("asset_id", "").astype(str).fillna("").str.strip()
         ex_map = ex.set_index("row_id")["asset_id"].to_dict()
@@ -646,6 +720,7 @@ def main() -> None:
     ap.add_argument("--mode", choices=["full", "patch"], default="full")
     ap.add_argument("--sleep_s", type=float, default=0.25)
     ap.add_argument("--assert_paths", action="store_true")
+    ap.add_argument("--debug_row_id", type=str, default="")
     args = ap.parse_args()
 
     if args.assert_paths:
@@ -656,8 +731,26 @@ def main() -> None:
 
     sleep_s = float(args.sleep_s)
     mode = args.mode
+    debug_row_id = (args.debug_row_id or "").strip().upper()
 
     existing = load_existing_universe(UNIVERSE_CSV)
+
+    # known-good asset_id per row_id to preserve identity during dedup
+    existing_asset_id_map: dict[str, str] = {}
+    if not existing.empty and "asset_id" in existing.columns:
+        ex = ensure_columns(existing.copy())
+        ex["row_id"] = ex.get("row_id", "").astype(str).fillna("").str.strip().str.upper()
+        ex["asset_id"] = ex.get("asset_id", "").astype(str).fillna("").str.strip()
+        ex = ex[(ex["row_id"] != "") & (ex["asset_id"] != "")]
+        existing_asset_id_map = ex.drop_duplicates(subset=["row_id"], keep="first").set_index("row_id")["asset_id"].to_dict()
+
+    # Always enforce PK on existing before any mode
+    existing = dedup_by_row_id(
+        existing,
+        existing_asset_id_map=existing_asset_id_map,
+        out_path=paths.local_outputs_dir() / "universe_audit" / "dedup_row_id_removed_existing.csv",
+        context="existing_pk",
+    )
 
     overrides = load_overrides(OVERRIDES_CSV)
     exclusions = load_exclusions(ASSET_EXCLUDED_CSV)
@@ -677,18 +770,24 @@ def main() -> None:
         else:
             print(f"[manual] no manual additions or empty at {MANUAL_CSV}")
 
-        # guarantee row_id in scraped
         scraped["row_id"] = scraped.get("row_id", "").astype(str)
         rid_empty = scraped["row_id"].astype(str).str.strip().eq("")
         if rid_empty.any():
             scraped.loc[rid_empty, "row_id"] = compute_row_id(scraped.loc[rid_empty].copy())
+        scraped["row_id"] = scraped["row_id"].astype(str).fillna("").str.strip().str.upper()
+
+        # PK enforce pre-merge scraped
+        scraped = dedup_by_row_id(
+            scraped,
+            existing_asset_id_map=existing_asset_id_map,
+            out_path=paths.local_outputs_dir() / "universe_audit" / "dedup_row_id_removed_scraped.csv",
+            context="scraped_pk",
+        )
 
         is_bootstrap = existing.empty
-
         if is_bootstrap:
             universe = scraped.copy()
         else:
-            # IMPORTANT: keep _scr columns until AFTER backfill
             universe = existing.merge(
                 scraped[["row_id", "ticker", "broker_ticker"] + SAFE_SCRAPE_UPDATE_COLS + ["yahoo_ticker", "lock_yahoo_ticker"]],
                 on="row_id",
@@ -696,30 +795,40 @@ def main() -> None:
                 suffixes=("", "_scr"),
             )
 
-            # backfill base columns from _scr where base is empty (this preserves new rows!)
             for col in ["ticker", "broker_ticker", "yahoo_ticker", "lock_yahoo_ticker"] + SAFE_SCRAPE_UPDATE_COLS:
                 universe = backfill_from_scr(universe, col)
 
-            # NOW safe to drop any remaining _scr columns
             universe = drop_scr_columns(universe)
 
         universe = ensure_columns(universe)
-
-        # drop invalid key rows (ticker empty) AFTER backfill
         universe = universe[universe["ticker"].astype(str).str.strip().ne("")].copy()
 
-        # apply exclusions + overrides
+        # PK enforce post-merge
+        universe = dedup_by_row_id(
+            universe,
+            existing_asset_id_map=existing_asset_id_map,
+            out_path=paths.local_outputs_dir() / "universe_audit" / "dedup_row_id_removed_post_merge.csv",
+            context="post_merge_pk",
+        )
+
         universe = apply_asset_exclusions_patch(universe, exclusions)
         affected_tickers = set(universe["ticker"].astype(str).str.strip().str.upper().tolist())
         universe = apply_overrides_patch(universe, overrides, affected_tickers=affected_tickers)
 
+        # PK enforce before write & enrichment
+        universe = dedup_by_row_id(
+            universe,
+            existing_asset_id_map=existing_asset_id_map,
+            out_path=paths.local_outputs_dir() / "universe_audit" / "dedup_row_id_removed_pre_write.csv",
+            context="pre_write_pk",
+        )
+
         universe.to_csv(UNIVERSE_CSV, index=False)
         print(f"[ok] wrote universe rows={len(universe)} -> {UNIVERSE_CSV}")
 
-        # Enrich only included rows by row_id
         u_live = universe.copy()
         u_live["include"] = pd.to_numeric(u_live.get("include", 1), errors="coerce").fillna(1).astype(int)
-        row_ids_live = sorted(u_live.loc[u_live["include"] == 1, "row_id"].dropna().astype(str).unique().tolist())
+        row_ids_live = sorted(u_live.loc[u_live["include"] == 1, "row_id"].dropna().astype(str).str.upper().unique().tolist())
 
         enrich_universe_csv(
             universe_csv=str(UNIVERSE_CSV),
@@ -742,17 +851,34 @@ def main() -> None:
         )
 
         u2 = pd.read_csv(UNIVERSE_CSV)
-        u2 = drop_scr_columns(u2)
+        u2 = ensure_columns(drop_scr_columns(u2))
+
+        u2 = dedup_by_row_id(
+            u2,
+            existing_asset_id_map=existing_asset_id_map,
+            out_path=paths.local_outputs_dir() / "universe_audit" / "dedup_row_id_removed_pre_asset_id.csv",
+            context="pre_asset_id_pk",
+        )
+
         u2 = assign_asset_ids(u2, existing=existing)
 
         dedup_report = paths.local_outputs_dir() / "universe_audit" / "dedup_asset_id_removed.csv"
         u2 = dedup_by_asset_id(u2, out_path=dedup_report)
 
+        u2 = dedup_by_row_id(
+            u2,
+            existing_asset_id_map=existing_asset_id_map,
+            out_path=paths.local_outputs_dir() / "universe_audit" / "dedup_row_id_removed_final.csv",
+            context="final_pk",
+        )
+
         u2.to_csv(UNIVERSE_CSV, index=False)
         print("[ok] asset_id assigned + dedup_by_asset_id done.")
 
     else:
-        # patch mode
+        # ----------------------------
+        # PATCH MODE
+        # ----------------------------
         if existing is None or existing.empty:
             raise RuntimeError("Patch mode requires an existing universe.csv. Run --mode full first.")
 
@@ -767,47 +893,94 @@ def main() -> None:
         print(f"[patch] affected_tickers={len(affected_tickers)}")
         if not affected_tickers:
             print("[patch] no changes detected; nothing to do.")
-            return
+            # still update snapshots at end
+        else:
+            universe = pd.read_csv(UNIVERSE_CSV)
+            universe = ensure_columns(drop_scr_columns(universe))
+            if "row_id" not in universe.columns or universe["row_id"].astype(str).str.strip().eq("").all():
+                universe["row_id"] = compute_row_id(universe)
+            universe["row_id"] = universe["row_id"].astype(str).fillna("").str.strip().str.upper()
 
-        universe = pd.read_csv(UNIVERSE_CSV)
-        universe = drop_scr_columns(universe)
-        universe = ensure_columns(universe)
-        if "row_id" not in universe.columns or universe["row_id"].astype(str).str.strip().eq("").all():
-            universe["row_id"] = compute_row_id(universe)
+            # PK enforce before patch work (critical because enrich_universe_csv now raises)
+            universe = dedup_by_row_id(
+                universe,
+                existing_asset_id_map=existing_asset_id_map,
+                out_path=paths.local_outputs_dir() / "universe_audit" / "dedup_row_id_removed_patch_pre.csv",
+                context="patch_pre_pk",
+            )
 
-        universe = apply_asset_exclusions_patch(universe, exclusions)
-        universe = apply_overrides_patch(universe, overrides, affected_tickers=affected_tickers)
-        universe.to_csv(UNIVERSE_CSV, index=False)
+            # apply exclusions + overrides only for affected tickers (override fn already filters internally)
+            universe = apply_asset_exclusions_patch(universe, exclusions)
+            universe = apply_overrides_patch(universe, overrides, affected_tickers=affected_tickers)
 
-        mask = universe["ticker"].astype(str).str.upper().isin(affected_tickers)
-        row_ids_affected = sorted(universe.loc[mask, "row_id"].astype(str).unique().tolist())
+            # PK enforce after patch changes
+            universe = dedup_by_row_id(
+                universe,
+                existing_asset_id_map=existing_asset_id_map,
+                out_path=paths.local_outputs_dir() / "universe_audit" / "dedup_row_id_removed_patch_post_apply.csv",
+                context="patch_post_apply_pk",
+            )
 
-        enrich_universe_csv(
-            universe_csv=str(UNIVERSE_CSV),
-            out_csv=str(UNIVERSE_CSV),
-            sleep_s=sleep_s,
-            ticker_col="row_id",
-            yahoo_col="yahoo_ticker",
-            tickers_subset=row_ids_affected,
-        )
+            universe.to_csv(UNIVERSE_CSV, index=False)
 
-        changed = resolve_bad_yahoo_symbols(UNIVERSE_CSV, row_ids_subset=row_ids_affected)
+            # enrich only affected row_ids (by ticker -> row_id)
+            mask = universe["ticker"].astype(str).str.upper().isin(affected_tickers)
+            row_ids_affected = sorted(universe.loc[mask, "row_id"].astype(str).str.upper().unique().tolist())
 
-        if changed:
+            if debug_row_id:
+                print(f"[patch][dbg] rows for row_id={debug_row_id}")
+                cols = [c for c in ["row_id", "ticker", "name", "region", "role", "asset_class", "asset_id", "yahoo_ticker", "include"] if c in universe.columns]
+                print(universe[universe["row_id"].eq(debug_row_id)][cols].head(50).to_string(index=False))
+
+            # IMPORTANT: enrich uses ticker_col=row_id and will now raise if duplicates exist
             enrich_universe_csv(
                 universe_csv=str(UNIVERSE_CSV),
                 out_csv=str(UNIVERSE_CSV),
                 sleep_s=sleep_s,
                 ticker_col="row_id",
                 yahoo_col="yahoo_ticker",
-                tickers_subset=changed,
+                tickers_subset=row_ids_affected,
             )
 
-        u2 = pd.read_csv(UNIVERSE_CSV)
-        u2 = assign_asset_ids(u2, existing=existing)
-        u2.to_csv(UNIVERSE_CSV, index=False)
+            changed = resolve_bad_yahoo_symbols(UNIVERSE_CSV, row_ids_subset=row_ids_affected)
 
-        print("[patch][ok] universe patched + enriched by row_id.")
+            if changed:
+                enrich_universe_csv(
+                    universe_csv=str(UNIVERSE_CSV),
+                    out_csv=str(UNIVERSE_CSV),
+                    sleep_s=sleep_s,
+                    ticker_col="row_id",
+                    yahoo_col="yahoo_ticker",
+                    tickers_subset=changed,
+                )
+
+            # re-load and finalize identity fields
+            u2 = pd.read_csv(UNIVERSE_CSV)
+            u2 = ensure_columns(drop_scr_columns(u2))
+
+            # PK enforce again before asset_id assignment
+            u2 = dedup_by_row_id(
+                u2,
+                existing_asset_id_map=existing_asset_id_map,
+                out_path=paths.local_outputs_dir() / "universe_audit" / "dedup_row_id_removed_patch_pre_asset_id.csv",
+                context="patch_pre_asset_id_pk",
+            )
+
+            u2 = assign_asset_ids(u2, existing=existing)
+
+            dedup_report = paths.local_outputs_dir() / "universe_audit" / "dedup_asset_id_removed_patch.csv"
+            u2 = dedup_by_asset_id(u2, out_path=dedup_report)
+
+            # final PK enforce
+            u2 = dedup_by_row_id(
+                u2,
+                existing_asset_id_map=existing_asset_id_map,
+                out_path=paths.local_outputs_dir() / "universe_audit" / "dedup_row_id_removed_patch_final.csv",
+                context="patch_final_pk",
+            )
+
+            u2.to_csv(UNIVERSE_CSV, index=False)
+            print("[patch][ok] universe patched + enriched by row_id + asset_id preserved.")
 
     # snapshots for patch diff
     try:

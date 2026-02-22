@@ -13,6 +13,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import threading
 
 from alpha_edge.core.market_store import MarketStore
+from alpha_edge import paths
 
 
 @dataclass
@@ -27,11 +28,15 @@ class CacheConfig:
     force: bool = False
     progress_every: int = 100
 
-    # NEW: speed knobs
-    max_workers: int = 8                 # parallelize per-asset reads
-    s3_max_concurrency: int = 8          # cap concurrent S3 pressure (if max_workers > this)
-    strict_window: bool = True           # if True: filter to [start,end] before stats
-    # NOTE: keep dtype float32 by default to reduce memory
+    # speed knobs
+    max_workers: int = 8
+    s3_max_concurrency: int = 8
+    strict_window: bool = True
+
+    # NEW: universe filtering (fixes "assets_discovered > universe")
+    universe_csv: str = (paths.universe_dir() / "universe.csv").as_posix()
+    excluded_csv: str = (paths.universe_dir() / "asset_excluded.csv").as_posix()
+    filter_to_active_universe: bool = True  # set False to build for all discovered assets
 
 
 def _safe_date(s: str | None) -> pd.Timestamp | None:
@@ -68,6 +73,33 @@ def _get_json_s3(store: MarketStore, key: str) -> dict:
         return {}
 
 
+def _load_active_asset_ids_from_universe(
+    *,
+    universe_csv: str,
+    excluded_csv: str | None = None,
+) -> set[str]:
+    """
+    Active assets = universe include=1 minus excluded asset_ids (if present).
+    """
+    u = pd.read_csv(universe_csv)
+    u = u[u.get("include", 1).fillna(1).astype(int) == 1].copy()
+    if "asset_id" not in u.columns:
+        raise RuntimeError("Universe CSV must include 'asset_id' column")
+    active = set(u["asset_id"].astype(str).str.strip().tolist())
+
+    if excluded_csv:
+        try:
+            ex = pd.read_csv(excluded_csv)
+            if "asset_id" in ex.columns:
+                bad = set(ex["asset_id"].astype(str).str.strip().tolist())
+                active -= bad
+        except Exception:
+            # excluded file is optional; ignore read errors
+            pass
+
+    return active
+
+
 def build_returns_wide_cache(cfg: CacheConfig) -> None:
     store = MarketStore(bucket=cfg.bucket)
 
@@ -94,9 +126,8 @@ def build_returns_wide_cache(cfg: CacheConfig) -> None:
             )
             return
 
-    # ---------- discover asset_ids by listing only the partition dirs ----------
-    # returns live under: market/returns_usd/v1/asset_id=.../year=YYYY/part-*.parquet
-    root = store.returns_prefix
+    # ---------- discover asset_ids by listing returns partitions ----------
+    root = store.returns_prefix  # e.g. market/returns_usd/v1
     print("[INFO] returns_root:", root)
     root_prefix = f"{root}/"
 
@@ -104,7 +135,7 @@ def build_returns_wide_cache(cfg: CacheConfig) -> None:
     if not keys:
         raise RuntimeError(f"No objects found under s3://{store.bucket}/{root_prefix}")
 
-    asset_ids = set()
+    asset_ids_all = set()
     for k in keys:
         if "/asset_id=" not in k or "/year=" not in k or not k.endswith(".parquet"):
             continue
@@ -112,24 +143,37 @@ def build_returns_wide_cache(cfg: CacheConfig) -> None:
             after = k.split("/asset_id=", 1)[1]
             aid = after.split("/", 1)[0].strip()
             if aid:
-                asset_ids.add(aid)
+                asset_ids_all.add(aid)
         except Exception:
             continue
 
-    asset_ids = sorted(asset_ids)
-    if not asset_ids:
+    asset_ids_all = sorted(asset_ids_all)
+    if not asset_ids_all:
         raise RuntimeError("Could not discover any asset_id partitions under returns_root.")
 
+    # ---------- optionally filter to current active universe ----------
+    active = None
+    asset_ids = asset_ids_all
+
+    if cfg.filter_to_active_universe:
+        active = _load_active_asset_ids_from_universe(
+            universe_csv=cfg.universe_csv,
+            excluded_csv=cfg.excluded_csv,
+        )
+        asset_ids = sorted(set(asset_ids_all).intersection(active))
+
     print(
-        f"[INFO] assets_discovered={len(asset_ids)} years={years[0]}..{years[-1]} "
-        f"window={start_ts.date()}..{end_ts.date()} workers={cfg.max_workers}"
+        f"[INFO] assets_discovered_all={len(asset_ids_all)} "
+        f"active_from_universe={(len(active) if active is not None else 'NA')} "
+        f"assets_used={len(asset_ids)} "
+        f"years={years[0]}..{years[-1]} window={start_ts.date()}..{end_ts.date()} "
+        f"workers={cfg.max_workers} strict_window={cfg.strict_window}"
     )
 
-    # ---------- fast + scalable wide build ----------
-    # Key optimization vs your old version:
-    #   1) DON'T do wide = wide.join(s) in a loop (quadratic-ish & very slow)
-    #   2) DO build series in parallel, then pd.concat(series_list, axis=1) once
+    if not asset_ids:
+        raise RuntimeError("No assets selected for returns_wide build after filtering (assets_used=0).")
 
+    # ---------- wide build ----------
     s3_sem = threading.Semaphore(int(cfg.s3_max_concurrency))
 
     def _read_one_asset(asset_id: str) -> dict:
@@ -150,7 +194,7 @@ def build_returns_wide_cache(cfg: CacheConfig) -> None:
             if df is None or df.empty:
                 return {"status": "empty", "asset_id": asset_id}
 
-            # normalize dates (same as before, but tight)
+            # normalize dates
             d = pd.to_datetime(df["date"], errors="coerce", utc=True)
             d = d.dt.tz_convert(None).dt.normalize()
 
@@ -164,7 +208,7 @@ def build_returns_wide_cache(cfg: CacheConfig) -> None:
                 if tmp.empty:
                     return {"status": "empty", "asset_id": asset_id}
 
-            # dedupe by date (protect pivot)
+            # dedupe by date
             tmp = tmp.sort_values("date").drop_duplicates(subset=["date"], keep="last")
 
             nobs = int(tmp.shape[0])
@@ -226,12 +270,8 @@ def build_returns_wide_cache(cfg: CacheConfig) -> None:
     if not series_list:
         raise RuntimeError("No assets kept for returns_wide cache after filters.")
 
-    # One-shot concat (MUCH faster than iterative join)
     wide = pd.concat(series_list, axis=1, join="outer")
-
-    # sort index, enforce dtype
-    wide = wide.sort_index()
-    wide = wide.astype(cfg.dtype)
+    wide = wide.sort_index().astype(cfg.dtype)
 
     # write parquet to S3
     bio = io.BytesIO()
@@ -262,6 +302,13 @@ def build_returns_wide_cache(cfg: CacheConfig) -> None:
             "build_strategy": "parallel per-asset read + one-shot concat",
             "max_workers": int(cfg.max_workers),
             "s3_max_concurrency": int(cfg.s3_max_concurrency),
+            "strict_window": bool(cfg.strict_window),
+            "filter_to_active_universe": bool(cfg.filter_to_active_universe),
+            "universe_csv": cfg.universe_csv,
+            "excluded_csv": cfg.excluded_csv,
+            "assets_discovered_all": int(len(asset_ids_all)),
+            "active_from_universe": int(len(active)) if active is not None else None,
+            "assets_used": int(len(asset_ids)),
         },
     }
     _put_json_s3(store, meta_key, meta)

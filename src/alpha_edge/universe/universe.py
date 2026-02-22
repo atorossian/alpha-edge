@@ -69,6 +69,7 @@ FIELDS = [
 _BAD_QUOTETYPES = {"NONE", "MUTUALFUND", "ECNQUOTE"}
 _GOOD_QUOTETYPES = {"EQUITY", "ETF", "ADR"}
 
+
 def _tokenize(s: str) -> set[str]:
     s = (s or "").lower()
     s = re.sub(r"[^a-z0-9]+", " ", s)
@@ -76,12 +77,14 @@ def _tokenize(s: str) -> set[str]:
     toks -= {"sa", "ag", "se", "plc", "inc", "corp", "ltd", "sme", "nv", "spa", "holdings"}
     return toks
 
+
 def name_match_score(expected: str, got: str) -> float:
     a = _tokenize(expected)
     b = _tokenize(got)
     if not a or not b:
         return 0.0
     return len(a & b) / max(1, len(a))
+
 
 def validate_yahoo_meta_for_row(
     meta: dict,
@@ -111,7 +114,6 @@ def validate_yahoo_meta_for_row(
         if qt and qt not in _GOOD_QUOTETYPES:
             return False, f"unexpected_quoteType={qt}", 0.0
 
-    # rough region sanity: if region says Europe but looks US -> reject
     reg = (expected_region or "").lower()
     looks_us = (
         (market == "us_market")
@@ -120,7 +122,7 @@ def validate_yahoo_meta_for_row(
         or ("NASDAQ" in full)
         or ("NYSE" in full)
     )
-    # Mexico sanity: reject US-looking mappings
+
     if (
         "mexico" in reg
         or "bmv" in reg
@@ -131,17 +133,17 @@ def validate_yahoo_meta_for_row(
             return False, "region_mismatch_looks_us_for_mexico", 0.0
 
     if (
-        "brazil" in reg 
-        or "b3" in reg 
-        or "bovespa" in reg 
-        or "sao paulo" in reg 
+        "brazil" in reg
+        or "b3" in reg
+        or "bovespa" in reg
+        or "sao paulo" in reg
         or "são paulo" in reg
     ):
         if looks_us:
             return False, "region_mismatch_looks_us_for_brazil", 0.0
-    
+
     if (
-        "europe" in reg 
+        "europe" in reg
         or "euronext" in reg
         or "cboe europe" in reg
     ):
@@ -167,10 +169,47 @@ def fetch_yahoo_meta(ticker: str) -> dict:
         info = {}
 
     meta = {k: info.get(k) for k in FIELDS}
-
-    # "yahoo_ok" means we got some info back, not that it's the right asset.
     meta["yahoo_ok"] = bool(meta.get("exchange") or meta.get("quoteType") or meta.get("shortName") or meta.get("longName"))
     return meta
+
+
+def _assert_unique_key_or_raise(df: pd.DataFrame, key: str, *, context: str) -> None:
+    """
+    Enrichment MUST NOT deduplicate by itself (it can destroy asset_id integrity).
+    If duplicates exist in key, dump them to audit and raise hard.
+    """
+    if df is None or df.empty:
+        return
+    if key not in df.columns:
+        return
+
+    dup_mask = df[key].duplicated(keep=False)
+    if not bool(dup_mask.any()):
+        return
+
+    dup = df.loc[dup_mask].copy()
+
+    audit_path = None
+    try:
+        audit_dir = paths.local_outputs_dir() / "universe_audit"
+        audit_dir.mkdir(parents=True, exist_ok=True)
+        audit_path = audit_dir / f"enrich_duplicates_{context}_{key}.csv"
+        dup.to_csv(audit_path, index=False)
+    except Exception:
+        audit_path = None
+
+    cols = [key] + [c for c in ["ticker", "yahoo_ticker", "asset_id", "include"] if c in dup.columns]
+    sample = dup[cols].head(12)
+
+    msg = (
+        f"[enrich] Duplicate key detected: {key} (context={context}). "
+        f"rows_involved={len(dup)} unique_keys_duplicated={dup[key].nunique()}."
+    )
+    if audit_path is not None:
+        msg += f" Audit written: {audit_path}."
+    msg += "\nSample:\n" + sample.to_string(index=False)
+
+    raise ValueError(msg)
 
 
 def enrich_universe_csv(
@@ -180,22 +219,26 @@ def enrich_universe_csv(
     *,
     ticker_col: str = "ticker",   # internal id (join key)
     yahoo_col: str = "symbol",    # provider symbol to query
-    tickers_subset: list[str] | set[str] | None = None,   # NEW
+    tickers_subset: list[str] | set[str] | None = None,
 ) -> pd.DataFrame:
+    """
+    Enriches universe.csv with Yahoo meta columns.
 
-
+    CONTRACT:
+      - NEVER deduplicates or drops rows by ticker_col.
+      - If ticker_col has duplicates, raises hard (and writes audit).
+    """
     df = pd.read_csv(universe_csv)
 
     if ticker_col not in df.columns:
         raise ValueError(f"Missing ticker_col={ticker_col!r} in {universe_csv}")
 
-    # normalize tickers in-file (join key stability)
-    df[ticker_col] = df[ticker_col].astype(str).str.strip().str.upper()
+    df[ticker_col] = df[ticker_col].astype(str).fillna("").str.strip().str.upper()
+    _assert_unique_key_or_raise(df, ticker_col, context="input")
 
     if yahoo_col not in df.columns:
         df[yahoo_col] = df[ticker_col]
 
-    # --- filter to subset if provided ---
     if tickers_subset is not None:
         subset = {str(t).strip().upper() for t in tickers_subset if str(t).strip() and str(t).strip().lower() != "nan"}
         df_sub = df[df[ticker_col].isin(subset)].copy()
@@ -206,7 +249,6 @@ def enrich_universe_csv(
     for _, row in df_sub.iterrows():
         internal = str(row[ticker_col]).strip().upper()
         yahoo_sym = str(row.get(yahoo_col, "")).strip()
-
         if yahoo_sym == "" or yahoo_sym.lower() == "nan":
             yahoo_sym = internal
 
@@ -227,22 +269,23 @@ def enrich_universe_csv(
         time.sleep(float(sleep_s))
 
     meta_df = pd.DataFrame(metas)
-
-    # If subset is empty, still save the file unchanged (no surprises)
     if meta_df.empty:
         Path(out_csv).parent.mkdir(parents=True, exist_ok=True)
         df.to_csv(out_csv, index=False)
         print(f"\nSaved (no enrichment performed): {out_csv}")
         return df
 
+    meta_df[ticker_col] = meta_df[ticker_col].astype(str).fillna("").str.strip().str.upper()
+    _assert_unique_key_or_raise(meta_df, ticker_col, context="meta_df")
     meta_df = meta_df.set_index(ticker_col)
 
-    # --- idempotent enrichment: drop existing meta columns before join ---
     overlap = [c for c in meta_df.columns if c in df.columns]
     if overlap:
         df = df.drop(columns=overlap)
 
     out = df.set_index(ticker_col).join(meta_df, how="left").reset_index()
+    _assert_unique_key_or_raise(out, ticker_col, context="output")
+
     Path(out_csv).parent.mkdir(parents=True, exist_ok=True)
     out.to_csv(out_csv, index=False)
     print(f"\nSaved: {out_csv}")
@@ -260,12 +303,12 @@ EU_SUFFIXES = [
     ".SA", ".MX", ".HE",
 ]
 
-# Prefer these venues when multiple candidates validate equally well
 PREF_SUFFIX_ORDER = [
     ".DE", ".MC", ".PA", ".MI", ".AS", ".L", ".SW",
     ".BR", ".ST",
     ".SA", ".MX",
-    ".MU", ".F", ".DU", ".HM",".HE",
+    ".MU", ".F", ".DU", ".HM",
+    ".HE",
     "",
 ]
 
@@ -280,8 +323,8 @@ def _venue_rank(sym: str) -> int:
             return i
     return 999
 
+
 REGION_SUFFIX_HINTS = {
-    # Quantfury exchange labels -> likely Yahoo suffixes
     "cboe europe": [".DE", ".MC", ".PA", ".MI", ".AS", ".L", ".SW", ".BR", ".ST", ".MU", ".F", ".DU", ".HM"],
     "spain": [".MC"],
     "madrid": [".MC"],
@@ -320,6 +363,7 @@ REGION_SUFFIX_HINTS = {
     "nasdaq helsinki": [".HE"],
 }
 
+
 def _has_price_history(ticker: str) -> bool:
     try:
         df = yf.download(ticker, period="10d", progress=False, auto_adjust=False, threads=False)
@@ -327,26 +371,24 @@ def _has_price_history(ticker: str) -> bool:
     except Exception:
         return False
 
+
 def _candidate_symbols(raw: str, region: str | None) -> list[str]:
     raw = str(raw).strip().upper()
     reg = (region or "").strip().lower()
 
     candidates: list[str] = [raw]
 
-    # region hints first
     for key, sufs in REGION_SUFFIX_HINTS.items():
         if key in reg:
             for suf in sufs:
                 candidates.append(raw + suf)
-    # Brazil numeric common pattern: ABCD3, ABCD4 -> try .SA early
+
     if re.match(r"^[A-Z]{4}\d{1,2}$", raw):
         candidates.append(raw + ".SA")
 
-    # fallback EU list
     for suf in EU_SUFFIXES:
         candidates.append(raw + suf)
 
-    # de-dupe preserving order
     seen = set()
     out = []
     for c in candidates:
@@ -354,6 +396,7 @@ def _candidate_symbols(raw: str, region: str | None) -> list[str]:
             out.append(c)
             seen.add(c)
     return out
+
 
 def resolve_ticker_strict(
     raw: str,
@@ -363,10 +406,6 @@ def resolve_ticker_strict(
     asset_class: str,
     role: str,
 ) -> tuple[Optional[str], dict]:
-    """
-    Tries candidates and returns (best_symbol, debug_dict).
-    Accepts ONLY validated matches (name + quoteType + region sanity + price history).
-    """
     best = None
     best_score = -1.0
     best_rank = 999
@@ -376,7 +415,6 @@ def resolve_ticker_strict(
     for cand in _candidate_symbols(raw, expected_region):
         meta = fetch_yahoo_meta(cand)
 
-        # validate
         ok, reason, score = validate_yahoo_meta_for_row(
             meta,
             expected_name=expected_name,
@@ -385,13 +423,11 @@ def resolve_ticker_strict(
             role=role,
         )
 
-        # must have price history too
         px_ok = _has_price_history(cand)
         if not px_ok:
             ok = False
             reason = f"{reason}; no_price_history"
 
-        # keep track of best ok candidate
         if ok:
             r = _venue_rank(cand)
             if (score > best_score) or (abs(score - best_score) < 1e-12 and r < best_rank):
@@ -401,7 +437,6 @@ def resolve_ticker_strict(
                 best_meta = meta
                 best_reason = reason
 
-            # early stop if very strong name match
             if score >= 0.75:
                 break
 
@@ -415,79 +450,3 @@ def resolve_ticker_strict(
         "best_meta_country": None if best_meta is None else best_meta.get("country"),
     }
     return best, debug
-
-
-def enrich_universe_csv_patch(
-    *,
-    universe_csv: str,
-    out_csv: str,
-    tickers_subset: list[str],
-    sleep_s: float = 0.25,
-    ticker_col: str = "ticker",
-    yahoo_col: str = "yahoo_ticker",
-) -> None:
-    """
-    Patch-enrich ONLY a subset of tickers by:
-      - extracting subset rows to a temp CSV
-      - calling existing enrich_universe_csv() on the temp CSV
-      - merging enriched columns back into the full universe CSV
-
-    This avoids rewriting your enrichment logic.
-    """
-
-    tickers_subset = [str(t).strip().upper() for t in (tickers_subset or []) if str(t).strip()]
-    if not tickers_subset:
-        return
-
-    base = pd.read_csv(universe_csv)
-    if base.empty:
-        return
-
-    # normalize
-    base[ticker_col] = base.get(ticker_col, "").astype(str).str.strip().str.upper()
-
-    sub = base[base[ticker_col].isin(tickers_subset)].copy()
-    if sub.empty:
-        return
-
-    tmp_dir = Path(paths.universe_dir() / ".tmp")
-    tmp_dir.mkdir(parents=True, exist_ok=True)
-    tmp_in = str(tmp_dir / "universe_patch_in.csv")
-    tmp_out = str(tmp_dir / "universe_patch_out.csv")
-
-    sub.to_csv(tmp_in, index=False)
-
-    # run your existing enrichment on the subset only
-    enrich_universe_csv(
-        universe_csv=tmp_in,
-        out_csv=tmp_out,
-        sleep_s=sleep_s,
-        ticker_col=ticker_col,
-        yahoo_col=yahoo_col,
-    )
-
-    enriched = pd.read_csv(tmp_out)
-    if enriched.empty:
-        return
-
-    enriched[ticker_col] = enriched.get(ticker_col, "").astype(str).str.strip().str.upper()
-
-    # merge back: for tickers_subset, replace columns with enriched values
-    # Keep base schema stable: update all columns present in enriched except ticker_col
-    cols_to_update = [c for c in enriched.columns if c != ticker_col]
-    enriched_map = enriched.set_index(ticker_col)
-
-    out = base.copy()
-    out = out.set_index(ticker_col)
-
-    for t in tickers_subset:
-        if t not in out.index:
-            continue
-        if t not in enriched_map.index:
-            continue
-        for c in cols_to_update:
-            out.at[t, c] = enriched_map.at[t, c]
-
-    out = out.reset_index()
-    out.to_csv(out_csv, index=False)
-

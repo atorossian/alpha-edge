@@ -265,13 +265,13 @@ QuantityUnit = Literal["shares", "contracts", "coins"]  # adjust as you use them
 class Trade:
     trade_id: str
     as_of: str                 # YYYY-MM-DD
-    ts_utc: str                # ISO string (when recorded)
+    ts_utc: str 
     ticker: str
     side: TradeSide
     quantity: float
     price: float               # REQUIRED
     currency: str = "USD"
-
+    asset_id: Optional[str] = None   
     # NEW: Quantfury semantics (persist to JSON)
     action_tag: Optional[TradeAction] = None          # open/close/add/reduce
     quantity_unit: Optional[QuantityUnit] = None      # shares/contracts/coins

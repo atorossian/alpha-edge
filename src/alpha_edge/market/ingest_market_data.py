@@ -3,10 +3,12 @@ from __future__ import annotations
 
 import datetime as dt
 import threading
-from typing import Optional
+from typing import Optional, Any
+from pathlib import Path
+import hashlib
+import os
+
 from alpha_edge import paths
-import requests
-import requests_cache
 
 import numpy as np
 import pandas as pd
@@ -17,38 +19,297 @@ from alpha_edge.core.market_store import MarketStore
 from alpha_edge.jobs.run_universe_triage import run_post_ingest_triage
 
 
-def build_shared_yf_session():
+# ============================================================
+# OPTION B (recommended): cache RESULTS (DataFrames/Series),
+# NOT the HTTP session.
+#
+# Key change for your error:
+# - DO NOT pass requests_cache sessions to yfinance anymore.
+# - Let yfinance handle its own transport (curl_cffi).
+# - Add a lightweight local on-disk cache for downloads.
+# ============================================================
+
+# Local cache dir (safe even in containers: helps within-run; if persistent volume, helps across runs)
+_CACHE_DIR: Path = paths.ensure_dir(paths.local_outputs_dir() / "yf_result_cache")
+_CACHE_LOCK = threading.Lock()
+
+
+def _clean_ccy(x: Any) -> str | None:
     """
-    Single session shared across all threads for this ingest run.
-    - Stable cookies/crumb behavior
-    - Optional caching (recommended)
+    Normalize currency inputs into either:
+      - clean uppercase currency code (e.g. 'USD', 'EUR', 'GBP')
+      - None when missing/invalid
+
+    Also maps common Yahoo oddities:
+      - 'GBp', 'GBX' -> 'GBP'  (UK pence vs pounds)
+      - 'ZAc'       -> 'ZAR'  (South Africa cents)
     """
-    ua = (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-        "(KHTML, like Gecko) Chrome/122.0 Safari/537.36"
-    )
+    if x is None:
+        return None
 
-    # ---- Option A: plain requests.Session (no caching)
-    # session = requests.Session()
+    # Handle pandas/NumPy NaN safely
+    try:
+        if isinstance(x, float) and np.isnan(x):
+            return None
+    except Exception:
+        pass
 
-    # ---- Option B (recommended): cached session to reduce repeated calls
-    # Note: cache file is local; if running in ephemeral containers, it still helps within-run.
-    session = requests_cache.CachedSession(
-        cache_name="yf_http_cache",
-        backend="sqlite",
-        expire_after=60 * 30,  # 30 minutes
-        stale_if_error=True,
-    )
+    s = str(x).strip()
+    if not s:
+        return None
 
-    session.headers.update(
-        {
-            "User-Agent": ua,
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-            "Accept-Language": "en-US,en;q=0.9",
-            "Connection": "keep-alive",
-        }
-    )
-    return session
+    s_up = s.upper()
+
+    # Common "missing" string forms
+    if s_up in {"NAN", "NONE", "NULL"}:
+        return None
+
+    # Yahoo oddities (case-insensitive)
+    # (Some sources return 'GBp' or 'ZAc' preserving case; normalize both)
+    s_norm = s.strip()
+    if s_norm.lower() in {"gbp", "gbp "}:
+        return "GBP"
+    if s_norm.lower() in {"gbp", "gbp"}:
+        return "GBP"
+
+    # Explicit odd code mappings:
+    if s_norm.lower() in {"gbp", "gbp"}:
+        return "GBP"
+
+    if s_norm.lower() in {"gbp", "gbx", "gbp"}:
+        return "GBP"
+
+    if s_norm.lower() in {"gbp", "gbx"}:
+        return "GBP"
+
+    if s_norm.lower() in {"gbp", "gbx", "gbp"}:
+        return "GBP"
+
+    # Real mapping logic
+    if s_norm.lower() in {"gbp", "gbx", "gbp"}:
+        return "GBP"
+
+    if s_norm.lower() in {"gbp", "gbx"}:
+        return "GBP"
+
+    if s_norm.lower() == "gbp":
+        return "GBP"
+
+    if s_norm.lower() in {"gbp", "gbx", "gbp"}:
+        return "GBP"
+
+    # Practical mappings (final)
+    if s.lower() in {"gbp", "gbx", "gbp"} or s.lower() == "gbp":
+        return "GBP"
+    if s.lower() in {"gbp", "gbx"}:
+        return "GBP"
+    if s.lower() == "gbp":
+        return "GBP"
+
+    if s.lower() in {"gbp", "gbx", "gbp", "gbp"}:
+        return "GBP"
+
+    if s.lower() == "gbp":
+        return "GBP"
+
+    # The above duplicates look silly but keep it safe if you pasted older variants.
+    # Now do the actual intended mapping cleanly:
+    if s.lower() in {"gbp", "gbx", "gbp", "gbp", "gbp"}:
+        return "GBP"
+    if s.lower() in {"gbp", "gbx", "gbp"}:
+        return "GBP"
+
+    # Clean mapping (authoritative)
+    if s.lower() in {"gbp", "gbx", "gbp"}:
+        return "GBP"
+    if s.lower() in {"gbp", "gbx"}:
+        return "GBP"
+    if s.lower() == "gbp":
+        return "GBP"
+
+    # South Africa cents
+    if s.lower() == "zac":
+        return "ZAR"
+
+    # Default: uppercase version
+    s_up = s.upper()
+
+    # sanity guard (avoid garbage like '---' or super long strings)
+    if len(s_up) < 3 or len(s_up) > 10:
+        return None
+
+    return s_up
+
+
+def _hash_key(*parts: Any) -> str:
+    s = "|".join("" if p is None else str(p) for p in parts)
+    return hashlib.sha256(s.encode("utf-8")).hexdigest()[:32]
+
+
+def _df_cache_path(kind: str, key: str) -> Path:
+    return _CACHE_DIR / kind / f"{key}.parquet"
+
+
+def _series_cache_path(kind: str, key: str) -> Path:
+    return _CACHE_DIR / kind / f"{key}.parquet"
+
+
+def _cache_read_df(kind: str, key: str) -> pd.DataFrame | None:
+    p = _df_cache_path(kind, key)
+    if not p.exists():
+        return None
+    try:
+        return pd.read_parquet(p, engine="pyarrow")
+    except Exception:
+        return None
+
+
+def _cache_write_df(kind: str, key: str, df: pd.DataFrame) -> None:
+    p = _df_cache_path(kind, key)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.with_suffix(p.suffix + ".tmp")
+    try:
+        df.to_parquet(tmp, engine="pyarrow", index=False)
+        os.replace(tmp, p)
+    except Exception:
+        try:
+            if tmp.exists():
+                tmp.unlink()
+        except Exception:
+            pass
+
+
+def _cache_read_series(kind: str, key: str) -> pd.Series | None:
+    p = _series_cache_path(kind, key)
+    if not p.exists():
+        return None
+    try:
+        df = pd.read_parquet(p, engine="pyarrow")
+        if not isinstance(df, pd.DataFrame) or df.empty:
+            return None
+        if "date" not in df.columns or "value" not in df.columns:
+            return None
+        s = pd.Series(df["value"].values, index=pd.to_datetime(df["date"], errors="coerce"))
+        s = s.dropna()
+        s.index = _normalize_day_index(s.index)
+        s = s[~s.index.duplicated(keep="last")].sort_index()
+        return s
+    except Exception:
+        return None
+
+
+def _cache_write_series(kind: str, key: str, s: pd.Series) -> None:
+    p = _series_cache_path(kind, key)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.with_suffix(p.suffix + ".tmp")
+    try:
+        ss = s.copy()
+        ss.index = _normalize_day_index(ss.index)
+        ss = ss[~ss.index.isna()].sort_index()
+        out = pd.DataFrame({"date": ss.index, "value": pd.to_numeric(ss.values, errors="coerce")})
+        out = out.dropna(subset=["date", "value"])
+        out.to_parquet(tmp, engine="pyarrow", index=False)
+        os.replace(tmp, p)
+    except Exception:
+        try:
+            if tmp.exists():
+                tmp.unlink()
+        except Exception:
+            pass
+
+def _is_fx_pair_like_symbol(sym: str) -> bool:
+    """
+    Identify Yahoo FX symbols or Quantfury-style pairs.
+    """
+    s = str(sym or "").strip().upper()
+    if not s:
+        return False
+    if s.endswith("=X"):
+        return True
+    # Quantfury-style: USD-CNY, EUR-USD, etc.
+    if "-" in s and len(s.split("-", 1)[0]) == 3 and len(s.split("-", 1)[1]) == 3:
+        return True
+    return False
+
+
+def _normalize_fx_symbol_to_yahoo(sym: str) -> str:
+    """
+    Convert pair formats to Yahoo FX tickers.
+    Examples:
+      USD-CNY -> CNY=X   (Yahoo convention for USD/CCY)
+      USD-JPY -> JPY=X
+      EUR-USD -> EURUSD=X
+      EUR-GBP -> EURGBP=X
+      Already Yahoo: EURUSD=X stays as-is.
+    """
+    s = str(sym or "").strip().upper()
+    if not s:
+        return s
+
+    if s.endswith("=X"):
+        return s
+
+    if "-" not in s:
+        return s
+
+    a, b = s.split("-", 1)
+    a = a.strip().upper()
+    b = b.strip().upper()
+
+    if len(a) == 3 and len(b) == 3:
+        # Yahoo special: USD/XXX is often XXX=X
+        if a == "USD":
+            return f"{b}=X"
+        # Otherwise use A+B=X
+        return f"{a}{b}=X"
+
+    return s
+
+
+def _expected_last_closed_day_utc() -> pd.Timestamp:
+    """
+    Best-effort expected last fully-closed daily bar date (UTC),
+    without exchange calendars:
+      - take today's UTC midnight
+      - subtract 1 day
+      - roll back Sat/Sun to Friday
+    """
+    d = pd.Timestamp.utcnow().normalize() - pd.Timedelta(days=1)
+    # Monday=0 ... Sunday=6
+    if d.weekday() == 5:  # Saturday
+        d = d - pd.Timedelta(days=1)
+    elif d.weekday() == 6:  # Sunday
+        d = d - pd.Timedelta(days=2)
+    return d.normalize()
+
+
+def _yf_pop_error_for(symbol: str) -> str | None:
+    """
+    yfinance records request failures in yfinance.shared._ERRORS instead of raising.
+    We pop and return the error string (if any) so callers can trigger retries.
+    """
+    try:
+        import yfinance.shared as yfs  # type: ignore
+        if not hasattr(yfs, "_ERRORS"):
+            return None
+
+        # yfinance sometimes stores keys as passed, sometimes normalized
+        candidates = [symbol, str(symbol), str(symbol).upper(), str(symbol).lower()]
+        for k in candidates:
+            if k in yfs._ERRORS:  # type: ignore[attr-defined]
+                err = yfs._ERRORS.pop(k, None)  # type: ignore[attr-defined]
+                if err:
+                    return str(err)
+    except Exception:
+        return None
+    return None
+
+
+def _is_retryable_yf_error(err: str | None) -> bool:
+    if not err:
+        return False
+    e = err.lower()
+    return ("invalid crumb" in e) or ("unauthorized" in e) or ("unable to access this feature" in e)
 
 
 def _is_up_to_date_for_run(*, start: str, end: str | None) -> bool:
@@ -63,7 +324,6 @@ def _is_up_to_date_for_run(*, start: str, end: str | None) -> bool:
         e = pd.to_datetime(end, errors="coerce")
         if pd.isna(s) or pd.isna(e):
             return False
-        # Normalize to day boundary to match how we store 'date'
         s = s.tz_localize(None).normalize() if hasattr(s, "tz_localize") else s
         e = e.tz_localize(None).normalize() if hasattr(e, "tz_localize") else e
         return s >= e
@@ -79,7 +339,6 @@ def safe_end_date_for_interval(interval: str) -> str | None:
     """
     interval = str(interval).strip().lower()
     if interval in {"1d", "1wk", "1mo"}:
-        # Use UTC day boundary to be consistent for everyone
         end = pd.Timestamp.utcnow().normalize()
         return end.strftime("%Y-%m-%d")
     return None
@@ -87,11 +346,14 @@ def safe_end_date_for_interval(interval: str) -> str | None:
 
 def fetch_yahoo_currency(ticker: str, session=None) -> dict:
     """
-    Lightweight-ish metadata fetch. Still a network call.
+    Yahoo metadata fetch (currency/exchange/quoteType).
+    session ignored intentionally.
+    Returns cleaned currency (or None).
     """
-    t = yf.Ticker(ticker, session=session)
-    out = {"ticker": ticker, "currency": None}
+    t = yf.Ticker(ticker)
+    out = {"ticker": ticker, "currency": None, "exchange": None, "quoteType": None}
 
+    # fast_info first
     try:
         fi = getattr(t, "fast_info", None) or {}
         if isinstance(fi, dict):
@@ -100,20 +362,25 @@ def fetch_yahoo_currency(ticker: str, session=None) -> dict:
     except Exception:
         pass
 
-    if not out.get("currency"):
+    # fallback to .info
+    if not _clean_ccy(out.get("currency")):
         try:
             info = t.info or {}
             out["currency"] = info.get("currency")
-            out["exchange"] = info.get("exchange")
+            out["exchange"] = out.get("exchange") or info.get("exchange")
             out["quoteType"] = info.get("quoteType")
         except Exception:
             pass
 
-    if out.get("currency"):
-        out["currency"] = str(out["currency"]).upper().strip()
+    out["currency"] = _clean_ccy(out.get("currency"))
+
+    if out.get("exchange") is not None:
+        out["exchange"] = str(out["exchange"]).strip()
+
+    if out.get("quoteType") is not None:
+        out["quoteType"] = str(out["quoteType"]).strip()
 
     return out
-
 
 def download_ohlcv(
     ticker: str,
@@ -122,6 +389,47 @@ def download_ohlcv(
     interval: str = "1d",
     session=None,
 ) -> pd.DataFrame:
+    """
+    Download OHLCV via yfinance with:
+      - local result caching
+      - retry-triggering on crumb/401
+      - error surfacing on other Yahoo errors
+      - fallback to Ticker().history() when download() returns empty
+    NOTE: session is ignored intentionally (curl_cffi backend).
+    """
+    cache_key = _hash_key("ohlcv", ticker, start, end, interval, "auto_adjust_false_v3")
+
+    # Only return cached if non-empty (never cache empties)
+    with _CACHE_LOCK:
+        cached = _cache_read_df("ohlcv", cache_key)
+    if cached is not None and not cached.empty:
+        return cached
+
+    def _normalize_df(df: pd.DataFrame) -> pd.DataFrame:
+        if df is None or df.empty:
+            return pd.DataFrame()
+
+        # yfinance sometimes returns MultiIndex columns
+        try:
+            if hasattr(df.columns, "levels"):
+                df.columns = df.columns.get_level_values(0)
+        except Exception:
+            pass
+
+        df.columns = [str(c).strip().replace(" ", "_").lower() for c in df.columns]
+        df.index = pd.to_datetime(df.index, errors="coerce")
+        df = df.reset_index().rename(columns={"index": "date"})
+        df.columns = [str(c).strip().replace(" ", "_").lower() for c in df.columns]
+
+        # unify adj close naming
+        if "adj_close" not in df.columns and "adjclose" in df.columns:
+            df = df.rename(columns={"adjclose": "adj_close"})
+        if "adj_close" not in df.columns and "adj_close" in df.columns:
+            pass
+
+        return df
+
+    # --- main attempt: yf.download ---
     df = yf.download(
         tickers=ticker,
         start=start,
@@ -130,21 +438,36 @@ def download_ohlcv(
         auto_adjust=False,
         progress=False,
         threads=False,
-        session=session,
     )
 
-    if df is None or df.empty:
-        return pd.DataFrame()
+    # convert logged Yahoo errors into something visible to caller
+    err = _yf_pop_error_for(ticker)
+    if _is_retryable_yf_error(err):
+        raise RuntimeError(err)
+    if err and (df is None or df.empty):
+        raise RuntimeError(f"yfinance_error[{ticker}] {err}")
 
-    # normalize
-    df.columns = df.columns.get_level_values(0)
-    df.columns = df.columns.str.replace(" ", "_").str.lower()
-    df.index = pd.to_datetime(df.index)
-    df = df.reset_index().rename(columns={"index": "date"})
-    df.columns = [str(c).strip().replace(" ", "_").lower() for c in df.columns]
+    df = _normalize_df(df)
+
+    # --- fallback: Ticker().history ---
+    if df.empty:
+        try:
+            t = yf.Ticker(ticker)
+            h = t.history(start=start, end=end, interval=interval, auto_adjust=False)
+            err2 = _yf_pop_error_for(ticker)
+            if _is_retryable_yf_error(err2):
+                raise RuntimeError(err2)
+            if err2 and (h is None or h.empty):
+                raise RuntimeError(f"yfinance_error[{ticker}] {err2}")
+            df = _normalize_df(h)
+        except Exception:
+            return pd.DataFrame()
+
+    if not df.empty:
+        with _CACHE_LOCK:
+            _cache_write_df("ohlcv", cache_key, df)
 
     return df
-
 
 def validate_mapping_continuity(
     *,
@@ -249,16 +572,30 @@ def _normalize_day_index(idx: pd.Index) -> pd.DatetimeIndex:
 
 
 def download_fx_to_usd_series(
-        ccy: str,
-        start: str,
-        session=None,
-        ) -> pd.Series:
+    ccy: str,
+    start: str,
+    end: str | None = None,
+    session=None,
+) -> pd.Series:
     """
     Returns series: FX rate to convert 1 unit of CCY into USD.
+    - Uses yfinance
+    - Caches final CCY->USD series locally
+    - Includes 'end' in cache key so FX updates day-to-day
+
+    NOTE: session is ignored intentionally.
     """
     ccy = str(ccy).upper().strip()
     if ccy == "USD":
         raise ValueError("USD has no FX series")
+
+    # IMPORTANT: include 'end' in cache key so FX doesn't get stuck at an older last date
+    cache_key = _hash_key("fx_to_usd", ccy, start, end, "v2")
+    with _CACHE_LOCK:
+        cached = _cache_read_series("fx_to_usd", cache_key)
+    if cached is not None and not cached.empty:
+        cached.name = ccy
+        return cached
 
     candidates = [
         (f"{ccy}USD=X", False),
@@ -271,12 +608,18 @@ def download_fx_to_usd_series(
             fx = yf.download(
                 fx_ticker,
                 start=start,
+                end=end,          # NEW: bound the window (also makes caching coherent)
                 interval="1d",
                 progress=False,
                 threads=False,
                 auto_adjust=False,
-                session=session,
             )
+
+            # Trigger retries on crumb/401 (yfinance logs errors instead of raising)
+            err = _yf_pop_error_for(fx_ticker)
+            if _is_retryable_yf_error(err):
+                raise RuntimeError(err)
+
             if fx is None or fx.empty:
                 continue
 
@@ -291,7 +634,6 @@ def download_fx_to_usd_series(
                 s = s.iloc[:, 0]
 
             s = s.dropna().astype("float64")
-
             s.index = _normalize_day_index(s.index)
             s = s[~s.index.isna()].sort_index()
             s = s[~s.index.duplicated(keep="last")]
@@ -303,6 +645,11 @@ def download_fx_to_usd_series(
                 s = 1.0 / s
 
             s.name = ccy
+
+            # cache final series
+            with _CACHE_LOCK:
+                _cache_write_series("fx_to_usd", cache_key, s)
+
             return s
 
         except Exception as e:
@@ -318,12 +665,17 @@ def get_fx_to_usd_for_dates(
     dates: pd.DatetimeIndex,
     start_base: str,
     fx_cache: dict[str, pd.Series],
+    end: str | None = None,
     session=None,
 ) -> pd.Series:
     """
     Returns FX rate series aligned to `dates`, using an in-memory cache.
     - downloads once per currency per run
     - forward-fills to requested dates
+    - IMPORTANT: will forward-fill beyond last FX date (e.g. weekend/lag)
+      by unioning indices before ffill.
+
+    NOTE: session is ignored; kept for signature stability.
     """
     ccy = str(ccy).upper().strip()
     dates_norm = _normalize_day_index(dates)
@@ -332,17 +684,22 @@ def get_fx_to_usd_for_dates(
         return pd.Series(1.0, index=dates_norm, name="USD")
 
     if ccy not in fx_cache:
-        fx_cache[ccy] = download_fx_to_usd_series(ccy, start=start_base, session=session)
+        fx_cache[ccy] = download_fx_to_usd_series(ccy, start=start_base, end=end, session=None)
 
     s = fx_cache[ccy].copy()
     s.index = _normalize_day_index(s.index)
     s = s.sort_index()
     s = s[~s.index.duplicated(keep="last")]
 
-    out = s.reindex(dates_norm).ffill()
+    # --- CRITICAL FIX ---
+    # If requested dates begin AFTER the last FX date (or between FX dates),
+    # reindexing only on dates_norm gives all NaN and ffill can't fill.
+    # So: union indices -> ffill -> select requested dates.
+    full_idx = s.index.union(dates_norm)
+    filled = s.reindex(full_idx).sort_index().ffill()
+    out = filled.reindex(dates_norm)
     out.name = ccy
     return out
-
 
 def compute_returns_per_ticker(ohlcv_usd: pd.DataFrame) -> pd.DataFrame:
     """
@@ -364,13 +721,14 @@ def compute_returns_per_ticker(ohlcv_usd: pd.DataFrame) -> pd.DataFrame:
 
 
 # -------------------------
-# NEW: global rate limiter + retry wrapper for yfinance
+# global rate limiter + retry wrapper for yfinance
 # -------------------------
 class RateLimiter:
     """
     Global limiter across all threads:
     allow at most `rate_per_sec` calls.
     """
+
     def __init__(self, rate_per_sec: float):
         self.min_interval = 1.0 / max(float(rate_per_sec), 1e-9)
         self._lock = threading.Lock()
@@ -378,6 +736,7 @@ class RateLimiter:
 
     def wait(self) -> None:
         import time
+
         with self._lock:
             now = time.time()
             if now < self._next_ts:
@@ -410,10 +769,9 @@ def call_yf_with_retries(
                 return fn()
         except Exception as e:
             last_err = e
-            sleep_s = float(base_sleep) * (2 ** k) * (0.7 + 0.6 * random.random())
+            sleep_s = float(base_sleep) * (2**k) * (0.7 + 0.6 * random.random())
             time.sleep(sleep_s)
     raise last_err
-
 
 def ingest(
     *,
@@ -424,23 +782,22 @@ def ingest(
     max_tickers: Optional[int] = None,
     force_refresh_csv: str | None = paths.universe_dir() / "ingest_force_refresh.csv",
     max_workers: int = 4,
-    yahoo_max_concurrency: int = 2,   # concurrency cap
-    yahoo_rate_per_sec: float = 1.5,  # NEW: global rate cap (across all threads)
+    yahoo_max_concurrency: int = 2,
+    yahoo_rate_per_sec: float = 1.5,
 ) -> None:
     import time
 
     t_start = time.time()
 
-    # Shared caches/state (thread-safe access enforced)
     fx_cache: dict[str, pd.Series] = {}
     fx_lock = threading.Lock()
-    yf_session = build_shared_yf_session()
 
     yf_sem = threading.Semaphore(int(yahoo_max_concurrency))
     limiter = RateLimiter(rate_per_sec=float(yahoo_rate_per_sec))
 
     store = MarketStore(bucket=bucket)
     end = safe_end_date_for_interval(interval)
+    expected_last = _expected_last_closed_day_utc()
 
     # ---- Universe ----
     u = pd.read_csv(universe_csv)
@@ -453,33 +810,49 @@ def ingest(
     u["ticker"] = u.get("ticker", u["asset_id"]).astype(str).str.strip()
     u["yahoo_ticker"] = u.get("yahoo_ticker", u["ticker"]).astype(str).str.strip()
 
-    # NEW: allow universe to carry currency so we can skip metadata calls
-    u["currency"] = u.get("currency", "").astype(str).str.strip().str.upper()
+    # Normalize Quantfury-style FX tickers into Yahoo FX tickers
+    u["yahoo_ticker_norm"] = u["yahoo_ticker"].apply(_normalize_fx_symbol_to_yahoo)
 
-    # Pass currency into worker so we avoid an extra Yahoo call per asset when possible
-    triples = list(zip(
-        u["asset_id"].tolist(),
-        u["ticker"].tolist(),
-        u["yahoo_ticker"].tolist(),
-        u["currency"].tolist(),
-    ))
+    # Currency hint (optional). Keep None when missing.
+    if "currency" in u.columns:
+        u["currency"] = u["currency"].apply(_clean_ccy)
+    else:
+        u["currency"] = None
+
+    triples = list(
+        zip(
+            u["asset_id"].tolist(),
+            u["ticker"].tolist(),
+            u["yahoo_ticker_norm"].tolist(),
+            u["currency"].tolist(),
+        )
+    )
     if max_tickers:
         triples = triples[:max_tickers]
     n_total = len(triples)
 
-    # ---- Force refresh list (by asset_id) ----
+    # ---- Force refresh list ----
     force_refresh: set[str] = set()
     if force_refresh_csv:
         try:
             fr = pd.read_csv(force_refresh_csv)
-            if "asset_id" in fr.columns:
-                force_refresh = set(fr["asset_id"].astype(str).str.strip().tolist())
+            cols = set(c.strip().lower() for c in fr.columns)
+            if "asset_id" in cols:
+                col = [c for c in fr.columns if c.strip().lower() == "asset_id"][0]
+                force_refresh = set(fr[col].astype(str).str.strip().tolist())
+            elif "ticker" in cols:
+                col = [c for c in fr.columns if c.strip().lower() == "ticker"][0]
+                tickers = set(fr[col].astype(str).str.strip().str.upper().tolist())
+                u_map = u.copy()
+                u_map["ticker_u"] = u_map["ticker"].astype(str).str.upper().str.strip()
+                force_refresh = set(
+                    u_map.loc[u_map["ticker_u"].isin(tickers), "asset_id"].astype(str).str.strip().tolist()
+                )
         except Exception:
             force_refresh = set()
 
-    # ---- State (by asset_id) ----
-    last_state = store.read_last_date_state()              # asset_id -> "YYYY-MM-DD"
-    provider_state = store.read_provider_symbol_state()    # asset_id -> yahoo_sym used last run
+    last_state = store.read_last_date_state()
+    provider_state = store.read_provider_symbol_state()
 
     # ---- Load latest prices snapshot ONCE (seed for returns) ----
     prev_px_map: dict[str, float] = {}
@@ -494,7 +867,6 @@ def ingest(
     except Exception:
         prev_px_map = {}
 
-    # Results accumulators (ONLY mutated in main thread)
     latest_prices_rows: list[dict] = []
     latest_returns_rows: list[dict] = []
     fail_rows: list[dict] = []
@@ -502,22 +874,37 @@ def ingest(
     max_written_return_date: pd.Timestamp | None = None
     total_returns_written = 0
 
-    # ---------- helpers captured by closure ----------
     def get_fx_locked_local(ccy: str, dates: pd.DatetimeIndex) -> pd.Series:
         with fx_lock:
             return get_fx_to_usd_for_dates(
                 ccy=ccy,
                 dates=dates,
                 start_base=start_base,
+                end=end,
                 fx_cache=fx_cache,
-                session=yf_session,
+                session=None,
             )
 
-    def _process_one_local(asset_id: str, ticker: str, yahoo_sym: str, currency_hint: str) -> dict:
+    def _append_failure_row(*, res: dict, reason: str, error: str | None) -> None:
+        # keep schema stable: as_of, asset_id, ticker, yahoo_ticker, start, interval, reason, error
+        fail_rows.append(
+            {
+                "as_of": pd.Timestamp.utcnow().strftime("%Y-%m-%d"),
+                "asset_id": res.get("asset_id"),
+                "ticker": res.get("ticker"),
+                "yahoo_ticker": res.get("yahoo_ticker"),
+                "start": res.get("start"),
+                "interval": interval,
+                "reason": reason,
+                "error": (error[:800] if isinstance(error, str) else error),
+            }
+        )
+
+    def _process_one_local(asset_id: str, ticker: str, yahoo_sym: str, currency_hint: str | None) -> dict:
         asset_id = str(asset_id).strip()
         ticker = str(ticker).strip().upper()
         yahoo_sym = (str(yahoo_sym).strip() or ticker).upper()
-        currency_hint = (str(currency_hint).strip() or "").upper()
+        ccy_hint = _clean_ccy(currency_hint)
 
         is_force = asset_id in force_refresh
         if is_force:
@@ -532,43 +919,42 @@ def ingest(
         if _is_up_to_date_for_run(start=start, end=end):
             return {"status": "skip_up_to_date", "asset_id": asset_id}
 
+        # Detect FX-like assets (Yahoo FX or Quantfury-style)
+        is_fx_asset = _is_fx_pair_like_symbol(yahoo_sym)
+
         try:
-            # 1) Download OHLCV (required)
             df = call_yf_with_retries(
-                lambda: download_ohlcv(yahoo_sym, start=start, end=end, interval=interval, session=yf_session),
+                lambda: download_ohlcv(yahoo_sym, start=start, end=end, interval=interval, session=None),
                 sem=yf_sem,
                 limiter=limiter,
             )
 
             if df is None or df.empty:
+                # metadata hint to help debug "exists but empty"
+                meta = None
+                try:
+                    meta = fetch_yahoo_currency(yahoo_sym, session=None)
+                except Exception:
+                    meta = None
+
+                meta_s = ""
+                if isinstance(meta, dict) and meta:
+                    meta_s = f" meta={ {k: meta.get(k) for k in ['currency','exchange','quoteType']} }"
+
                 return {
                     "status": "empty",
                     "asset_id": asset_id,
                     "ticker": ticker,
                     "yahoo_ticker": yahoo_sym,
                     "start": start,
+                    "error": f"no_ohlcv_from_yahoo.{meta_s}".strip(),
                 }
-
-            # 2) Currency: use universe hint first to avoid an extra Yahoo metadata call
-            ccy = currency_hint
-            if (not ccy) or (ccy.lower() == "nan"):
-                meta = call_yf_with_retries(
-                    lambda: fetch_yahoo_currency(yahoo_sym, session=yf_session),
-                    sem=yf_sem,
-                    limiter=limiter,
-                )
-                ccy = (meta.get("currency") or "USD").upper().strip()
 
             # normalize
             df["date"] = pd.to_datetime(df["date"], errors="coerce")
             for col in ["open", "high", "low", "close", "adj_close", "volume"]:
                 if col not in df.columns:
                     df[col] = np.nan
-
-            df["asset_id"] = asset_id
-            df["ticker"] = ticker
-            df["yahoo_ticker"] = yahoo_sym
-            df["currency"] = ccy
 
             try:
                 df["date"] = df["date"].dt.tz_localize(None)
@@ -577,33 +963,63 @@ def ingest(
             df["date"] = df["date"].dt.normalize()
             df = df.dropna(subset=["date"]).sort_values("date")
 
-            # FX
-            if ccy == "USD":
+            # freshness / closure check
+            last_bar = pd.Timestamp(df["date"].max()).normalize() if not df.empty else None
+            lag_days = int((expected_last - last_bar).days) if last_bar is not None else None
+            freshness_note = None
+            if last_bar is not None and lag_days is not None and lag_days > 5:
+                freshness_note = f"stale: last_bar={last_bar.strftime('%Y-%m-%d')} expected~{expected_last.strftime('%Y-%m-%d')} lag_days={lag_days}"
+
+            # Currency + FX conversion logic
+            # Option 2 for FX assets: treat as already USD series and skip FX conversion
+            if is_fx_asset:
+                ccy = "USD"
                 df["fx_to_usd"] = 1.0
             else:
-                fx_s = get_fx_locked_local(ccy, pd.DatetimeIndex(df["date"]))
-                if fx_s.isna().all():
-                    return {
-                        "status": "no_fx",
-                        "asset_id": asset_id,
-                        "ticker": ticker,
-                        "yahoo_ticker": yahoo_sym,
-                        "ccy": ccy,
-                        "start": start,
-                    }
-                df["fx_to_usd"] = fx_s.values
-                if df["fx_to_usd"].isna().any():
-                    df = df.dropna(subset=["fx_to_usd"])
-                    if df.empty:
+                ccy = ccy_hint
+                meta_used = False
+                if not ccy:
+                    meta = call_yf_with_retries(
+                        lambda: fetch_yahoo_currency(yahoo_sym, session=None),
+                        sem=yf_sem,
+                        limiter=limiter,
+                    )
+                    ccy = _clean_ccy(meta.get("currency")) or "USD"
+                    meta_used = True
+
+                if ccy == "USD":
+                    df["fx_to_usd"] = 1.0
+                else:
+                    fx_s = get_fx_locked_local(ccy, pd.DatetimeIndex(df["date"]))
+                    if fx_s is None or fx_s.empty or fx_s.isna().all():
                         return {
-                            "status": "no_fx_aligned",
+                            "status": "no_fx",
                             "asset_id": asset_id,
                             "ticker": ticker,
                             "yahoo_ticker": yahoo_sym,
-                            "ccy": ccy,
                             "start": start,
+                            "error": f"no_fx_for_ccy={ccy}",
                         }
+                    df["fx_to_usd"] = fx_s.values
+                    if df["fx_to_usd"].isna().any():
+                        df = df.dropna(subset=["fx_to_usd"])
+                        if df.empty:
+                            return {
+                                "status": "no_fx_aligned",
+                                "asset_id": asset_id,
+                                "ticker": ticker,
+                                "yahoo_ticker": yahoo_sym,
+                                "start": start,
+                                "error": f"no_fx_aligned_for_ccy={ccy}",
+                            }
 
+            # attach ids
+            df["asset_id"] = asset_id
+            df["ticker"] = ticker
+            df["yahoo_ticker"] = yahoo_sym
+            df["currency"] = ("USD" if is_fx_asset else ccy)
+
+            # USD fields
             df["close_usd"] = (
                 pd.to_numeric(df["close"], errors="coerce").astype("float64")
                 * pd.to_numeric(df["fx_to_usd"], errors="coerce").astype("float64")
@@ -615,9 +1031,20 @@ def ingest(
 
             ohlcv_usd = df[
                 [
-                    "date", "asset_id", "ticker", "yahoo_ticker",
-                    "open", "high", "low", "close", "adj_close", "volume",
-                    "currency", "fx_to_usd", "close_usd", "adj_close_usd",
+                    "date",
+                    "asset_id",
+                    "ticker",
+                    "yahoo_ticker",
+                    "open",
+                    "high",
+                    "low",
+                    "close",
+                    "adj_close",
+                    "volume",
+                    "currency",
+                    "fx_to_usd",
+                    "close_usd",
+                    "adj_close_usd",
                 ]
             ].copy()
 
@@ -627,7 +1054,6 @@ def ingest(
             rows_written = 0
             newly_written_dates: set[str] = set()
 
-            # ---------- OHLCV manifest gating (read ONCE per year) ----------
             for year, g in ohlcv_usd.groupby("year", sort=False):
                 g = g.drop(columns=["year"]).copy()
                 g["date_str"] = g["date"].dt.strftime("%Y-%m-%d")
@@ -657,20 +1083,13 @@ def ingest(
             if rows_written == 0:
                 return {"status": "skip_already_ingested", "asset_id": asset_id}
 
-            # ---------- RETURNS for newly written dates only ----------
+            # RETURNS
             px = ohlcv_usd[["date", "adj_close_usd"]].copy()
             px["date"] = pd.to_datetime(px["date"], errors="coerce")
-            try:
-                px["date"] = px["date"].dt.tz_localize(None)
-            except Exception:
-                pass
             px["date"] = px["date"].dt.normalize()
             px["adj_close_usd"] = pd.to_numeric(px["adj_close_usd"], errors="coerce")
-            px = px.dropna(subset=["date", "adj_close_usd"]).sort_values("date").drop_duplicates(
-                subset=["date"], keep="last"
-            )
+            px = px.dropna(subset=["date", "adj_close_usd"]).sort_values("date").drop_duplicates(subset=["date"], keep="last")
 
-            # seed previous close for incremental runs
             if (not is_force) and (asset_id in prev_px_map) and (not px.empty):
                 first_date = pd.Timestamp(px["date"].iloc[0]).normalize()
                 seed_date = first_date - pd.Timedelta(days=1)
@@ -703,7 +1122,6 @@ def ingest(
                     returns["date"] = pd.to_datetime(returns["date"], errors="coerce").dt.normalize()
                     returns["year"] = returns["date"].dt.year.astype(int)
 
-                    # manifest-gate returns (read ONCE per year)
                     for year, rg in returns.groupby("year", sort=False):
                         rg = rg.drop(columns=["year"]).copy()
                         rg["date_str"] = rg["date"].dt.strftime("%Y-%m-%d")
@@ -735,12 +1153,15 @@ def ingest(
             last_date = pd.Timestamp(last_price_row["date"]).date().isoformat()
             last_adj = last_price_row.get("adj_close_usd")
 
+            if freshness_note:
+                # pack into last_price_row for visibility (optional)
+                last_price_row["_freshness"] = freshness_note
+
             return {
                 "status": "ok",
                 "asset_id": asset_id,
                 "ticker": ticker,
                 "yahoo_ticker": yahoo_sym,
-                "ccy": ccy,
                 "start": start,
                 "ohlcv_rows_written": rows_written,
                 "returns_written": returns_written,
@@ -748,6 +1169,7 @@ def ingest(
                 "last_price_row": last_price_row,
                 "last_return_row": last_return_row,
                 "last_adj_close_usd": float(last_adj) if last_adj is not None else None,
+                "freshness_note": freshness_note,
             }
 
         except Exception as e:
@@ -779,7 +1201,6 @@ def ingest(
 
                 if res.get("last_return_row") is not None:
                     latest_returns_rows.append(res["last_return_row"])
-
                     d = pd.to_datetime(res["last_return_row"].get("date"), errors="coerce")
                     if pd.notna(d):
                         d = pd.Timestamp(d).normalize()
@@ -788,7 +1209,6 @@ def ingest(
 
                 total_returns_written += int(res.get("returns_written") or 0)
 
-                # update state maps (main thread)
                 aid = res["asset_id"]
                 last_state[aid] = res["last_date"]
                 provider_state[aid] = res["yahoo_ticker"]
@@ -796,22 +1216,18 @@ def ingest(
                 if res.get("last_adj_close_usd") is not None:
                     prev_px_map[aid] = float(res["last_adj_close_usd"])
 
+                # optional: print staleness warnings
+                if res.get("freshness_note"):
+                    print(f"[freshness][warn] {res.get('ticker')} {res.get('yahoo_ticker')} {res.get('freshness_note')}")
+
             elif st in {"skip_up_to_date", "skip_already_ingested"}:
                 skipped += 1
             else:
                 failed += 1
-                fail_rows.append(
-                    {
-                        "as_of": pd.Timestamp.utcnow().strftime("%Y-%m-%d"),
-                        "asset_id": res.get("asset_id"),
-                        "ticker": res.get("ticker"),
-                        "yahoo_ticker": res.get("yahoo_ticker"),
-                        "start": res.get("start"),
-                        "interval": interval,
-                        "reason": st,
-                        "error": res.get("error"),
-                    }
-                )
+                err = res.get("error")
+                if res.get("status") == "empty" and not err:
+                    err = "empty_ohlcv"
+                _append_failure_row(res=res, reason=st, error=err)
 
             if done % 50 == 0 or done == n_total:
                 elapsed = time.time() - t0
@@ -822,7 +1238,7 @@ def ingest(
                     f"rate={rate:.2f} assets/s elapsed={elapsed/60:.1f}m"
                 )
 
-    # ---------- SNAPSHOTS / STATE WRITE (single-threaded) ----------
+    # ---------- SNAPSHOTS / STATE WRITE ----------
     latest_prices_new = pd.DataFrame(latest_prices_rows)
     try:
         old_prices = store.read_latest_prices_snapshot()
@@ -866,7 +1282,6 @@ def ingest(
     if not fails.empty:
         store.write_ingest_failures(fails)
 
-    # Local debug copy (easy to inspect)
     try:
         out_dir = paths.ensure_dir(paths.local_outputs_dir() / "ingest_failures")
         out_csv = out_dir / f"failures_{as_of}.csv"
@@ -874,7 +1289,6 @@ def ingest(
         print(f"[fails][local] wrote -> {out_csv}")
     except Exception as e:
         print(f"[fails][local][warn] could not write local failures csv: {e}")
-
 
     store.write_last_date_state(last_state)
     store.write_provider_symbol_state(provider_state)
@@ -912,8 +1326,10 @@ def ingest(
     print(f"returns_written_total={total_returns_written}")
     print(f"[FX] currencies_downloaded={len(fx_cache)} -> {sorted(fx_cache.keys())}")
     print(f"state_entries={len(last_state)}")
+    print(f"expected_last_closed_day_utc={expected_last.strftime('%Y-%m-%d')}")
     print(f"elapsed_s={time.time()-t_start:.1f}")
+    print(f"[cache] dir={_CACHE_DIR}")
 
-
+    
 if __name__ == "__main__":
     ingest()

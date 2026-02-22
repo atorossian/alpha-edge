@@ -706,7 +706,7 @@ def run_daily_cycle_asof(
 
     GOALS = goals_override if goals_override is not None else [7500.0, 10000.0, 12500.0]
     MAIN_GOAL = float(main_goal_override if main_goal_override is not None else 10000.0)
-    equity = float(equity_override) if equity_override is not None else 7019.61
+    equity = float(equity_override) if equity_override is not None else 8940.70
 
     # ---------- Load MARKET regime (GLOBAL path) ----------
     market_hmm_payload = s3_load_latest_json(

@@ -619,8 +619,8 @@ def main():
     as_of_run_date = run_dt.strftime("%Y-%m-%d")
 
     # keep hardcoded (LIVE defaults)
-    equity0 = 5541.63
-    GOALS = (7500.0, 10000.0, 12500.0)
+    equity0 = 5155.45
+    GOALS = (10000.0, 12500.0, 15000.0)
     MAIN_GOAL = 10000.0
 
     # run using latest market_hmm snapshot (as in prod)

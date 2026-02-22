@@ -30,13 +30,13 @@ ENGINE_ROOT_PREFIX = "engine/v1"
 
 RETURNS_WIDE_CACHE_PATH = "s3://alpha-edge-algo/market/cache/v1/returns_wide_min5y.parquet"
 
-# Quarantine tables
+# Quarantine tables (evaluation-owned)
 QUAR_EVALS_TABLE = "quarantine/evals"      # dt partitions + per-candidate latest.json
 QUAR_SUMMARY_TABLE = "quarantine/summary"  # dt partitions + latest.json
 QUAR_CAND_TABLE = "quarantine/candidates"  # candidate_id=.../latest.json (persistent baseline/streaks)
 QUAR_REPORTS_TABLE = "quarantine/reports"  # dt partitions
 
-# Auto-discovery source (current canonical for quarantine)
+# Auto-discovery source (input to quarantine evaluation)
 PORTFOLIO_RUNS_TABLE = "portfolio_search/runs"
 
 
@@ -99,7 +99,6 @@ def _dt_prefix(root_prefix: str, table: str, dt_str: str) -> str:
 
 
 def _candidate_latest_key(root_prefix: str, table: str, cid: str) -> str:
-    # table is e.g. "quarantine/candidates" or "quarantine/evals"
     return f"{root_prefix.strip('/')}/{table.strip('/')}/candidate_id={cid}/latest.json"
 
 
@@ -139,14 +138,8 @@ def _discover_candidates_from_portfolio_runs(
     lookback_days: int = 10,
 ) -> list[dict]:
     """
-    Returns list of candidates from portfolio_search/runs:
-      {
-        "candidate_id": <run_id>,
-        "run_key": <s3 key>,
-        "shares": {...},
-        "source": {...}
-      }
-    Uses outputs.discrete_allocation.shares.
+    Discover candidates from portfolio_search/runs by reading outputs.discrete_allocation.shares.
+    candidate_id = run_id (stable).
     """
     out: list[dict] = []
     start_ts = (as_of_ts - pd.Timedelta(days=int(lookback_days))).normalize()
@@ -187,7 +180,6 @@ def _discover_candidates_from_portfolio_runs(
                 qf = _safe_float(q)
                 if tt and qf is not None and abs(qf) > 0:
                     shares_n[tt] = float(qf)
-
             if len(shares_n) < 2:
                 continue
 
@@ -220,17 +212,13 @@ def _discover_pending_candidates_from_state(
     s3,
     bucket: str,
     root_prefix: str,
-    as_of_ts: pd.Timestamp,
-    ttl_days: int,  # not used for filtering; kept so signature matches your callsite
 ) -> list[dict]:
     """
     Discover candidates from quarantine/candidates that are still pending.
-    We rely on cand_state["shares"] being present.
+    This allows evaluation to continue even when outside lookback window.
     """
-    _ = ttl_days  # keep arg (you may use it later)
     prefix = f"{root_prefix.strip('/')}/{QUAR_CAND_TABLE.strip('/')}/candidate_id="
     keys = _s3_list_keys(s3, bucket=bucket, prefix=prefix)
-
     latest_keys = [k for k in keys if k.endswith("/latest.json")]
 
     out: list[dict] = []
@@ -256,14 +244,6 @@ def _discover_pending_candidates_from_state(
         if status in ("APPROVED", "REJECTED", "EXPIRED"):
             continue
 
-        # We do NOT force a default as_of_date here (helper doesn't own that).
-        # We keep start_as_of optional; main loop will default intelligently.
-        start_as_of = str(q.get("start_as_of") or "").strip() or None
-        if start_as_of is None:
-            start_as_of = str(cand_state.get("last_seen_as_of") or "").strip() or None
-
-        _ = start_as_of  # age computed in main loop; helper only returns shares
-
         shares = cand_state.get("shares") or {}
         if not isinstance(shares, dict) or len(shares) < 2:
             continue
@@ -274,7 +254,6 @@ def _discover_pending_candidates_from_state(
             qf = _safe_float(qv)
             if tt and qf is not None and abs(qf) > 0:
                 shares_n[tt] = float(qf)
-
         if len(shares_n) < 2:
             continue
 
@@ -414,7 +393,7 @@ def run_quarantine_analysis_asof(
     run_dt = pd.Timestamp(dt.date.today()).normalize() if mode == "live" else as_of_ts
 
     s3 = s3_init(ENGINE_REGION)
-    _market = MarketStore(bucket=ENGINE_BUCKET)
+    _market = MarketStore(bucket="alpha-edge-algo")  # kept for compatibility with your infra
 
     raw_score_cfg = s3_load_latest_json(
         s3, bucket=ENGINE_BUCKET, root_prefix=root_prefix, table="configs/score_config"
@@ -432,13 +411,11 @@ def run_quarantine_analysis_asof(
         lookback_days=int(lookback_days),
     )
 
-    # 2) pending candidates already in quarantine state
+    # 2) pending candidates already persisted in quarantine/candidates
     pending_from_state = _discover_pending_candidates_from_state(
         s3=s3,
         bucket=ENGINE_BUCKET,
         root_prefix=root_prefix,
-        as_of_ts=as_of_ts,
-        ttl_days=int(ttl_days),
     )
 
     # union + dedup (prefer recent run record if both exist)
@@ -483,7 +460,7 @@ def run_quarantine_analysis_asof(
     ) or {}
     cur_regime_label = str((market_hmm.get("label_commit") or market_hmm.get("label") or "UNKNOWN"))
 
-    # keep consistent with daily jobs (even if unused today)
+    # Keep returns cache warm/consistent (as your system expects)
     cache_cfg = CacheConfig(bucket=ENGINE_BUCKET, min_years=float(5.0))
     build_returns_wide_cache(cache_cfg)
     returns_wide = pd.read_parquet(RETURNS_WIDE_CACHE_PATH, engine="pyarrow").sort_index()
@@ -560,10 +537,10 @@ def run_quarantine_analysis_asof(
         cand_state.setdefault("candidate_id", cid)
         cand_state.setdefault("source", item.get("source") or {})
 
-        # IMPORTANT: persist shares so we can evaluate pending even when outside lookback
+        # Persist shares always (so we can evaluate outside lookback)
         cand_state["shares"] = {str(t).upper().strip(): float(qv) for t, qv in shares.items()}
 
-        # start_as_of fallback chain: q.start_as_of -> cand_state.last_seen_as_of -> today
+        # start_as_of fallback chain: q.start_as_of -> cand_state.last_seen_as_of -> as_of_date
         start_as_of = str(q.get("start_as_of") or "").strip() or None
         if start_as_of is None:
             start_as_of = str(cand_state.get("last_seen_as_of") or "").strip() or None
@@ -590,7 +567,7 @@ def run_quarantine_analysis_asof(
             goals = [7500.0, 10000.0, 12500.0]
         main_goal = _safe_float(cand_state.get("main_goal")) or 10000.0
 
-        # evaluate candidate
+        # Evaluate candidate via same report engine
         try:
             positions = {
                 t: Position(ticker=t, quantity=float(qv), entry_price=None, currency="USD")
@@ -613,7 +590,7 @@ def run_quarantine_analysis_asof(
 
         score_today = _metric(eval_today, "score")
 
-        # Entry gate: only applies if candidate is new (no baseline yet)
+        # Entry gate for brand new candidates
         if is_new and (score_today is None or float(score_today) < float(min_entry_score)):
             status = "REJECTED"
             sev = "RED"
@@ -684,7 +661,7 @@ def run_quarantine_analysis_asof(
 
             continue
 
-        # baseline init (only for accepted candidates)
+        # baseline init (accepted candidates only)
         if "baseline_eval" not in q or not isinstance(q.get("baseline_eval"), dict):
             q["start_as_of"] = start_as_of
             q["baseline_eval"] = dict(eval_today) if isinstance(eval_today, dict) else {}
@@ -730,6 +707,7 @@ def run_quarantine_analysis_asof(
         if ann_today is not None and ann_ref is not None and ann_today < ann_ref - 0.08:
             metric_flags.append(f"ann_down({ann_ref:.3f}->{ann_today:.3f})")
 
+        # drift metrics currently compare target to itself (placeholder hook)
         w_target = _signed_gross_weights_from_shares(shares=shares, prices_usd=prices_usd)
         w_today = w_target
         w_drift_l1 = _l1_drift(w_today, w_target)
@@ -748,7 +726,7 @@ def run_quarantine_analysis_asof(
             consecutive_red=int(q.get("streak_red", 0) or 0),
         )
         if regime_changed and age_days >= 3 and sev != "GREEN":
-            reasons = reasons + ["regime_changed"]
+            reasons = (reasons or []) + ["regime_changed"]
 
         # streaks
         if sev == "GREEN":
@@ -768,7 +746,7 @@ def run_quarantine_analysis_asof(
         if status not in ("PENDING", "APPROVED", "REJECTED", "EXPIRED"):
             status = "PENDING"
 
-        # Hard reject if it falls under entry threshold while still pending
+        # Hard reject if it falls below entry threshold while still pending
         if status == "PENDING" and (score_today is None or float(score_today) < float(min_entry_score)):
             status = "REJECTED"
             sev = "RED"
@@ -932,7 +910,6 @@ def parse_args():
     ap.add_argument("--no-write", action="store_true")
     ap.add_argument("--no-latest", action="store_true")
 
-    # preferred defaults
     ap.add_argument("--min-days", type=int, default=5)
     ap.add_argument("--approve-green-days", type=int, default=5)
     ap.add_argument("--ttl-days", type=int, default=12)

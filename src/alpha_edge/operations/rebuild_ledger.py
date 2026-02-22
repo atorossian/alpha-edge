@@ -1,3 +1,4 @@
+# rebuild_ledger.py
 from __future__ import annotations
 
 import argparse
@@ -7,7 +8,7 @@ import json
 import re
 from collections import deque
 from dataclasses import asdict, dataclass
-from typing import Deque, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Deque, Dict, Iterable, List, Optional, Tuple
 
 import boto3
 import pandas as pd
@@ -22,23 +23,30 @@ ENGINE_ROOT = "engine/v1"
 TRADES_TABLE = "trades"
 LEDGER_TABLE = "ledger"
 
+# Lake root for OHLCV in USD (as you described)
+OHLCV_USD_ROOT = "market/ohlcv_usd/v1"
+
 # ----------------------------
 # Numeric stability helpers
 # ----------------------------
 QTY_EPS = 1e-9
 LOT_EPS = 1e-9
-# NEW: position-level dust filters (presentation / hygiene)
+
+# position-level dust filters (presentation / hygiene)
 POSITION_QTY_EPS = 1e-6        # shares/coins below this are dust
 POSITION_NOTIONAL_EPS = 1e-4   # $0.0001 notional is dust
 
+
 def _snap(x: float, eps: float = QTY_EPS) -> float:
     return 0.0 if abs(float(x)) < eps else float(x)
+
 
 # Spot lot: (qty_signed, entry_price_usd)
 Lot = Tuple[float, float]
 
 # Notional lot: (notional_signed_usd, entry_price_usd)
 ContractLot = Tuple[float, float]
+
 
 def _clean_lots(lots: Deque[Lot], eps: float = LOT_EPS) -> Deque[Lot]:
     out: Deque[Lot] = deque()
@@ -59,17 +67,21 @@ def _clean_lots(lots: Deque[Lot], eps: float = LOT_EPS) -> Deque[Lot]:
             out.append((q, px))
     return out
 
+
 # ----------------------------
 # S3 helpers
 # ----------------------------
 def s3_client(region: str = REGION):
     return boto3.client("s3", region_name=region)
 
+
 def engine_key(*parts: str) -> str:
     return "/".join([ENGINE_ROOT.strip("/")] + [p.strip("/") for p in parts])
 
+
 def dt_key(table: str, dt_str: str, filename: str) -> str:
     return engine_key(table, f"dt={dt_str}", filename)
+
 
 def s3_put_json(s3, *, bucket: str, key: str, payload: dict) -> None:
     s3.put_object(
@@ -79,11 +91,12 @@ def s3_put_json(s3, *, bucket: str, key: str, payload: dict) -> None:
         ContentType="application/json",
     )
 
+
 def s3_list_keys(s3, *, bucket: str, prefix: str) -> list[str]:
     keys: list[str] = []
     token = None
     while True:
-        kwargs = dict(Bucket=bucket, Prefix=prefix)
+        kwargs: dict[str, Any] = dict(Bucket=bucket, Prefix=prefix)
         if token:
             kwargs["ContinuationToken"] = token
         resp = s3.list_objects_v2(**kwargs)
@@ -94,15 +107,18 @@ def s3_list_keys(s3, *, bucket: str, prefix: str) -> list[str]:
         token = resp.get("NextContinuationToken")
     return keys
 
+
 def s3_get_json(s3, *, bucket: str, key: str) -> dict:
     obj = s3.get_object(Bucket=bucket, Key=key)
     body = obj["Body"].read()
     return json.loads(body.decode("utf-8"))
 
+
 def s3_get_parquet_df(s3, *, bucket: str, key: str) -> pd.DataFrame:
     obj = s3.get_object(Bucket=bucket, Key=key)
     data = obj["Body"].read()
     return pd.read_parquet(io.BytesIO(data), engine="pyarrow")
+
 
 # ----------------------------
 # FX helpers
@@ -152,6 +168,7 @@ def _download_daily_fx_usd_per_ccy(ccy: str, start: str, end: str) -> pd.Series:
     s.name = ccy
     return s
 
+
 def _fx_to_usd(ccy: str, d: dt.date, fx_map: dict[str, pd.Series]) -> float:
     ccy = ccy.upper().strip()
     if ccy in {"USD", "USDT", "USDC"}:
@@ -161,18 +178,22 @@ def _fx_to_usd(ccy: str, d: dt.date, fx_map: dict[str, pd.Series]) -> float:
         d = d - dt.timedelta(days=1)
     return float(s.loc[d])
 
+
 # ----------------------------
 # Ledger data structures
 # ----------------------------
 @dataclass
 class PositionLotAvg:
+    asset_id: str
     ticker: str
     quantity: float
     avg_cost: float
     currency: str = "USD"
 
+
 @dataclass
 class PositionView:
+    asset_id: str
     ticker: str
     quantity: float
     avg_cost: float
@@ -182,13 +203,16 @@ class PositionView:
     unrealized_pnl: float | None
     currency: str = "USD"
 
+
 @dataclass
 class DerivativePositionView:
+    asset_id: str
     ticker: str
     side: str               # LONG/SHORT
     open_notional_usd: float
     avg_entry_price: float
     currency: str = "USD"
+
 
 @dataclass
 class PnLSummary:
@@ -200,6 +224,7 @@ class PnLSummary:
     unrealized_pnl_spot: float
     total_pnl: float
 
+
 # ----------------------------
 # Trade loading + normalization
 # ----------------------------
@@ -208,6 +233,7 @@ def _parse_ts(ts_utc: str) -> pd.Timestamp:
     if pd.isna(t):
         raise ValueError(f"Invalid ts_utc: {ts_utc}")
     return t
+
 
 def _load_trades(
     s3,
@@ -244,6 +270,7 @@ def _load_trades(
     out.sort(key=lambda x: (_parse_ts(str(x.get("ts_utc", ""))), str(x.get("trade_id", ""))))
     return out
 
+
 def _normalize_unit(u: Optional[str]) -> Optional[str]:
     if u is None:
         return None
@@ -258,6 +285,7 @@ def _normalize_unit(u: Optional[str]) -> Optional[str]:
         return "ounces"
     return s
 
+
 def _normalize_trade(t: dict) -> dict:
     trade_id = str(t.get("trade_id"))
     as_of = str(t.get("as_of"))
@@ -267,6 +295,14 @@ def _normalize_trade(t: dict) -> dict:
     qty = float(t.get("quantity"))
     price = float(t.get("price"))
     ccy = str(t.get("currency") or "USD").upper().strip()
+
+    asset_id = t.get("asset_id", None)
+    asset_id = None if asset_id is None else str(asset_id).strip()
+    if not asset_id:
+        raise ValueError(
+            f"Trade {trade_id} missing asset_id. "
+            "Re-record trades with record_trade.py after asset_id support, or backfill asset_id."
+        )
 
     if side not in ("BUY", "SELL"):
         raise ValueError(f"Trade {trade_id}: invalid side={side}")
@@ -297,6 +333,7 @@ def _normalize_trade(t: dict) -> dict:
         "trade_id": trade_id,
         "as_of": as_of,
         "ts_utc": ts_utc,
+        "asset_id": asset_id,
         "ticker": ticker,
         "side": side,
         "quantity": qty,
@@ -310,22 +347,23 @@ def _normalize_trade(t: dict) -> dict:
         "reported_pnl": reported_pnl,
     }
 
+
 # ----------------------------
 # Asset-type routing
 # ----------------------------
 _FX_PAIR_RE = re.compile(r"^[A-Z]{3}[-/][A-Z]{3}$")
-_FUT_CODE_RE = re.compile(r"^[A-Z]{1,3}[FGHJKMNQUVXZ]\d{1,2}$")  # e.g. VXQ4, VXF5, ESU4
 
 _CRYPTO_BASES = {
-    # common Quantfury crypto bases seen in your logs / typical universe
     "BTC", "ETH", "ADA", "XRP", "DOT", "BCH", "LTC", "SOL", "DOGE", "SUI", "HBAR", "DASH",
     "BNB", "AVAX", "LINK", "MATIC", "ATOM", "NEAR", "UNI", "AAVE", "TRX", "ETC",
 }
 _CRYPTO_QUOTES = {"USD", "USDT", "USDC", "EUR"}
 
+
 def _is_fx_pair(ticker: str) -> bool:
     t = str(ticker).upper().strip()
     return bool(_FX_PAIR_RE.match(t))
+
 
 def _is_crypto_pair(ticker: str) -> bool:
     t = str(ticker).upper().strip()
@@ -338,8 +376,8 @@ def _is_crypto_pair(ticker: str) -> bool:
         return False
     if quote not in _CRYPTO_QUOTES:
         return False
-    # if base is known crypto base -> treat as crypto pair
     return base in _CRYPTO_BASES
+
 
 def _route_asset_side(*, ticker: str, quantity_unit: Optional[str]) -> str:
     """
@@ -351,20 +389,14 @@ def _route_asset_side(*, ticker: str, quantity_unit: Optional[str]) -> str:
     t = str(ticker).upper().strip()
     unit = (quantity_unit or "").lower().strip()
 
-    # Always NOTIONAL for FX tickers like USD-CNY / EUR-USD, regardless of unit label
     if _is_fx_pair(t):
         return "NOTIONAL"
-
-    # Always NOTIONAL for crypto pairs like BTC-USD / ADA-USDT, regardless of unit label
     if _is_crypto_pair(t):
         return "NOTIONAL"
-
-    # Explicit contracts => NOTIONAL (futures/CFDs)
     if unit == "contracts":
         return "NOTIONAL"
-
-    # Everything else is SPOT (equities/ETFs/etc)
     return "SPOT"
+
 
 # ----------------------------
 # FIFO accounting (spot + notional using action_tag)
@@ -377,23 +409,17 @@ def rebuild_positions_and_pnl_fifo(
     recon_path: str | None = None,
 ) -> Tuple[Dict[str, PositionLotAvg], Dict[str, DerivativePositionView], float]:
     """
-    SPOT side:
-        - Quantity FIFO
-        - Shorts allowed
-        - action_tag is informational only (NOT enforced)
-        - BUY/SELL determines direction
-        - NO implicit flip inside a single trade
-
-    NOTIONAL side (futures/crypto/FX):
-        - Notional FIFO by `value` (USD notional)
-        - action_tag enforced
-        - `value` required
-        - NO flipping allowed (raise)
+    asset_id-native:
+      - Positions are keyed by asset_id (unique)
+      - ticker is retained for readability and routing/pricing lookup
     """
-    spot_lots: Dict[str, Deque[Lot]] = {}
-    notional_lots: Dict[str, Deque[ContractLot]] = {}
+    spot_lots: Dict[str, Deque[Lot]] = {}               # asset_id -> lots
+    notional_lots: Dict[str, Deque[ContractLot]] = {}   # asset_id -> lots
 
-    ccy_by_ticker: Dict[str, str] = {}
+    # metadata per asset_id
+    ticker_by_asset: Dict[str, str] = {}
+    ccy_by_asset: Dict[str, str] = {}
+
     realized = 0.0
     recon_rows: list[dict] = []
 
@@ -403,15 +429,15 @@ def rebuild_positions_and_pnl_fifo(
             return 1.0
         return _fx_to_usd(ccy, d, fx_map) if ccy != "USD" else 1.0
 
-    def _get_spot(ticker: str) -> Deque[Lot]:
-        if ticker not in spot_lots:
-            spot_lots[ticker] = deque()
-        return spot_lots[ticker]
+    def _get_spot(asset_id: str) -> Deque[Lot]:
+        if asset_id not in spot_lots:
+            spot_lots[asset_id] = deque()
+        return spot_lots[asset_id]
 
-    def _get_notional(ticker: str) -> Deque[ContractLot]:
-        if ticker not in notional_lots:
-            notional_lots[ticker] = deque()
-        return notional_lots[ticker]
+    def _get_notional(asset_id: str) -> Deque[ContractLot]:
+        if asset_id not in notional_lots:
+            notional_lots[asset_id] = deque()
+        return notional_lots[asset_id]
 
     def _weighted_avg_cost_spot(lots: Deque[Lot]) -> float:
         num = 0.0
@@ -423,7 +449,6 @@ def rebuild_positions_and_pnl_fifo(
         return float(num / den) if den > QTY_EPS else 0.0
 
     def _weighted_avg_entry_notional(lots: Deque[ContractLot]) -> Tuple[float, float]:
-        # returns (avg_entry_price, total_abs_notional)
         num = 0.0
         den = 0.0
         for v, px in lots:
@@ -438,11 +463,9 @@ def rebuild_positions_and_pnl_fifo(
     norm = [_normalize_trade(t) for t in trades]
 
     def _action_pri(tag: str | None) -> int:
-        # open/add must happen before close/reduce if same timestamp
         return 0 if tag in {"open", "add"} else 1
 
     def _side_pri(side: str) -> int:
-        # optional: SELL before BUY
         return 0 if side == "SELL" else 1
 
     norm.sort(
@@ -455,8 +478,8 @@ def rebuild_positions_and_pnl_fifo(
     )
 
     for t in norm:
-
-        ticker = t["ticker"]
+        asset_id = str(t["asset_id"])
+        ticker = str(t["ticker"]).upper().strip()
         side = t["side"]
         qty = float(t["quantity"])
         price = float(t["price"])
@@ -467,22 +490,30 @@ def rebuild_positions_and_pnl_fifo(
         unit = t.get("quantity_unit")
         value = t.get("value")
 
-        if ticker in ccy_by_ticker and ccy_by_ticker[ticker] != ccy:
-            raise ValueError(f"Currency mismatch for {ticker}: {ccy_by_ticker[ticker]} vs {ccy}")
-        ccy_by_ticker[ticker] = ccy
+        # enforce deterministic reconciliation
+        if action_tag not in {"open", "close", "add", "reduce"}:
+            raise ValueError(
+                f"Trade {trade_id} ({ticker}/{asset_id}) requires action_tag in "
+                f"{{open, close, add, reduce}} (got {action_tag!r})."
+            )
+
+        # lock metadata per asset_id
+        if asset_id in ticker_by_asset and ticker_by_asset[asset_id] != ticker:
+            raise ValueError(
+                f"Ticker mismatch for asset_id={asset_id}: {ticker_by_asset[asset_id]} vs {ticker}"
+            )
+        ticker_by_asset[asset_id] = ticker
+
+        if asset_id in ccy_by_asset and ccy_by_asset[asset_id] != ccy:
+            raise ValueError(
+                f"Currency mismatch for asset_id={asset_id}: {ccy_by_asset[asset_id]} vs {ccy}"
+            )
+        ccy_by_asset[asset_id] = ccy
 
         fx = _fx(ccy, t["as_of"])
         price_usd = float(price) * float(fx)
 
         trade_realized_delta = 0.0
-
-        # enforce action_tag always for deterministic reconciliation
-        if action_tag not in {"open", "close", "add", "reduce"}:
-            raise ValueError(
-                f"Trade {trade_id} ({ticker}) requires action_tag in "
-                f"{{open, close, add, reduce}} (got {action_tag!r})."
-            )
-
         route = _route_asset_side(ticker=ticker, quantity_unit=unit)
 
         # -----------------------------
@@ -491,26 +522,23 @@ def rebuild_positions_and_pnl_fifo(
         if route == "NOTIONAL":
             if value is None:
                 raise ValueError(
-                    f"Trade {trade_id} ({ticker}) is NOTIONAL-side (futures/crypto/FX) but value is missing. "
-                    f"Need Quantfury 'value' to compute notional PnL."
+                    f"Trade {trade_id} ({ticker}/{asset_id}) is NOTIONAL-side but value is missing. "
+                    f"Need broker 'value' to compute notional PnL."
                 )
 
             value_usd = float(value) * float(fx)
-            lots = _get_notional(ticker)  # Deque[(signed_notional_usd, entry_price_usd)]
+            lots = _get_notional(asset_id)  # Deque[(signed_notional_usd, entry_price_usd)]
 
-            # OPEN/ADD => increase exposure, NO realized PnL
             if action_tag in {"open", "add"}:
                 if side == "BUY":
                     lots.append((+value_usd, float(price_usd)))  # long
                 else:
                     lots.append((-value_usd, float(price_usd)))  # short
-
-            # CLOSE/REDUCE => must decrease exposure, realize PnL against existing lots
             else:  # {"close","reduce"}
                 remaining_value = float(value_usd)
 
                 if side == "SELL":
-                    # SELL close/reduce closes LONG lots (positive)
+                    # SELL closes LONG (positive)
                     while remaining_value > LOT_EPS and lots and lots[0][0] > 0:
                         lot_v, lot_px = lots[0]
                         lot_size = abs(float(lot_v))
@@ -531,12 +559,12 @@ def rebuild_positions_and_pnl_fifo(
 
                     if remaining_value > LOT_EPS:
                         raise ValueError(
-                            f"Trade {trade_id} ({ticker}) SELL close/reduce exceeds long exposure (NO FLIP). "
-                            f"Remaining notional={remaining_value:.6f} USD. Lots={list(lots)[:5]} ..."
+                            f"Trade {trade_id} ({ticker}/{asset_id}) SELL close/reduce exceeds long exposure (NO FLIP). "
+                            f"Remaining notional={remaining_value:.6f} USD."
                         )
 
                 else:  # BUY
-                    # BUY close/reduce closes SHORT lots (negative)
+                    # BUY closes SHORT (negative)
                     while remaining_value > LOT_EPS and lots and lots[0][0] < 0:
                         lot_v, lot_px = lots[0]
                         lot_size = abs(float(lot_v))
@@ -557,15 +585,15 @@ def rebuild_positions_and_pnl_fifo(
 
                     if remaining_value > LOT_EPS:
                         raise ValueError(
-                            f"Trade {trade_id} ({ticker}) BUY close/reduce exceeds short exposure (NO FLIP). "
-                            f"Remaining notional={remaining_value:.6f} USD. Lots={list(lots)[:5]} ..."
+                            f"Trade {trade_id} ({ticker}/{asset_id}) BUY close/reduce exceeds short exposure (NO FLIP). "
+                            f"Remaining notional={remaining_value:.6f} USD."
                         )
 
             lots = _clean_lots(lots, LOT_EPS)
             if lots:
-                notional_lots[ticker] = lots
+                notional_lots[asset_id] = lots
             else:
-                notional_lots.pop(ticker, None)
+                notional_lots.pop(asset_id, None)
 
             reported_pnl = t.get("reported_pnl")
             reported_pnl_usd = None if reported_pnl is None else float(reported_pnl) * float(fx)
@@ -575,6 +603,7 @@ def rebuild_positions_and_pnl_fifo(
                 "trade_id": trade_id,
                 "ts_utc": t.get("ts_utc"),
                 "as_of": t.get("as_of"),
+                "asset_id": asset_id,
                 "ticker": ticker,
                 "side": side,
                 "action_tag": action_tag,
@@ -598,27 +627,23 @@ def rebuild_positions_and_pnl_fifo(
         # -----------------------------
         # SPOT SIDE (ETFs/shares/rest): quantity FIFO, action_tag aware, NO FLIP
         # -----------------------------
-        lots = _get_spot(ticker)
+        lots = _get_spot(asset_id)
 
-        # OPEN/ADD => increase exposure in direction of side, no realized PnL
         if action_tag in {"open", "add"}:
             if side == "BUY":
                 lots.append((+qty, float(price_usd)))   # add to long
             else:
                 lots.append((-qty, float(price_usd)))   # add to short
-
-        # REDUCE/CLOSE => must decrease exposure, realize PnL against opposite lots
         else:  # {"reduce","close"}
             remaining = float(qty)
 
             if side == "SELL":
-                # SELL reduce/close closes LONG lots (positive qty lots)
+                # closes LONG
                 while remaining > QTY_EPS and lots and lots[0][0] > 0:
                     lot_q, lot_px = lots[0]
                     lot_size = abs(float(lot_q))
                     close_qty = min(remaining, lot_size)
 
-                    # long close pnl = (exit - entry) * qty
                     delta = close_qty * (float(price_usd) - float(lot_px))
                     realized += delta
                     trade_realized_delta += delta
@@ -632,25 +657,21 @@ def rebuild_positions_and_pnl_fifo(
                     if left != 0.0:
                         lots.appendleft((+left, float(lot_px)))
 
-                # NO FLIP: cannot sell-reduce more long than you have
                 if remaining > QTY_EPS:
-                    # allow tiny dust from rounding
                     if remaining <= 1e-8:
                         remaining = 0.0
                     else:
                         raise ValueError(
-                            f"Trade {trade_id} ({ticker}) SELL {action_tag} exceeds LONG exposure (NO FLIP). "
-                            f"Remaining qty={remaining:.12f}. Lots_head={list(lots)[:3]}"
+                            f"Trade {trade_id} ({ticker}/{asset_id}) SELL {action_tag} exceeds LONG exposure (NO FLIP). "
+                            f"Remaining qty={remaining:.12f}."
                         )
-
-            else:  # side == "BUY"
-                # BUY reduce/close closes SHORT lots (negative qty lots)
+            else:  # BUY
+                # closes SHORT
                 while remaining > QTY_EPS and lots and lots[0][0] < 0:
                     lot_q, lot_px = lots[0]
                     lot_size = abs(float(lot_q))
                     close_qty = min(remaining, lot_size)
 
-                    # short close pnl = (entry - exit) * qty
                     delta = close_qty * (float(lot_px) - float(price_usd))
                     realized += delta
                     trade_realized_delta += delta
@@ -664,22 +685,20 @@ def rebuild_positions_and_pnl_fifo(
                     if left != 0.0:
                         lots.appendleft((-left, float(lot_px)))
 
-                # NO FLIP: cannot buy-reduce more short than you have
                 if remaining > QTY_EPS:
                     if remaining <= 1e-8:
                         remaining = 0.0
                     else:
                         raise ValueError(
-                            f"Trade {trade_id} ({ticker}) BUY {action_tag} exceeds SHORT exposure (NO FLIP). "
-                            f"Remaining qty={remaining:.12f}. Lots_head={list(lots)[:3]}"
+                            f"Trade {trade_id} ({ticker}/{asset_id}) BUY {action_tag} exceeds SHORT exposure (NO FLIP). "
+                            f"Remaining qty={remaining:.12f}."
                         )
 
         lots = _clean_lots(lots, LOT_EPS)
         if lots:
-            spot_lots[ticker] = lots
+            spot_lots[asset_id] = lots
         else:
-            spot_lots.pop(ticker, None)
-
+            spot_lots.pop(asset_id, None)
 
         reported_pnl = t.get("reported_pnl")
         diff = None if reported_pnl is None else float(trade_realized_delta - float(reported_pnl))
@@ -688,6 +707,7 @@ def rebuild_positions_and_pnl_fifo(
             "trade_id": trade_id,
             "ts_utc": t.get("ts_utc"),
             "as_of": t.get("as_of"),
+            "asset_id": asset_id,
             "ticker": ticker,
             "side": side,
             "action_tag": action_tag,
@@ -706,40 +726,48 @@ def rebuild_positions_and_pnl_fifo(
             "_s3_key": t.get("_s3_key"),
         })
 
-    # Build SPOT positions
+    # Build SPOT positions (asset_id-native)
     positions_spot: Dict[str, PositionLotAvg] = {}
-    for ticker, lots in spot_lots.items():
+    for asset_id, lots in spot_lots.items():
         q = sum(float(qty_signed) for qty_signed, _ in lots)
         q = _snap(q, QTY_EPS)
         if q == 0.0:
             continue
         avg_cost = _weighted_avg_cost_spot(lots)
-        positions_spot[ticker] = PositionLotAvg(ticker=ticker, quantity=float(q), avg_cost=float(avg_cost), currency="USD")
+        positions_spot[asset_id] = PositionLotAvg(
+            asset_id=str(asset_id),
+            ticker=str(ticker_by_asset.get(asset_id, "")),
+            quantity=float(q),
+            avg_cost=float(avg_cost),
+            currency="USD",
+        )
 
-    # Build NOTIONAL positions (notional + avg entry)
+    # Build NOTIONAL positions (asset_id-native)
     positions_deriv: Dict[str, DerivativePositionView] = {}
-    for ticker, lots in notional_lots.items():
+    for asset_id, lots in notional_lots.items():
         net = sum(float(v) for v, _ in lots)
         net = _snap(net, LOT_EPS)
         if net == 0.0:
             continue
         avg_px, _ = _weighted_avg_entry_notional(lots)
-        positions_deriv[ticker] = DerivativePositionView(
-            ticker=ticker,
+        positions_deriv[asset_id] = DerivativePositionView(
+            asset_id=str(asset_id),
+            ticker=str(ticker_by_asset.get(asset_id, "")),
             side=("LONG" if net > 0 else "SHORT"),
             open_notional_usd=float(abs(net)),
             avg_entry_price=float(avg_px),
             currency="USD",
         )
 
-    for tkr in list(positions_spot.keys()):
-        if abs(float(positions_spot[tkr].quantity)) < POSITION_QTY_EPS:
-            positions_spot.pop(tkr, None)
+    # Dust filters
+    for aid in list(positions_spot.keys()):
+        if abs(float(positions_spot[aid].quantity)) < POSITION_QTY_EPS:
+            positions_spot.pop(aid, None)
 
-    for tkr in list(positions_deriv.keys()):
-        if abs(float(positions_deriv[tkr].open_notional_usd)) < POSITION_NOTIONAL_EPS:
-            positions_deriv.pop(tkr, None)
-            
+    for aid in list(positions_deriv.keys()):
+        if abs(float(positions_deriv[aid].open_notional_usd)) < POSITION_NOTIONAL_EPS:
+            positions_deriv.pop(aid, None)
+
     # Write reconciliation CSV
     if recon_path is not None:
         df = pd.DataFrame(recon_rows)
@@ -748,7 +776,18 @@ def rebuild_positions_and_pnl_fifo(
                 df[c] = pd.to_numeric(df[c], errors="coerce")
         df["engine_realized_delta"] = df["engine_realized_delta"].fillna(0.0)
         df_focus = df[df["reported_pnl"].notna() | (df["engine_realized_delta"].abs() > 1e-12)].copy()
-        df_focus["abs_diff"] = df_focus["diff_engine_minus_reported"].abs()
+        # pick the diff column whichever exists (spot vs notional naming)
+        diff_col = None
+        for c in ["diff_engine_minus_reported", "diff_engine_minus_reported_usd"]:
+            if c in df_focus.columns:
+                diff_col = c
+                break
+
+        if diff_col is None:
+            # nothing to reconcile; still write file and continue
+            df_focus["abs_diff"] = 0.0
+        else:
+            df_focus["abs_diff"] = pd.to_numeric(df_focus[diff_col], errors="coerce").abs()
         df_focus = df_focus.sort_values(["abs_diff", "ts_utc"], ascending=[False, True])
         df_focus.to_csv(recon_path, index=False)
 
@@ -765,6 +804,7 @@ def rebuild_positions_and_pnl_fifo(
 
     return positions_spot, positions_deriv, float(realized)
 
+
 # ----------------------------
 # Splits
 # ----------------------------
@@ -773,6 +813,7 @@ class SplitEvent:
     ticker: str
     effective_date: str
     factor: float
+
 
 def apply_split_events_to_trades(trades: list[dict], events: Iterable[SplitEvent]) -> list[dict]:
     evs = sorted(
@@ -812,22 +853,159 @@ def apply_split_events_to_trades(trades: list[dict], events: Iterable[SplitEvent
 
     return out
 
+
+# ----------------------------
+# As-of pricing from OHLCV lake
+# ----------------------------
+def _ohlcv_prefix_for_asset_year(asset_id: str, year: int) -> str:
+    return f"{OHLCV_USD_ROOT}/asset_id={asset_id}/year={year}/"
+
+
+def _pick_price_column(df: pd.DataFrame) -> str:
+    # try most likely names first
+    candidates = [
+        "adj_close_usd",
+        "close_usd",
+        "adj_close",
+        "close",
+        "Adj Close",
+        "Close",
+    ]
+    for c in candidates:
+        if c in df.columns:
+            return c
+    raise KeyError(f"OHLCV parquet missing expected close column. cols={list(df.columns)[:50]}")
+
+
+def _normalize_ohlcv_dates(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Ensure we can lookup by date efficiently.
+    Accepts either:
+      - index is datetime-like
+      - a 'date' column exists
+    Produces:
+      - 'date' as python date in a column
+      - sorted by date
+      - drops duplicates keeping last
+    """
+    out = df.copy()
+    if "date" in out.columns:
+        out["date"] = pd.to_datetime(out["date"], errors="coerce").dt.date
+    else:
+        # try index
+        try:
+            out["date"] = pd.to_datetime(out.index, errors="coerce").date
+        except Exception:
+            out["date"] = pd.to_datetime(out.index, errors="coerce").dt.date
+
+    out = out.dropna(subset=["date"]).sort_values("date")
+    out = out.drop_duplicates(subset=["date"], keep="last")
+    return out
+
+
+def _load_asset_close_usd_series_for_year(
+    s3,
+    *,
+    bucket: str,
+    asset_id: str,
+    year: int,
+    cache: dict[tuple[str, int], pd.Series],
+) -> pd.Series:
+    k = (asset_id, int(year))
+    if k in cache:
+        return cache[k]
+
+    prefix = _ohlcv_prefix_for_asset_year(asset_id, int(year))
+    keys = s3_list_keys(s3, bucket=bucket, prefix=prefix)
+    keys = [x for x in keys if x.endswith(".parquet")]
+
+    if not keys:
+        # empty series: no data that year
+        s = pd.Series(dtype="float64")
+        cache[k] = s
+        return s
+
+    dfs: list[pd.DataFrame] = []
+    for key in sorted(keys):
+        try:
+            df = s3_get_parquet_df(s3, bucket=bucket, key=key)
+            if df is None or df.empty:
+                continue
+            dfs.append(df)
+        except Exception:
+            continue
+
+    if not dfs:
+        s = pd.Series(dtype="float64")
+        cache[k] = s
+        return s
+
+    df_all = pd.concat(dfs, ignore_index=False, sort=False)
+    df_all = _normalize_ohlcv_dates(df_all)
+    col = _pick_price_column(df_all)
+
+    s = pd.to_numeric(df_all[col], errors="coerce")
+    s.index = df_all["date"].astype(object)  # python date
+    s = s.dropna()
+    cache[k] = s
+    return s
+
+
+def get_asset_close_usd_asof(
+    s3,
+    *,
+    bucket: str,
+    asset_id: str,
+    asof_date: dt.date,
+    cache: dict[tuple[str, int], pd.Series],
+    max_lookback_days: int = 14,
+) -> Optional[float]:
+    """
+    Calendar-day aware:
+      - If no bar on asof_date (weekend/holiday), walk back until we find one.
+    """
+    d = asof_date
+    for _ in range(max_lookback_days + 1):
+        year = int(d.year)
+        s = _load_asset_close_usd_series_for_year(
+            s3,
+            bucket=bucket,
+            asset_id=asset_id,
+            year=year,
+            cache=cache,
+        )
+        if not s.empty and d in s.index:
+            try:
+                return float(s.loc[d])
+            except Exception:
+                pass
+        d = d - dt.timedelta(days=1)
+    return None
+
+
 # ----------------------------
 # Spot views
 # ----------------------------
-def build_position_views(*, positions: Dict[str, PositionLotAvg], px_map: Dict[str, float]) -> List[PositionView]:
+def build_position_views(
+    *,
+    positions: Dict[str, PositionLotAvg],
+    px_by_asset_id: Dict[str, float],
+) -> List[PositionView]:
     out: List[PositionView] = []
-    for t, p in sorted(positions.items(), key=lambda kv: kv[0]):
+    for asset_id, p in sorted(positions.items(), key=lambda kv: kv[0]):
         qty = float(p.quantity)
         avg_cost = float(p.avg_cost)
-        last = px_map.get(t)
+        tkr = str(p.ticker).upper().strip()
+
+        last = px_by_asset_id.get(str(asset_id))
 
         cost_value = abs(qty) * avg_cost
 
         if last is None or not pd.notna(last):
             out.append(
                 PositionView(
-                    ticker=t,
+                    asset_id=str(asset_id),
+                    ticker=tkr,
                     quantity=qty,
                     avg_cost=avg_cost,
                     last_price=None,
@@ -849,7 +1027,8 @@ def build_position_views(*, positions: Dict[str, PositionLotAvg], px_map: Dict[s
 
         out.append(
             PositionView(
-                ticker=t,
+                asset_id=str(asset_id),
+                ticker=tkr,
                 quantity=qty,
                 avg_cost=avg_cost,
                 last_price=last,
@@ -861,6 +1040,7 @@ def build_position_views(*, positions: Dict[str, PositionLotAvg], px_map: Dict[s
         )
     return out
 
+
 # ----------------------------
 # Main
 # ----------------------------
@@ -871,6 +1051,16 @@ def main():
     ap.add_argument("--as-of", default=None)
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--quantfury-csv", default=None, help="Optional CSV attach value/unit/tag/reported_pnl by trade_id (backfill only).")
+
+    ap.add_argument(
+        "--prices-mode",
+        choices=["asof", "latest"],
+        default="asof",
+        help="SPOT pricing source for unrealized PnL. "
+             "'asof' uses OHLCV close for the as-of date (walking back on non-trading days). "
+             "'latest' uses the latest_prices snapshot (legacy).",
+    )
+
     args = ap.parse_args()
 
     s3 = s3_client(REGION)
@@ -916,7 +1106,7 @@ def main():
     trade_ccys = {str(t.get("currency") or "USD").upper().strip() for t in trades}
     trade_ccys.discard("USD")
 
-    fx_map = {}
+    fx_map: dict[str, pd.Series] = {}
     if trade_ccys:
         start = str(min(pd.Timestamp(t["as_of"]).date() for t in trades) - dt.timedelta(days=10))
         end = str(max(pd.Timestamp(t["as_of"]).date() for t in trades) + dt.timedelta(days=10))
@@ -937,29 +1127,69 @@ def main():
         recon_path="./data/recon_trades_fifo_vs_reported.csv",
     )
 
-    # Spot prices for unrealized
-    latest_prices_key = "market/snapshots/v1/latest_prices.parquet"
-    latest_prices_df = s3_get_parquet_df(s3, bucket=BUCKET, key=latest_prices_key)
+    # ---------------------------------------------------------
+    # As-of date
+    # ---------------------------------------------------------
+    as_of = args.as_of or pd.Timestamp(dt.date.today()).strftime("%Y-%m-%d")
+    asof_date = pd.Timestamp(as_of).date()
 
-    px_map = (
-        latest_prices_df.assign(ticker=lambda d: d["ticker"].astype(str))
-        .set_index("ticker")["adj_close_usd"]
-        .apply(pd.to_numeric, errors="coerce")
-        .dropna()
-        .to_dict()
-    )
+    # ---------------------------------------------------------
+    # Pricing for SPOT unrealized PnL
+    #   - asof: price from OHLCV (calendar-day aware)
+    #   - latest: legacy latest_prices snapshot (not correct for historical, but useful for debugging)
+    # ---------------------------------------------------------
+    px_by_asset_id: dict[str, float] = {}
+    missing_px_spot = 0
 
-    spot_views = build_position_views(positions=positions_spot, px_map=px_map)
+    if args.prices_mode == "asof":
+        # cache per (asset_id, year) to avoid re-reading parquet repeatedly
+        close_cache: dict[tuple[str, int], pd.Series] = {}
+
+        for asset_id in positions_spot.keys():
+            px = get_asset_close_usd_asof(
+                s3,
+                bucket=BUCKET,
+                asset_id=str(asset_id),
+                asof_date=asof_date,
+                cache=close_cache,
+                max_lookback_days=14,
+            )
+            if px is None:
+                missing_px_spot += 1
+            else:
+                px_by_asset_id[str(asset_id)] = float(px)
+
+        prices_source_ref = f"s3://{BUCKET}/{OHLCV_USD_ROOT}/asset_id=<...>/year=<...>/"
+    else:
+        # legacy: latest snapshot parquet by ticker (kept for debugging)
+        latest_prices_key = "market/snapshots/v1/latest_prices.parquet"
+        latest_prices_df = s3_get_parquet_df(s3, bucket=BUCKET, key=latest_prices_key)
+
+        px_map_ticker = (
+            latest_prices_df.assign(ticker=lambda d: d["ticker"].astype(str).str.upper().str.strip())
+            .set_index("ticker")["adj_close_usd"]
+            .apply(pd.to_numeric, errors="coerce")
+            .dropna()
+            .to_dict()
+        )
+
+        for asset_id, p in positions_spot.items():
+            tkr = str(p.ticker).upper().strip()
+            px = px_map_ticker.get(tkr)
+            if px is None:
+                missing_px_spot += 1
+            else:
+                px_by_asset_id[str(asset_id)] = float(px)
+
+        prices_source_ref = f"s3://{BUCKET}/{latest_prices_key}"
+
+    spot_views = build_position_views(positions=positions_spot, px_by_asset_id=px_by_asset_id)
 
     unreal_spot = 0.0
-    missing_px_spot = 0
     for v in spot_views:
         if v.unrealized_pnl is None:
-            missing_px_spot += 1
-        else:
-            unreal_spot += float(v.unrealized_pnl)
-
-    as_of = args.as_of or pd.Timestamp(dt.date.today()).strftime("%Y-%m-%d")
+            continue
+        unreal_spot += float(v.unrealized_pnl)
 
     pnl = PnLSummary(
         as_of=as_of,
@@ -973,17 +1203,18 @@ def main():
 
     positions_payload = {
         "as_of": as_of,
-        "method": "fifo_with_splits_spot_vs_notional_by_asset_type_action_tag",
+        "method": "fifo_with_splits_spot_vs_notional_by_asset_type_action_tag_asset_id_native",
         "spot_positions": [asdict(v) for v in spot_views],
         "derivatives_positions": [asdict(v) for v in positions_deriv.values()],
         "stats": {
             "n_spot_positions": int(len(spot_views)),
             "n_notional_positions": int(len(positions_deriv)),
             "missing_price_spot_n": int(missing_px_spot),
+            "prices_mode": str(args.prices_mode),
         },
         "sources": {
             "trades_prefix": f"s3://{BUCKET}/{engine_key(TRADES_TABLE)}/",
-            "prices_snapshot": "market/snapshots/v1/latest_prices.parquet",
+            "prices_source": prices_source_ref,
         },
     }
 
@@ -1001,6 +1232,7 @@ def main():
     print(f"realized_pnl:     {realized:,.2f}")
     print(f"unrealized_pnl:   {unreal_spot:,.2f} (missing_px_spot={missing_px_spot})")
     print(f"total_pnl:        {realized + unreal_spot:,.2f}")
+    print(f"prices_mode:      {args.prices_mode}")
     print("")
 
     positions_key = dt_key(LEDGER_TABLE, as_of, "positions.json")
@@ -1028,6 +1260,7 @@ def main():
     print(f"  s3://{BUCKET}/{positions_latest_key}")
     print(f"  s3://{BUCKET}/{pnl_latest_key}")
     print("")
+
 
 if __name__ == "__main__":
     main()

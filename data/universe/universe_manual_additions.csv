@@ -4,3 +4,28 @@ CON,CON,1,Concentra Group Holdings Parent Inc,equity,stock,NYSE
 MBRF3,MBRF3.SA,1,Marfrig Global Foods S.A.,equity,stock,Brazil
 BG,BG,1,Bunge Global SA,equity,stock,NYSE
 VCIT,VCIT,1,Vanguard Intermediate-Term Corporate Bond Index,equity,etf,NASDAQ
+QMN20,QMN20,1,Crude Oil WTI Mini July 2020,derivative,futures,NYMEX
+QTUM-USD,QTUM-USD,1,Qtum,crypto,crypto,Coinbase
+CO,CO.PA,1,Casino Guichard-Perrachon S.A.,equity,stock,Euronext
+DASH-USD,DASH-USD,1,Dash,crypto,crypto,Coinbase
+ALXN,ALXN,1,Alexion Pharmaceuticals Inc.,equity,stock,NASDAQ
+QMX22,QMX22,1,Crude Oil WTI Mini November 2022,derivative,futures,NYMEX
+SCU,SCU,1,Sculptor Capital Management Inc.,equity,stock,NYSE
+RENDER-USD,RENDER-USD,1,Render,crypto,crypto,Coinbase
+QUBT,QUBT,1,Quantum Computing Inc.,equity,stock,NASDAQ
+QBTS,QBTS,1,D-Wave Quantum Inc.,equity,stock,NASDAQ
+VXX5,VXX5,1,CBOE Volatility Index (VIX) November 2025,derivative,futures,NYMEX
+GCZ5,GCZ5,1,COMEX Gold December 2025,derivative,futures,NYMEX
+VXV5,VXV5,1,CBOE Volatility Index (VIX) October 2025,derivative,futures,NYMEX
+USD-CNY,USD-CNY,1,US Dollar CN Yuan,fx,fx_pair,Forex
+EUR-USD,EUR-USD,1,Euro US Dollar,fx,fx_pair,Forex
+GCM5,GCM5,1,COMEX Gold April 2025,derivative,futures,NYMEX
+VXJ5,VXJ5,1,CBOE Volatility Index (VIX) April 2025,derivative,futures,NYMEX
+VXG5,VXG5,1,CBOE Volatility Index (VIX) February 2025,derivative,futures,NYMEX
+USD-JPY,USD-JPY,1,US Dollar JP Yen,fx,fx_pair,Forex
+VXF5,VXF5,1,CBOE Volatility Index (VIX) January 2025,derivative,futures,NYMEX
+USD-TRY,USD-TRY,US Dollar Turkish Lira,fx,fx_pair,Forex
+USD-BRL,USD-BRL,US Dollar Brazilian Real,fx,fx_pair,Forex
+ESU4,ESU4,1,E-mini S&P 500 September 2024,derivative,futures,NYMEX
+NQU4,NQU4,1,E-mini Nasdaq 100 September 2024,derivative,futures,NYMEX
+VXQ4,VXQ4,1,CBOE Volatility Index (VIX) August 2024,derivative,futures,NYMEX

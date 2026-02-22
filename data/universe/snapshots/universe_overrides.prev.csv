@@ -124,3 +124,5 @@ D62E7D52B5A45B62,KRZ,KRZ.IR,1,Kerry Group PLC,triage:add_suffix_by_region_hint;c
 B3E5CB693E33BBEC,TT,TT,1,Trane Technologies PLC,triage:add_suffix_by_region_hint;conf=HIGH
 C627A9F698F70100,ADNT,ADNT,1,Adient PLC,triage:add_suffix_by_region_hint;conf=HIGH
 B03989F92ABA04FA,ALLE,ALLE,1,Allegion PLC,triage:add_suffix_by_region_hint;conf=HIGH
+4AE933AEEA356CAA,AM,AM.PA,1,Dassault Aviation SA,triage:add_suffix_by_region_hint;conf=HIGH
+E01F0823B529EE80,BMED,BMED.MI,1,Banca Mediolanum SpA,triage:add_suffix_by_region_hint;conf=HIGH

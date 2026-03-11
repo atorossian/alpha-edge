@@ -28,6 +28,12 @@ def extract_p_hit_main_goal(metrics, goals: list[float], main_goal: float) -> fl
     p_hit = extract_p_hit_map(metrics, goals)
     return float(p_hit.get(float(main_goal), 0.0))
 
+def health_from_raw(score_raw: float, *, k: float = 1.0) -> float:
+    if score_raw is None or (not np.isfinite(float(score_raw))):
+        return 0.0
+    x = float(score_raw)
+    return float(1.0 / (1.0 + np.exp(-k * x)))
+
 
 def compute_portfolio_timeseries(
     closes: pd.DataFrame,

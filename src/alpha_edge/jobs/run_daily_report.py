@@ -56,6 +56,8 @@ from alpha_edge.core.data_loader import (
     parse_portfolio_health,
     parse_ledger_positions_obj,
     clean_returns_matrix,
+    s3_get_json,
+    s3_load_latest_json_asof,
 )
 from alpha_edge.portfolio.rebalance_engine import (
     RebalanceState,
@@ -86,6 +88,14 @@ def _resolve_root_prefix(*, backtest_run_id: str | None) -> str:
         return f"{ENGINE_ROOT_PREFIX}/backtests/{backtest_run_id}"
     return ENGINE_ROOT_PREFIX
 
+def s3_load_ledger_positions_dt(s3, *, bucket: str, root_prefix: str, as_of: str) -> dict | None:
+    key = f"{root_prefix.strip('/')}/ledger/dt={as_of}/positions.json"
+    return s3_get_json(s3, bucket=bucket, key=key)  # use your existing helper
+
+def s3_load_ledger_pnl_dt(s3, *, bucket: str, root_prefix: str, as_of: str) -> dict | None:
+    key = f"{root_prefix.strip('/')}/ledger/dt={as_of}/pnl.json"
+    return s3_get_json(s3, bucket=bucket, key=key)
+
 
 UNIVERSE_CSV_LOCAL = paths.universe_dir() / "universe.csv"
 
@@ -115,6 +125,71 @@ def _load_universe_ticker_to_asset_id() -> dict[str, str]:
     df = df.drop_duplicates(subset=["ticker"], keep="first")
     return dict(zip(df["ticker"].tolist(), df["asset_id"].tolist()))
 
+
+def _diagnose_hmm_history(*, closes: pd.DataFrame, tickers: list[str], as_of_date: str) -> None:
+    """
+    Print per-ticker history stats and identify the limiting ticker for:
+      closes window
+      returns window after pct_change + dropna(any)
+    """
+    if closes is None or closes.empty:
+        print("[diag][hmm] closes is empty")
+        return
+
+    c = closes.copy()
+    c.index = pd.to_datetime(c.index, errors="coerce").tz_localize(None).normalize()
+    c = c.loc[c.index <= pd.Timestamp(as_of_date).tz_localize(None).normalize()]
+
+    cols = [t for t in tickers if t in c.columns]
+    missing = [t for t in tickers if t not in c.columns]
+
+    if missing:
+        print(f"[diag][hmm] missing tickers in closes: {missing[:20]}{'...' if len(missing)>20 else ''}")
+
+    if not cols:
+        print("[diag][hmm] no tickers available in closes")
+        return
+
+    sub = c[cols]
+
+    # First valid date per ticker (after ffill there may be fewer NaNs, but still check)
+    first_valid = {t: sub[t].first_valid_index() for t in cols}
+    last_valid = {t: sub[t].last_valid_index() for t in cols}
+    n_valid = {t: int(sub[t].notna().sum()) for t in cols}
+    n_nan = {t: int(sub[t].isna().sum()) for t in cols}
+
+    # Limiting ticker = latest first_valid (it starts the latest)
+    limiting_by_start = sorted(
+        [(t, first_valid[t]) for t in cols],
+        key=lambda x: (pd.Timestamp.max if x[1] is None else pd.Timestamp(x[1])),
+        reverse=True,
+    )[:5]
+
+    limiting_by_count = sorted([(t, n_valid[t]) for t in cols], key=lambda x: x[1])[:5]
+
+    print("[diag][hmm] closes per ticker (worst 5 by latest start):")
+    for t, d in limiting_by_start:
+        print(f"  - {t}: first_valid={d} last_valid={last_valid[t]} n_valid={n_valid[t]} n_nan={n_nan[t]}")
+
+    print("[diag][hmm] closes per ticker (worst 5 by fewest valid obs):")
+    for t, n in limiting_by_count:
+        print(f"  - {t}: n_valid={n} first_valid={first_valid[t]} last_valid={last_valid[t]} n_nan={n_nan[t]}")
+
+    # Now check returns window impact
+    rets = sub.pct_change()
+
+    # How many NaNs per column in returns?
+    rets_nan = rets.isna().sum().sort_values(ascending=False)
+    print("[diag][hmm] returns NaN counts (top 5):")
+    for t, nn in rets_nan.head(5).items():
+        print(f"  - {t}: nan_returns={int(nn)}")
+
+    # Effective sample after dropna(any)
+    rets_any = rets.dropna(how="any")
+    print(f"[diag][hmm] returns window: rows_before={rets.shape[0]} rows_after_dropna_any={rets_any.shape[0]}")
+    if not rets_any.empty:
+        print(f"[diag][hmm] effective returns start={rets_any.index.min().date()} end={rets_any.index.max().date()}")
+    
 
 def _s3_list_keys(client, bucket: str, prefix: str) -> list[str]:
     keys: list[str] = []
@@ -661,7 +736,7 @@ def run_daily_cycle_asof(
     goals_override: list[float] | None = None,
     main_goal_override: float | None = None,
 ) -> dict:
-    root_prefix = _resolve_root_prefix(backtest_run_id=backtest_run_id)
+    root_prefix = ENGINE_ROOT_PREFIX
     mode = "backtest" if backtest_run_id else "live"
 
     as_of_ts = pd.Timestamp(as_of).tz_localize(None).normalize()
@@ -727,9 +802,14 @@ def run_daily_cycle_asof(
     print(f"[market regime] as_of={market_as_of} target_leverage={market_lev:.2f}x")
 
     # ---------- Inputs ----------
-    raw_ledger_positions = s3_load_latest_json(
-        s3, bucket=ENGINE_BUCKET, root_prefix=root_prefix, table="ledger/positions"
+    raw_ledger_positions = s3_load_ledger_positions_dt(
+        s3, bucket=ENGINE_BUCKET, root_prefix=ENGINE_ROOT_PREFIX, as_of=as_of_date
     )
+    raw_pnl = s3_load_ledger_pnl_dt(
+        s3, bucket=ENGINE_BUCKET, root_prefix=ENGINE_ROOT_PREFIX, as_of=as_of_date
+    ) or {}
+
+    equity_from_ledger = raw_pnl.get("equity") or raw_pnl.get("equity_usd")
     if not raw_ledger_positions:
         raise RuntimeError(f"Missing S3 latest ledger positions under {root_prefix}/ledger/positions/latest.json")
 
@@ -823,6 +903,8 @@ def run_daily_cycle_asof(
 
     closes = closes_all[tickers].copy()
     rets_assets = closes.pct_change().dropna(how="any")
+
+    _diagnose_hmm_history(closes=closes, tickers=tickers, as_of_date=as_of_date)
 
     values = np.array([float(prices_for_valuation[t]) * float(positions[t].quantity) for t in tickers], dtype=np.float64)
     gross = float(np.sum(np.abs(values)))
@@ -933,8 +1015,9 @@ def run_daily_cycle_asof(
     prev_label = raw_mkt_state.get("label")
     prev_lev = raw_mkt_state.get("leverage")
 
+    fs = (lev_rec or {}).get("filter_state") or {}
     cur_label = str(
-        (lev_rec or {}).get("filter_state", {}).get("chosen_label")
+        fs.get("chosen_label")
         or (hmm_res or {}).get("label_commit")
         or "UNKNOWN"
     )

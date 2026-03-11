@@ -1,20 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, List, Optional
+from typing import Dict, List
 
 import pandas as pd
 import pyarrow as pa
 
-
-# ----------------------------
-# Canonical Warehouse Schemas (v=1)
-# ----------------------------
-# Notes:
-# - Use pa.date32() for dates (Athena friendly).
-# - Use pa.timestamp("ms") for timestamps (no timezone).
-# - Keep names stable; evolve via v=2 folder when needed.
-# ----------------------------
 
 DIM_ASSETS_SCHEMA = pa.schema(
     [
@@ -90,14 +81,22 @@ FCT_POSITIONS_DAILY_SCHEMA = pa.schema(
     ]
 )
 
+# ✅ UPDATED (v=1): add net_cashflow_usd + dividends_pnl_usd
 FCT_ACCOUNT_PNL_DAILY_SCHEMA = pa.schema(
     [
         pa.field("as_of_date", pa.date32(), nullable=False),
         pa.field("account_id", pa.string(), nullable=False),
+
         pa.field("realized_pnl_usd", pa.float64(), nullable=True),
         pa.field("unrealized_pnl_usd", pa.float64(), nullable=True),
+
+        # NEW:
+        pa.field("dividends_pnl_usd", pa.float64(), nullable=True),
+        pa.field("net_cashflow_usd", pa.float64(), nullable=True),
+
         pa.field("total_pnl_usd", pa.float64(), nullable=True),
         pa.field("equity_usd", pa.float64(), nullable=True),
+
         pa.field("trade_count", pa.int64(), nullable=True),
         pa.field("tickers_spot", pa.int64(), nullable=True),
         pa.field("tickers_derivatives", pa.int64(), nullable=True),
@@ -127,9 +126,6 @@ FCT_DAILY_REPORT_STATS_SCHEMA = pa.schema(
 )
 
 
-# ----------------------------
-# Schema enforcement
-# ----------------------------
 @dataclass(frozen=True)
 class EnforceResult:
     table: pa.Table
@@ -138,17 +134,6 @@ class EnforceResult:
 
 
 def enforce_schema(df: pd.DataFrame, schema: pa.Schema) -> EnforceResult:
-    """
-    Enforce:
-      - exact column set (schema-driven)
-      - exact column order
-      - arrow types on write
-
-    Strategy:
-      - add missing columns as null
-      - drop extra columns
-      - build Arrow table using schema (safe=False to allow casts)
-    """
     df = df.copy()
 
     schema_cols = [f.name for f in schema]
@@ -163,24 +148,19 @@ def enforce_schema(df: pd.DataFrame, schema: pa.Schema) -> EnforceResult:
     if extra:
         df = df.drop(columns=extra)
 
-    # reorder
     df = df[schema_cols]
 
-    # normalize a few common types for stability (dates + timestamps)
     for field in schema:
         name = field.name
         t = field.type
 
         if pa.types.is_date32(t):
-            # accept strings / timestamps and normalize to date
             df[name] = pd.to_datetime(df[name], errors="coerce").dt.date
 
         elif pa.types.is_timestamp(t):
-            # keep as pandas datetime64[ns] (Arrow will convert)
             df[name] = pd.to_datetime(df[name], errors="coerce", utc=False)
 
         elif pa.types.is_boolean(t):
-            # allow 0/1, "true"/"false"
             if df[name].dtype != "bool":
                 df[name] = df[name].map(
                     lambda x: None
@@ -189,15 +169,10 @@ def enforce_schema(df: pd.DataFrame, schema: pa.Schema) -> EnforceResult:
                 )
 
         elif pa.types.is_integer(t):
-            # pandas nullable integer
             df[name] = pd.to_numeric(df[name], errors="coerce").astype("Int64")
 
         elif pa.types.is_floating(t):
             df[name] = pd.to_numeric(df[name], errors="coerce").astype("float64")
-
-        else:
-            # strings / other: keep as object; Arrow will handle
-            pass
 
     table = pa.Table.from_pandas(df, schema=schema, preserve_index=False, safe=False)
     return EnforceResult(table=table, missing_cols_added=missing, extra_cols_dropped=extra)

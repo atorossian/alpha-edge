@@ -320,16 +320,18 @@ def build_fct_account_pnl_daily_for_dt(
     summary = payload.get("summary") or {}
     method = payload.get("method", None)
 
-    equity_usd = summary.get("equity", None)
-    if equity_usd is None:
-        equity_usd = summary.get("equity_usd", None)
+    dividends_pnl_usd = summary.get("dividends_pnl_usd", summary.get("dividends_usd", None))
+    net_cashflow_usd = summary.get("net_cashflow_usd", summary.get("cashflow_usd", None))
+    equity_usd = summary.get("equity_usd", summary.get("equity", None))
 
     row = {
         "as_of_date": as_of_date,
         "account_id": account_id,
-        "realized_pnl_usd": summary.get("realized_pnl", None),
-        "unrealized_pnl_usd": summary.get("unrealized_pnl_spot", None),
-        "total_pnl_usd": summary.get("total_pnl", None),
+        "realized_pnl_usd": summary.get("realized_pnl", summary.get("realized_pnl_usd", None)),
+        "unrealized_pnl_usd": summary.get("unrealized_pnl_spot", summary.get("unrealized_pnl_usd", None)),
+        "dividends_pnl_usd": dividends_pnl_usd,
+        "net_cashflow_usd": net_cashflow_usd,
+        "total_pnl_usd": summary.get("total_pnl", summary.get("total_pnl_usd", None)),
         "equity_usd": equity_usd,
         "trade_count": summary.get("trade_count", None),
         "tickers_spot": summary.get("tickers_spot", None),
@@ -364,19 +366,39 @@ def build_fct_daily_report_stats_for_dt(
     as_of = str(payload.get("date") or payload.get("as_of") or dt)
     as_of_date = pd.Timestamp(as_of).date()
 
+    # ---- Support both formats:
+    # (1) flat metrics at top-level
+    # (2) nested daily_reports format: {"report": {"eval": {...}}}
+    eval_obj = None
+    if isinstance(payload.get("report"), dict):
+        rep = payload["report"]
+        if isinstance(rep.get("eval"), dict):
+            eval_obj = rep["eval"]
+
+    def pick(*keys, default=None):
+        # try top-level then nested eval
+        for k in keys:
+            if k in payload and payload[k] is not None:
+                return payload[k]
+        if isinstance(eval_obj, dict):
+            for k in keys:
+                if k in eval_obj and eval_obj[k] is not None:
+                    return eval_obj[k]
+        return default
+
     row = {
         "as_of_date": as_of_date,
         "account_id": account_id,
-        "total_notional_usd": payload.get("total_notional_usd", payload.get("total_notional", None)),
-        "equity_usd": payload.get("equity_usd", payload.get("equity", None)),
-        "leverage": payload.get("leverage", None),
-        "ann_return": payload.get("ann_return", None),
-        "ann_vol": payload.get("ann_vol", payload.get("ann_volatility", None)),
-        "sharpe": payload.get("sharpe", None),
-        "max_drawdown": payload.get("max_drawdown", None),
-        "ruin_prob": payload.get("ruin_prob", None),
-        "score": payload.get("score", None),
-        "alpha_vs_bench": payload.get("alpha_vs_bench", None),
+        "total_notional_usd": pick("total_notional_usd", "total_notional"),
+        "equity_usd": pick("equity_usd", "equity"),
+        "leverage": pick("leverage"),
+        "ann_return": pick("ann_return"),
+        "ann_vol": pick("ann_vol", "ann_volatility"),
+        "sharpe": pick("sharpe"),
+        "max_drawdown": pick("max_drawdown"),
+        "ruin_prob": pick("ruin_prob"),
+        "score": pick("score"),
+        "alpha_vs_bench": pick("alpha_vs_bench"),
         "source_key": report_key,
         "load_ts_utc": load_ts,
     }
@@ -384,7 +406,6 @@ def build_fct_daily_report_stats_for_dt(
     df = pd.DataFrame([row])
     res = enforce_schema(df, FCT_DAILY_REPORT_STATS_SCHEMA)
     return res.table
-
 
 # ----------------------------
 # Runner
@@ -402,7 +423,6 @@ def parse_args() -> argparse.Namespace:
     ap.add_argument("--universe-path", default=None, help="Local path to universe.csv (to build dim_assets).")
     ap.add_argument("--build-dim-assets", action="store_true", help="Rewrite dim_assets snapshot (unpartitioned).")
 
-    # NEW: dim-only mode
     ap.add_argument(
         "--dim-assets-only",
         action="store_true",
@@ -412,7 +432,10 @@ def parse_args() -> argparse.Namespace:
     ap.add_argument(
         "--report-key",
         default=None,
-        help="S3 key to report.json for this dt. If omitted, defaults to engine_root/reports/dt=DT/report.json",
+        help=(
+            "S3 key to report.json for this dt. "
+            "If omitted, defaults to engine_root/daily_reports/dt=DT/report.json"
+        ),
     )
     ap.add_argument("--dry-run", action="store_true")
 
@@ -430,10 +453,10 @@ def main() -> None:
     engine_root = str(args.engine_root).strip("/")
     account_id = str(args.account_id)
 
-    # default report key
+    # default report key (UPDATED)
     report_key = args.report_key
     if report_key is None:
-        report_key = lake_key(engine_root, "reports", f"dt={dt_str}", "report.json")
+        report_key = lake_key(engine_root, "daily_reports", f"dt={dt_str}", "report.json")
 
     # 1) dim_assets (optional full snapshot rewrite)
     if args.build_dim_assets:
@@ -451,16 +474,14 @@ def main() -> None:
         if not args.dry_run:
             s3_put_parquet_table(s3, bucket=bucket, key=dim_assets_key, table=table)
 
-        # NEW: stop here if dim-only
         if args.dim_assets_only:
             print("[OK] dim_assets-only mode: skipped fact tables.")
             return
 
-    # guard: dim-assets-only without build-dim-assets is a misuse
     if args.dim_assets_only and (not args.build_dim_assets):
         raise SystemExit("--dim-assets-only requires --build-dim-assets")
 
-    # 2) facts for dt (required)
+    # 2) facts for dt
     trades_table = build_fct_trades_for_dt(
         s3,
         bucket=bucket,

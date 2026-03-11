@@ -69,7 +69,6 @@ class MarketStore:
                     keys.append(k)
         return keys
 
-
     # -------------------------
     # Prefixes (S3 KEYS, not s3://)
     # -------------------------
@@ -93,8 +92,6 @@ class MarketStore:
     def manifests_prefix(self) -> str:
         return f"{self.base_prefix}/manifests/{self.version}"
 
-
-
     # -------------------------
     # Partition path builders
     # -------------------------
@@ -117,8 +114,15 @@ class MarketStore:
         except Exception:
             return {}
 
-
-    def write_asset_year_manifest(self, *, table: str, asset_id: str, year: int, dates: list[str], parts: list[str] | None = None) -> None:
+    def write_asset_year_manifest(
+        self,
+        *,
+        table: str,
+        asset_id: str,
+        year: int,
+        dates: list[str],
+        parts: list[str] | None = None,
+    ) -> None:
         key = self._manifest_key(table=table, asset_id=asset_id, year=year)
         payload = {
             "asset_id": str(asset_id).strip(),
@@ -127,8 +131,11 @@ class MarketStore:
             "parts": sorted(set(str(p) for p in (parts or []))),
             "as_of_utc": pd.Timestamp.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
         }
-        self._put_bytes(key, json.dumps(payload, indent=2, sort_keys=True).encode("utf-8"), content_type="application/json")
-
+        self._put_bytes(
+            key,
+            json.dumps(payload, indent=2, sort_keys=True).encode("utf-8"),
+            content_type="application/json",
+        )
 
     # -------------------------
     # RETURNS FULL DONE CHECKPOINTS (per-asset)
@@ -146,7 +153,11 @@ class MarketStore:
 
     def write_returns_full_done(self, asset_id: str, payload: dict) -> None:
         key = self._returns_full_done_key(asset_id)
-        self._put_bytes(key, json.dumps(payload, indent=2, default=str).encode("utf-8"), content_type="application/json")
+        self._put_bytes(
+            key,
+            json.dumps(payload, indent=2, default=str).encode("utf-8"),
+            content_type="application/json",
+        )
 
     # -------------------------
     # WRITE (append-only parquet)
@@ -195,19 +206,49 @@ class MarketStore:
     # -------------------------
     # SNAPSHOTS
     # -------------------------
-    def write_latest_prices_snapshot(self, latest_prices: pd.DataFrame) -> None:
-        key = f"{self.snapshots_prefix}/latest_prices.parquet"
-        bio = io.BytesIO()
-        latest_prices.to_parquet(bio, index=False)
-        bio.seek(0)
-        self._put_bytes(key, bio.read())
+    def _snapshot_key(self, name: str) -> str:
+        return f"{self.snapshots_prefix}/{name}.parquet"
 
-    def write_latest_returns_snapshot(self, latest_returns: pd.DataFrame) -> None:
-        key = f"{self.snapshots_prefix}/latest_returns.parquet"
+    def _write_snapshot(self, name: str, df: pd.DataFrame) -> None:
         bio = io.BytesIO()
-        latest_returns.to_parquet(bio, index=False)
+        df.to_parquet(bio, index=False)
         bio.seek(0)
-        self._put_bytes(key, bio.read())
+        self._put_bytes(self._snapshot_key(name), bio.read())
+
+    def _read_snapshot(self, name: str) -> pd.DataFrame:
+        key = self._snapshot_key(name)
+        try:
+            raw = self._get_bytes(key)
+            return pd.read_parquet(io.BytesIO(raw))
+        except Exception:
+            return pd.DataFrame()
+
+    # Backward-compatible combined snapshot
+    def write_latest_prices_snapshot(self, latest_prices: pd.DataFrame) -> None:
+        self._write_snapshot("latest_prices", latest_prices)
+
+    def read_latest_prices_snapshot(self) -> pd.DataFrame:
+        return self._read_snapshot("latest_prices")
+
+    # New Phase 0 raw/adjusted snapshot APIs
+    def write_latest_prices_raw_snapshot(self, latest_prices_raw: pd.DataFrame) -> None:
+        self._write_snapshot("latest_prices_raw", latest_prices_raw)
+
+    def read_latest_prices_raw_snapshot(self) -> pd.DataFrame:
+        return self._read_snapshot("latest_prices_raw")
+
+    def write_latest_prices_adjusted_snapshot(self, latest_prices_adjusted: pd.DataFrame) -> None:
+        self._write_snapshot("latest_prices_adjusted", latest_prices_adjusted)
+
+    def read_latest_prices_adjusted_snapshot(self) -> pd.DataFrame:
+        return self._read_snapshot("latest_prices_adjusted")
+
+    # Returns snapshot remains analytics-oriented
+    def write_latest_returns_snapshot(self, latest_returns: pd.DataFrame) -> None:
+        self._write_snapshot("latest_returns", latest_returns)
+
+    def read_latest_returns_snapshot(self) -> pd.DataFrame:
+        return self._read_snapshot("latest_returns")
 
     # -------------------------
     # STATE (json)
@@ -217,7 +258,11 @@ class MarketStore:
         Canonical state for the new asset_id pipeline.
         """
         key = f"{self.state_prefix}/last_date_by_asset_id.json"
-        self._put_bytes(key, json.dumps(last_date_by_asset, indent=2).encode("utf-8"), content_type="application/json")
+        self._put_bytes(
+            key,
+            json.dumps(last_date_by_asset, indent=2).encode("utf-8"),
+            content_type="application/json",
+        )
 
     def read_last_date_state(self) -> dict[str, str]:
         """
@@ -228,7 +273,6 @@ class MarketStore:
         try:
             return json.loads(self._get_bytes(key_asset).decode("utf-8"))
         except Exception:
-            # fallback: legacy file name (if exists)
             key_legacy = f"{self.state_prefix}/last_date_by_ticker.json"
             try:
                 return json.loads(self._get_bytes(key_legacy).decode("utf-8"))
@@ -240,7 +284,11 @@ class MarketStore:
 
     def write_provider_symbol_state(self, mapping: dict[str, str]) -> None:
         key = self._provider_symbol_state_key()
-        self._put_bytes(key, json.dumps(mapping, indent=2, sort_keys=True).encode("utf-8"), content_type="application/json")
+        self._put_bytes(
+            key,
+            json.dumps(mapping, indent=2, sort_keys=True).encode("utf-8"),
+            content_type="application/json",
+        )
 
     def read_provider_symbol_state(self) -> dict[str, str]:
         key = self._provider_symbol_state_key()
@@ -250,14 +298,12 @@ class MarketStore:
             return {}
 
     def write_ingest_failures(self, df: pd.DataFrame) -> None:
-        # latest
         key_latest = f"{self.base_prefix}/ingest_failures/{self.version}/latest.parquet"
         bio = io.BytesIO()
         df.to_parquet(bio, index=False)
         bio.seek(0)
         self._put_bytes(key_latest, bio.read())
 
-        # history
         dt_str = pd.Timestamp.utcnow().strftime("%Y-%m-%d")
         key_hist = f"{self.base_prefix}/ingest_failures/{self.version}/dt={dt_str}/failures.parquet"
         bio = io.BytesIO()
@@ -267,7 +313,11 @@ class MarketStore:
 
     def write_returns_latest_state(self, payload: dict) -> None:
         key = f"{self.state_prefix}/returns_latest.json"
-        self._put_bytes(key, json.dumps(payload, indent=2, default=str).encode("utf-8"), content_type="application/json")
+        self._put_bytes(
+            key,
+            json.dumps(payload, indent=2, default=str).encode("utf-8"),
+            content_type="application/json",
+        )
 
     def read_returns_latest_state(self) -> dict:
         key = f"{self.state_prefix}/returns_latest.json"
@@ -281,7 +331,11 @@ class MarketStore:
 
     def write_regime_filter_state(self, payload: dict) -> None:
         key = self._regime_filter_state_key()
-        self._put_bytes(key, json.dumps(payload, indent=2, default=str).encode("utf-8"), content_type="application/json")
+        self._put_bytes(
+            key,
+            json.dumps(payload, indent=2, default=str).encode("utf-8"),
+            content_type="application/json",
+        )
 
     def read_regime_filter_state(self) -> dict:
         key = self._regime_filter_state_key()
@@ -291,7 +345,7 @@ class MarketStore:
             return {}
 
     # -------------------------
-    # Universe triage outputs (unchanged API)
+    # Universe triage outputs
     # -------------------------
     def write_universe_triage_outputs(
         self,
@@ -303,44 +357,85 @@ class MarketStore:
         mapping_changes: pd.DataFrame | None = None,
         mapping_validation: pd.DataFrame | None = None,
     ) -> None:
-        # These are big-ish; keep pandas direct-to-s3 behavior if you want,
-        # but to stay consistent with "boto3 only", we write via bytes too.
         base = f"{self.base_prefix}/universe_triage/{self.version}/dt={as_of}"
 
-        # triage_report parquet
         bio = io.BytesIO()
         triage_report.to_parquet(bio, index=False)
         bio.seek(0)
         self._put_bytes(f"{base}/triage_report.parquet", bio.read())
 
-        # CSVs
-        self._put_bytes(f"{base}/suggested_overrides.csv", suggested_overrides.to_csv(index=False).encode("utf-8"), content_type="text/csv")
-        self._put_bytes(f"{base}/suggested_exclusions.csv", suggested_exclusions.to_csv(index=False).encode("utf-8"), content_type="text/csv")
+        self._put_bytes(
+            f"{base}/suggested_overrides.csv",
+            suggested_overrides.to_csv(index=False).encode("utf-8"),
+            content_type="text/csv",
+        )
+        self._put_bytes(
+            f"{base}/suggested_exclusions.csv",
+            suggested_exclusions.to_csv(index=False).encode("utf-8"),
+            content_type="text/csv",
+        )
 
         if mapping_changes is not None:
-            self._put_bytes(f"{base}/mapping_changes.csv", mapping_changes.to_csv(index=False).encode("utf-8"), content_type="text/csv")
+            self._put_bytes(
+                f"{base}/mapping_changes.csv",
+                mapping_changes.to_csv(index=False).encode("utf-8"),
+                content_type="text/csv",
+            )
         if mapping_validation is not None:
-            self._put_bytes(f"{base}/mapping_validation.csv", mapping_validation.to_csv(index=False).encode("utf-8"), content_type="text/csv")
+            self._put_bytes(
+                f"{base}/mapping_validation.csv",
+                mapping_validation.to_csv(index=False).encode("utf-8"),
+                content_type="text/csv",
+            )
+    # -------------------------
+    # CORPORATE ACTIONS
+    # -------------------------
+    @property
+    def corporate_actions_prefix(self) -> str:
+        # market/reference/v1/corporate_actions
+        return f"{self.base_prefix}/reference/{self.version}/corporate_actions"
+
+
+    def _corporate_actions_part_key(self, asset_id: str) -> str:
+        asset_id = str(asset_id).strip()
+        return f"{self.corporate_actions_prefix}/asset_id={asset_id}/part-00000.parquet"
+
+
+    def write_corporate_actions_partitioned(self, df: pd.DataFrame) -> list[str]:
+        """
+        Overwrite one parquet part per asset_id:
+        market/reference/v1/corporate_actions/asset_id=<asset_id>/part-00000.parquet
+        """
+        if df is None or df.empty:
+            return []
+
+        df = df.copy()
+        if "asset_id" not in df.columns:
+            raise RuntimeError("Expected 'asset_id' column for corporate actions partitioning.")
+
+        df["asset_id"] = df["asset_id"].astype(str).str.strip()
+        if "effective_date" in df.columns:
+            df["effective_date"] = pd.to_datetime(df["effective_date"], errors="coerce").dt.date
+
+        written: list[str] = []
+
+        for asset_id, g in df.groupby("asset_id", sort=False):
+            out = g.sort_values(["effective_date", "ticker"], kind="stable").reset_index(drop=True)
+
+            bio = io.BytesIO()
+            out.to_parquet(bio, index=False)
+            bio.seek(0)
+
+            key = self._corporate_actions_part_key(str(asset_id))
+            self._put_bytes(key, bio.read(), content_type="application/octet-stream")
+            written.append(key)
+
+        return written
+
 
     # -------------------------
     # READ (boto3 + BytesIO)
     # -------------------------
-    def read_latest_prices_snapshot(self) -> pd.DataFrame:
-        key = f"{self.snapshots_prefix}/latest_prices.parquet"
-        try:
-            raw = self._get_bytes(key)
-            return pd.read_parquet(io.BytesIO(raw))
-        except Exception:
-            return pd.DataFrame()
-
-    def read_latest_returns_snapshot(self) -> pd.DataFrame:
-        key = f"{self.snapshots_prefix}/latest_returns.parquet"
-        try:
-            raw = self._get_bytes(key)
-            return pd.read_parquet(io.BytesIO(raw))
-        except Exception:
-            return pd.DataFrame()
-
     def read_ohlcv_usd(
         self,
         asset_ids: Iterable[str],
@@ -359,6 +454,49 @@ class MarketStore:
     ) -> pd.DataFrame:
         return self._read_partitioned(self.returns_prefix, asset_ids, start, end, columns)
 
+    def read_corporate_actions(
+        self,
+        asset_ids: Iterable[str] | None = None,
+        columns: Optional[list[str]] = None,
+    ) -> pd.DataFrame:
+        """
+        Read partitioned corporate actions. If asset_ids is None, read all partitions.
+        """
+        keys: list[str] = []
+
+        if asset_ids is None:
+            keys = [k for k in self._list_keys(self.corporate_actions_prefix + "/") if k.endswith(".parquet")]
+        else:
+            ids = [str(a).strip() for a in asset_ids if str(a).strip()]
+            for asset_id in ids:
+                key = self._corporate_actions_part_key(asset_id)
+                if self._key_exists(key):
+                    keys.append(key)
+
+        if not keys:
+            return pd.DataFrame()
+
+        dfs: list[pd.DataFrame] = []
+        for key in keys:
+            try:
+                raw = self._get_bytes(key)
+                df = pd.read_parquet(io.BytesIO(raw), columns=columns)
+                if df is not None and not df.empty:
+                    if "asset_id" in df.columns:
+                        df["asset_id"] = df["asset_id"].astype(str).str.strip()
+                    if "effective_date" in df.columns:
+                        df["effective_date"] = pd.to_datetime(df["effective_date"], errors="coerce").dt.date
+                    dfs.append(df)
+            except Exception:
+                continue
+
+        if not dfs:
+            return pd.DataFrame()
+
+        out = pd.concat(dfs, ignore_index=True)
+        if "asset_id" in out.columns and "effective_date" in out.columns:
+            out = out.sort_values(["asset_id", "effective_date"], kind="stable")
+        return out.reset_index(drop=True)
 
     def _read_partitioned(
         self,
@@ -386,7 +524,6 @@ class MarketStore:
         start_ts = pd.to_datetime(start).normalize() if start else None
         end_ts = pd.to_datetime(end).normalize() if end else None
 
-        # years range (tight)
         if start_ts is None and end_ts is None:
             years = [pd.Timestamp.utcnow().year]
         else:
@@ -396,7 +533,6 @@ class MarketStore:
 
         table_name = "ohlcv_usd" if table_prefix == self.ohlcv_prefix else "returns_usd"
 
-        # Collect keys once (manifest parts preferred, fallback to list)
         all_keys: list[str] = []
 
         for asset_id in ids:
@@ -408,18 +544,16 @@ class MarketStore:
                     all_keys.extend(parts)
                     continue
 
-                # Legacy fallback (only when no parts)
                 prefix = f"{table_prefix}/asset_id={asset_id}/year={int(y)}/"
                 keys = [k for k in self._list_keys(prefix) if k.endswith(".parquet")]
                 all_keys.extend(keys)
 
-        # De-dupe (manifests can accumulate duplicates if you ever union twice)
         if not all_keys:
             return pd.DataFrame()
-        all_keys = list(dict.fromkeys(all_keys))  # stable unique
+        all_keys = list(dict.fromkeys(all_keys))
 
         dfs: list[pd.DataFrame] = []
-        max_workers = 16  # safe default; your botocore pool is 64
+        max_workers = 16
 
         with ThreadPoolExecutor(max_workers=max_workers) as ex:
             futs = [ex.submit(_load_one, k) for k in all_keys]

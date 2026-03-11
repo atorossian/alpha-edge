@@ -5,7 +5,7 @@ target_row_id,ticker,yahoo_ticker,lock_yahoo_ticker,expected_name,note
 3F224449EBE1FD24,UNI-USD,UNI7083-USD,1,Uniswap,Quantfury UNI is Uniswap; Yahoo UNI-USD points to a different token
 252CEE46104F0E24,APT-USD,APT21794-USD,1,Aptos,Quantfury APT is Aptos; Yahoo APT-USD points to a different token
 1E0020F0D2D45F33,ARB-USD,ARB11841-USD,1,Arbitrum,Quantfury ARB is Arbitrum; Yahoo ARB-USD points to a different token
-8D22B41A46A5E938,AI.PA,AI.PA,1,Air Liquide,Manual addition (Quantfury has separate asset vs AI)
+8D22B41A46A5E938,AI,AI.PA,1,Air Liquide,Manual addition (Quantfury has separate asset vs AI)
 526C4F97D87323E5,ANDR,ANDR.VI,1,Andritz AG, Quantfury ANDR is Andritz AG; Yahoo ANDR points to a different asset
 26593173D5B405BC,ANE,ANE.MC,1,Corporacion Acciona Energias Renovable SA,triage:add_suffix_by_region_hint;conf=LOW
 C06FF75D9838A72D,BCP,BCP.LS,1,Banco Comercial Português SA,triage:add_suffix_by_region_hint;conf=LOW
@@ -29,6 +29,7 @@ BAF3F1CAF5BA307C,RBI,RBI.VI,1,Raiffeisen Bank International AG,triage:add_suffix
 B972C7BE6FBE4984,VER,VER.VI,1,VERBUND AG,triage:add_suffix_by_region_hint;conf=LOW
 2807A38D6D84E2F6,WIE,WIE.VI,1,Wienerberger AG,triage:add_suffix_by_region_hint;conf=LOW
 4D17A4279D74F09E,XPBR31,XPBR31.SA,1,XP Inc,triage:add_suffix_by_region_hint;conf=HIGH
+C5C6873A246D77D3,XPBR31,XP,1,XP Inc,ticker change
 DBC2021D1A130B4D,BF,BF-B,1,Brown-Forman Corporation,triage:add_suffix_by_region_hint;conf=HIGH
 15D96E79DC2C85AE,OR,OR.PA,1,L'Oréal S.A.,triage:add_suffix_by_region_hint;conf=HIGH
 2FC621173E5C4908,PARA,PSKY,1,Paramount Skydance Corp,triage:add_suffix_by_region_hint;conf=HIGH
@@ -126,3 +127,7 @@ C627A9F698F70100,ADNT,ADNT,1,Adient PLC,triage:add_suffix_by_region_hint;conf=HI
 B03989F92ABA04FA,ALLE,ALLE,1,Allegion PLC,triage:add_suffix_by_region_hint;conf=HIGH
 4AE933AEEA356CAA,AM,AM.PA,1,Dassault Aviation SA,triage:add_suffix_by_region_hint;conf=HIGH
 E01F0823B529EE80,BMED,BMED.MI,1,Banca Mediolanum SpA,triage:add_suffix_by_region_hint;conf=HIGH
+31D845ED83156CA4,AIR,AIR.PA,1,Airbus SE,triage:add_suffix_by_region_hint;conf=HIGH
+5EF2B2C3B2222EBB,FER,FER.MC,1,Ferrovial S.A.,triage:add_suffix_by_region_hint;conf=HIGH
+028BDA11B8D55D6F,TTE,TTE.PA,1,TotalEnergies SE,triage:add_suffix_by_region_hint;conf=HIGH
+EA6F8A2B8A81FF41,ALV,ALV.DE,1,Allianz SE,triage:add_suffix_by_region_hint;conf=HIGHA

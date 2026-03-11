@@ -21,6 +21,9 @@ LEDGER_TABLE = "ledger"
 WAREHOUSE_ROOT = "warehouse"
 WAREHOUSE_VERSION = "v=1"
 
+CASHFLOWS_TABLE = "cashflows"
+DIVIDENDS_TABLE = "dividends"
+
 
 # ----------------------------
 # S3 helpers
@@ -89,27 +92,27 @@ def daterange(start: dt.date, end: dt.date) -> list[dt.date]:
     return out
 
 
-def discover_first_trade_date(s3, *, bucket: str, engine_root: str) -> Optional[dt.date]:
-    """
-    Earliest dt=... folder under engine_root/trades/.
-    """
-    prefix = lake_key(engine_root, TRADES_TABLE, "dt=")
-    objs = s3_list_objects(s3, bucket=bucket, prefix=prefix)
-    if not objs:
-        return None
+def discover_first_activity_date(s3, *, bucket: str, engine_root: str) -> Optional[dt.date]:
+    prefixes = [
+        lake_key(engine_root, TRADES_TABLE, "dt="),
+        lake_key(engine_root, CASHFLOWS_TABLE, "dt="),
+        lake_key(engine_root, DIVIDENDS_TABLE, "dt="),
+    ]
 
     dates: list[dt.date] = []
-    for o in objs:
-        k = o.get("Key")
-        if not isinstance(k, str):
-            continue
-        m = _DT_PART_RE.search(k.replace("\\", "/"))
-        if not m:
-            continue
-        try:
-            dates.append(parse_date(m.group(1)))
-        except Exception:
-            continue
+    for prefix in prefixes:
+        objs = s3_list_objects(s3, bucket=bucket, prefix=prefix)
+        for o in objs:
+            k = o.get("Key")
+            if not isinstance(k, str):
+                continue
+            m = _DT_PART_RE.search(k.replace("\\", "/"))
+            if not m:
+                continue
+            try:
+                dates.append(parse_date(m.group(1)))
+            except Exception:
+                continue
 
     return min(dates) if dates else None
 
@@ -137,9 +140,6 @@ def discover_latest_dt_under_prefix(s3, *, bucket: str, prefix: str) -> Optional
 
 
 def discover_latest_warehouse_dt(s3, *, bucket: str, engine_root: str) -> Optional[dt.date]:
-    """
-    Resume point is the most recent dt among the main fact tables.
-    """
     candidates = [
         wh_key(engine_root, "fct_account_pnl_daily", ""),
         wh_key(engine_root, "fct_positions_daily", ""),
@@ -216,7 +216,7 @@ def run_subprocess(cmd: list[str]) -> None:
 
 def parse_args() -> argparse.Namespace:
     ap = argparse.ArgumentParser(
-        description="Daily warehouse update: rebuild_ledger (Option A) + build_warehouse for calendar days."
+        description="Daily warehouse update: rebuild_ledger + build_warehouse for calendar days."
     )
 
     ap.add_argument("--bucket", default=DEFAULT_BUCKET)
@@ -228,7 +228,7 @@ def parse_args() -> argparse.Namespace:
         default="auto",
         help="Start date YYYY-MM-DD, or 'auto' to resume from latest warehouse dt + 1 (default: auto).",
     )
-    ap.add_argument("--end", default=None, help="End date YYYY-MM-DD. Default: today (local machine date).")
+    ap.add_argument("--end", default=None, help="End date YYYY-MM-DD. Default: today.")
 
     ap.add_argument("--account-id", default="main")
 
@@ -248,18 +248,31 @@ def parse_args() -> argparse.Namespace:
         "--ledger-prices-mode",
         choices=["asof", "latest"],
         default="asof",
-        help="Pricing mode to pass to rebuild_ledger.py. Use 'asof' for historical daily MTM.",
+        help="Pricing mode to pass to rebuild_ledger.py.",
+    )
+
+    ap.add_argument("--use-checkpoints", action="store_true", help="Pass --use-checkpoints to rebuild_ledger.")
+    ap.add_argument(
+        "--write-checkpoints",
+        action="store_true",
+        help="Pass --write-checkpoints to rebuild_ledger while backfilling.",
+    )
+    ap.add_argument(
+        "--checkpoint-policy",
+        choices=["month_end", "always"],
+        default="month_end",
+        help="Checkpoint emission policy passed to rebuild_ledger.",
     )
 
     ap.add_argument(
         "--rebuild-ledger-module",
         default="alpha_edge.operations.rebuild_ledger",
-        help="Python module to execute for ledger rebuild (must support --as-of, --start, --end, --prices-mode).",
+        help="Python module to execute for ledger rebuild.",
     )
     ap.add_argument(
         "--build-warehouse-module",
         default="alpha_edge.warehouse.build_warehouse",
-        help="Python module to execute for warehouse build (must support --dt).",
+        help="Python module to execute for warehouse build.",
     )
 
     return ap.parse_args()
@@ -275,21 +288,23 @@ def main() -> None:
 
     s3 = s3_client(region)
 
-    # This is the ONLY correct start for rebuild_ledger: we must include all prior trades to carry positions forward.
-    first_trade_d = discover_first_trade_date(s3, bucket=bucket, engine_root=engine_root)
-    if first_trade_d is None:
-        raise SystemExit("No trades found under engine_root/trades/dt=...")
-
     end_d = parse_date(args.end) if args.end else dt.date.today()
 
-    # Warehouse start (resume)
+    first_activity_d = discover_first_activity_date(
+        s3,
+        bucket=bucket,
+        engine_root=engine_root,
+    )
+    if first_activity_d is None:
+        raise SystemExit("No activity found under engine_root/{trades,cashflows,dividends}/dt=...")
+
     start_arg = str(args.start).strip().lower()
     if start_arg == "auto":
         latest_wh = discover_latest_warehouse_dt(s3, bucket=bucket, engine_root=engine_root)
         if latest_wh is not None:
             wh_start_d = latest_wh + dt.timedelta(days=1)
         else:
-            wh_start_d = first_trade_d
+            wh_start_d = first_activity_d
     else:
         wh_start_d = parse_date(args.start)
 
@@ -302,18 +317,20 @@ def main() -> None:
         print("[OK] nothing to do (empty date range).")
         return
 
-    print("\n=== WAREHOUSE DAILY UPDATE (OPTION A) ===")
-    print(f"bucket:        {bucket}")
-    print(f"engine_root:   {engine_root}")
-    print(f"region:        {region}")
-    print(f"account_id:    {account_id}")
-    print(f"ledger_start:  {fmt_date(first_trade_d)} (first trade dt)")
-    print(f"warehouse_rng: {fmt_date(wh_start_d)} -> {fmt_date(end_d)} ({len(days)} calendar days)")
-    print(f"dry_run:       {bool(args.dry_run)}")
-    print(f"prices_mode:   {str(args.ledger_prices_mode)}")
+    print("\n=== WAREHOUSE DAILY UPDATE ===")
+    print(f"bucket:             {bucket}")
+    print(f"engine_root:        {engine_root}")
+    print(f"region:             {region}")
+    print(f"account_id:         {account_id}")
+    print(f"ledger_start:       {fmt_date(first_activity_d)}")
+    print(f"warehouse_rng:      {fmt_date(wh_start_d)} -> {fmt_date(end_d)} ({len(days)} calendar days)")
+    print(f"dry_run:            {bool(args.dry_run)}")
+    print(f"prices_mode:        {str(args.ledger_prices_mode)}")
+    print(f"use_checkpoints:    {bool(args.use_checkpoints)}")
+    print(f"write_checkpoints:  {bool(args.write_checkpoints)}")
+    print(f"checkpoint_policy:  {args.checkpoint_policy}")
     print("")
 
-    # Optional dim_assets (once)
     if args.build_dim_assets:
         if not args.universe_path:
             raise SystemExit("--build-dim-assets requires --universe-path")
@@ -348,6 +365,7 @@ def main() -> None:
         print("")
 
     errors: list[str] = []
+
     for d in days:
         dt_str = fmt_date(d)
 
@@ -384,8 +402,10 @@ def main() -> None:
                     sys.executable,
                     "-m",
                     str(args.rebuild_ledger_module),
+                    "--account-id",
+                    account_id,
                     "--start",
-                    fmt_date(first_trade_d),  # IMPORTANT FIX
+                    fmt_date(first_activity_d),
                     "--end",
                     dt_str,
                     "--as-of",
@@ -393,6 +413,19 @@ def main() -> None:
                     "--prices-mode",
                     str(args.ledger_prices_mode),
                 ]
+
+                if args.use_checkpoints:
+                    cmd.append("--use-checkpoints")
+
+                if args.write_checkpoints:
+                    cmd.extend(
+                        [
+                            "--write-checkpoints",
+                            "--checkpoint-policy",
+                            args.checkpoint_policy,
+                        ]
+                    )
+
                 if args.dry_run:
                     cmd.append("--dry-run")
 

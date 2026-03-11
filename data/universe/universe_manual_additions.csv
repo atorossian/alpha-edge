@@ -29,3 +29,4 @@ USD-BRL,USD-BRL,US Dollar Brazilian Real,fx,fx_pair,Forex
 ESU4,ESU4,1,E-mini S&P 500 September 2024,derivative,futures,NYMEX
 NQU4,NQU4,1,E-mini Nasdaq 100 September 2024,derivative,futures,NYMEX
 VXQ4,VXQ4,1,CBOE Volatility Index (VIX) August 2024,derivative,futures,NYMEX
+VXH6,VXH6,1,CBOE Volatility Index (VIX) March 2026,derivative,futures,NYMEX

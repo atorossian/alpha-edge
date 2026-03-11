@@ -99,6 +99,24 @@ def _spectral_profiles_df(
             df[c] = 0.0
     return df
 
+def score_breakdown(p_hit_main: float, ruin: float, penalties: dict, cfg: ScoreConfig | None = None) -> dict:
+    if cfg is None:
+        cfg = ScoreConfig()
+
+    terms = {
+        "base_p_hit_main": float(p_hit_main),
+        "ruin": -cfg.lambda_ruin * float(ruin),
+        "cvar": -cfg.lambda_cvar * float(penalties.get("cvar", 0.0)),
+        "mdd": -cfg.lambda_mdd * float(penalties.get("mdd", 0.0)),
+        "hhi": -cfg.lambda_conc * float(penalties.get("hhi", 0.0)),
+        "avg_corr": -cfg.lambda_corr * float(penalties.get("avg_corr", 0.0)),
+        "time": -cfg.lambda_time * float(penalties.get("time", 0.0)),
+        "hf_ratio": -cfg.lambda_hf_ratio * float(penalties.get("hf_ratio", 0.0)),
+        "freq_overlap": -cfg.lambda_freq_overlap * float(penalties.get("freq_overlap", 0.0)),
+        "spec_entropy": -cfg.lambda_spec_entropy * float(penalties.get("spec_entropy", 0.0)),
+    }
+    terms["score"] = float(sum(terms.values()))
+    return terms
 
 def _frequency_overlap_penalty(w: np.ndarray, V: np.ndarray) -> float:
     if V.shape[0] < 2:
@@ -343,6 +361,8 @@ def evaluate_portfolio_from_arrays(
             penalties["freq_overlap"] = max(0.0, float(overlap) - cfg.freq_overlap_cap)
 
     score = score_candidate(p_main, ruin, penalties, score_config)
+    bd = score_breakdown(p_main, ruin, penalties, score_config)
+    print("[score breakdown]", bd)
 
     g1, g2, g3 = float(goals[0]), float(goals[1]), float(goals[2])
 
@@ -646,6 +666,9 @@ def evaluate_portfolio(
     )
 
     score = score_candidate(p_main, ruin, penalties, score_config)
+
+    bd = score_breakdown(p_main, ruin, penalties, score_config)
+    print("[score breakdown]", bd)
 
     g1, g2, g3 = goals
 

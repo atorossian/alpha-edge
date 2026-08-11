@@ -21,7 +21,9 @@ poetry run python src/alpha_edge/operations/record_trade.py \
   --quantity-unit coins \
   --value "$total_value" \
   --universe-path ./data/universe/universe.csv \
-  --strict-universe
+  --strict-universe \
+  --env prod \
+  --confirm-prod-write
 
 
 quantity=122.76705431
@@ -45,7 +47,9 @@ poetry run python src/alpha_edge/operations/record_trade.py \
   --value "$close_value" \
   --reported-pnl "$(awk -v cv="$close_value" -v ov="$total_value" 'BEGIN { printf "%.2f", cv - ov }')" \
   --universe-path ./data/universe/universe.csv \
-  --strict-universe
+  --strict-universe \
+  --env prod \
+  --confirm-prod-write
 
 
 poetry run python src/alpha_edge/operations/record_trade.py \
@@ -74,7 +78,7 @@ poetry run python src/alpha_edge/operations/backfill_trades_asset_id.py \
   --mode strict
 
  poetry run python src/alpha_edge/jobs/run_warehouse_backfill.py \
-   --start 2020-05-20 \
+   --start 2021-02-01 \
    --end 2026-03-09 \
    --account-id main \
    --ledger-prices-mode asof \

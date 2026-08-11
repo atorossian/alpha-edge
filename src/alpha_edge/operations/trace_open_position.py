@@ -2,18 +2,18 @@ from __future__ import annotations
 
 import argparse
 import json
-import datetime as dt
 from collections import deque
-from dataclasses import dataclass, asdict
+from dataclasses import asdict
 from typing import Any, Deque, Dict, List, Optional
 
 import boto3
 import pandas as pd
 
+from alpha_edge.core.runtime import load_runtime_config
+from alpha_edge.core.run_logging import capture_script_run
+from alpha_edge.core.schemas import RuntimeConfig, TradeRow, OpenQtyLot, OpenValueLot
 
-BUCKET = "alpha-edge-algo"
-REGION = "eu-west-1"
-ENGINE_ROOT = "engine/v1"
+
 TRADES_TABLE = "trades"
 
 QTY_EPS = 1e-9
@@ -24,12 +24,14 @@ _FX_BASES = {
     "EUR", "USD", "GBP", "JPY", "CHF", "AUD", "NZD", "CAD",
     "SEK", "NOK", "DKK", "CNH", "HKD", "SGD", "MXN", "ZAR",
 }
+
 _CRYPTO_BASES = {
     "BTC", "ETH", "ADA", "XRP", "DOT", "BCH", "LTC", "SOL",
     "DOGE", "SUI", "HBAR", "DASH", "BNB", "AVAX", "LINK",
     "MATIC", "ATOM", "NEAR", "UNI", "AAVE", "TRX", "ETC",
     "QTUM",
 }
+
 _CRYPTO_QUOTES = {"USD", "USDT", "USDC", "EUR"}
 
 
@@ -50,7 +52,9 @@ def _parse_ts(ts_utc: str) -> pd.Timestamp:
 def _normalize_unit(u: Optional[str]) -> Optional[str]:
     if u is None:
         return None
+
     s = str(u).strip().lower()
+
     if s in {"share", "shares"}:
         return "shares"
     if s in {"contract", "contracts"}:
@@ -67,6 +71,7 @@ def _normalize_unit(u: Optional[str]) -> Optional[str]:
         return "coins"
     if s in {"derivative", "derivatives"}:
         return "derivative"
+
     return s
 
 
@@ -74,6 +79,7 @@ def _is_fx_pair(ticker: str) -> bool:
     t = str(ticker).upper().strip().replace("/", "-")
     if "-" not in t:
         return False
+
     base, quote = t.split("-", 1)
     return base in _FX_BASES and quote in _FX_BASES
 
@@ -82,14 +88,17 @@ def _is_crypto_pair(ticker: str) -> bool:
     t = str(ticker).upper().strip().replace("/", "-")
     if "-" not in t:
         return False
+
     base, quote = t.split("-", 1)
     return base in _CRYPTO_BASES and quote in _CRYPTO_QUOTES
 
 
 def _route_asset_side(*, ticker: str, quantity_unit: Optional[str]) -> str:
     t = str(ticker).upper().strip()
+
     if _is_fx_pair(t):
         return "NOTIONAL"
+
     return "SPOT"
 
 
@@ -104,27 +113,33 @@ def _side_pri(side: str) -> int:
 # ----------------------------
 # S3 helpers
 # ----------------------------
-def s3_client(region: str = REGION):
-    return boto3.client("s3", region_name=region)
+def s3_client(cfg: RuntimeConfig):
+    return boto3.client("s3", region_name=cfg.region)
 
 
-def engine_key(*parts: str) -> str:
-    return "/".join([ENGINE_ROOT.strip("/")] + [p.strip("/") for p in parts])
+def engine_key(cfg: RuntimeConfig, *parts: str) -> str:
+    return "/".join([cfg.engine_root.strip("/")] + [p.strip("/") for p in parts])
 
 
 def s3_list_keys(s3, *, bucket: str, prefix: str) -> list[str]:
     keys: list[str] = []
     token = None
+
     while True:
         kwargs: dict[str, Any] = dict(Bucket=bucket, Prefix=prefix)
         if token:
             kwargs["ContinuationToken"] = token
+
         resp = s3.list_objects_v2(**kwargs)
+
         for it in resp.get("Contents", []):
             keys.append(it["Key"])
+
         if not resp.get("IsTruncated"):
             break
+
         token = resp.get("NextContinuationToken")
+
     return keys
 
 
@@ -135,82 +150,39 @@ def s3_get_json(s3, *, bucket: str, key: str) -> dict:
 
 
 # ----------------------------
-# Data models
-# ----------------------------
-@dataclass
-class TradeRow:
-    trade_id: str
-    as_of: str
-    ts_utc: str
-    asset_id: str
-    ticker: str
-    side: str
-    action_tag: str
-    quantity: float
-    price: float
-    currency: str
-    quantity_unit: Optional[str]
-    value: Optional[float]
-    reported_pnl: Optional[float]
-    s3_key: str
-
-
-@dataclass
-class OpenQtyLot:
-    trade_id: str
-    as_of: str
-    ts_utc: str
-    asset_id: str
-    ticker: str
-    side: str
-    action_tag: str
-    quantity_open: float
-    quantity_remaining: float
-    price: float
-    value: Optional[float]
-    quantity_unit: Optional[str]
-
-
-@dataclass
-class OpenValueLot:
-    trade_id: str
-    as_of: str
-    ts_utc: str
-    asset_id: str
-    ticker: str
-    side: str
-    action_tag: str
-    value_open: float
-    value_remaining: float
-    price: float
-    quantity: Optional[float]
-    quantity_unit: Optional[str]
-
-
-# ----------------------------
 # Loading / normalization
 # ----------------------------
-def _load_trades(s3, *, start: Optional[str] = None, end: Optional[str] = None) -> List[dict]:
-    prefix = engine_key(TRADES_TABLE, "dt=")
-    keys = s3_list_keys(s3, bucket=BUCKET, prefix=prefix)
+def _load_trades(
+    s3,
+    *,
+    cfg: RuntimeConfig,
+    start: Optional[str] = None,
+    end: Optional[str] = None,
+) -> List[dict]:
+    prefix = engine_key(cfg, TRADES_TABLE, "dt=")
+    keys = s3_list_keys(s3, bucket=cfg.bucket, prefix=prefix)
     keys = [k for k in keys if k.endswith(".json") and "/trade_" in k]
 
     start_d = pd.Timestamp(start).date() if start else None
     end_d = pd.Timestamp(end).date() if end else None
 
     out: List[dict] = []
+
     for k in keys:
         parts = k.split("/")
         dt_part = next((p for p in parts if p.startswith("dt=")), None)
         if not dt_part:
             continue
+
         d = pd.Timestamp(dt_part.replace("dt=", "")).date()
+
         if start_d and d < start_d:
             continue
         if end_d and d > end_d:
             continue
 
-        payload = s3_get_json(s3, bucket=BUCKET, key=k)
+        payload = s3_get_json(s3, bucket=cfg.bucket, key=k)
+
         if isinstance(payload, dict):
             payload["_s3_key"] = k
             out.append(payload)
@@ -230,19 +202,22 @@ def _normalize_trade(t: dict) -> TradeRow:
 
     asset_id = t.get("asset_id", None)
     asset_id = None if asset_id is None else str(asset_id).strip()
+
     if not asset_id:
         raise ValueError(f"Trade {trade_id} missing asset_id")
 
     if side not in ("BUY", "SELL"):
         raise ValueError(f"Trade {trade_id}: invalid side={side}")
+
     if qty <= 0 or price <= 0:
         raise ValueError(f"Trade {trade_id}: qty and price must be > 0")
 
     _ = pd.Timestamp(as_of).date()
     _ = _parse_ts(ts_utc)
 
-    action_tag = (t.get("action_tag") or None)
+    action_tag = t.get("action_tag") or None
     action_tag = None if action_tag is None else str(action_tag).strip().lower()
+
     if action_tag not in {"open", "close", "add", "reduce"}:
         raise ValueError(f"Trade {trade_id}: invalid action_tag={action_tag}")
 
@@ -287,6 +262,8 @@ def trace_open_position(
     *,
     debug: bool = True,
 ) -> dict[str, Any]:
+    _ = debug
+
     spot_long_lots: Dict[str, Deque[OpenQtyLot]] = {}
     spot_short_lots: Dict[str, Deque[OpenQtyLot]] = {}
     notional_long_lots: Dict[str, Deque[OpenValueLot]] = {}
@@ -458,7 +435,6 @@ def trace_open_position(
             events.append(event)
             continue
 
-        # SPOT branch
         if t.side == "BUY" and t.action_tag in {"open", "add"}:
             lots = get_spot_long(t.asset_id)
             lots.append(
@@ -504,6 +480,7 @@ def trace_open_position(
                     lots.popleft()
 
             remaining = _snap(remaining, CLOSE_QTY_EPS)
+
             if remaining > CLOSE_QTY_EPS:
                 event["status"] = "ERROR"
                 event["error"] = f"SELL close/reduce exceeds long exposure; remaining_qty={remaining:.12f}"
@@ -556,6 +533,7 @@ def trace_open_position(
                     lots.popleft()
 
             remaining = _snap(remaining, CLOSE_QTY_EPS)
+
             if remaining > CLOSE_QTY_EPS:
                 event["status"] = "ERROR"
                 event["error"] = f"BUY close/reduce exceeds short exposure; remaining_qty={remaining:.12f}"
@@ -567,25 +545,29 @@ def trace_open_position(
         event["error"] = "Unsupported SPOT combination"
         events.append(event)
 
-    remaining_spot_long = []
-    for asset_id, lots in spot_long_lots.items():
-        for lot in lots:
-            remaining_spot_long.append(asdict(lot))
+    remaining_spot_long = [
+        asdict(lot)
+        for _, lots in spot_long_lots.items()
+        for lot in lots
+    ]
 
-    remaining_spot_short = []
-    for asset_id, lots in spot_short_lots.items():
-        for lot in lots:
-            remaining_spot_short.append(asdict(lot))
+    remaining_spot_short = [
+        asdict(lot)
+        for _, lots in spot_short_lots.items()
+        for lot in lots
+    ]
 
-    remaining_notional_long = []
-    for asset_id, lots in notional_long_lots.items():
-        for lot in lots:
-            remaining_notional_long.append(asdict(lot))
+    remaining_notional_long = [
+        asdict(lot)
+        for _, lots in notional_long_lots.items()
+        for lot in lots
+    ]
 
-    remaining_notional_short = []
-    for asset_id, lots in notional_short_lots.items():
-        for lot in lots:
-            remaining_notional_short.append(asdict(lot))
+    remaining_notional_short = [
+        asdict(lot)
+        for _, lots in notional_short_lots.items()
+        for lot in lots
+    ]
 
     return {
         "events": events,
@@ -599,20 +581,27 @@ def trace_open_position(
 # ----------------------------
 # CLI / rendering
 # ----------------------------
-def main() -> None:
+def parse_args() -> argparse.Namespace:
     ap = argparse.ArgumentParser(description="Trace which trade(s) still leave an open position.")
+    ap.add_argument("--env", default=None, choices=["dev", "staging", "prod"])
+
     ap.add_argument("--ticker", default=None, help="Filter by ticker, e.g. SOL-USD or VXQ4")
     ap.add_argument("--asset-id", default=None, help="Filter by asset_id")
     ap.add_argument("--start", default=None)
     ap.add_argument("--end", default=None)
-    ap.add_argument("--json-out", default=None, help="Optional path to save full trace as JSON")
-    args = ap.parse_args()
+    ap.add_argument("--json-out", default=None, help="Optional local path to save full trace as JSON")
+
+    return ap.parse_args()
+
+
+def _main_impl(args: argparse.Namespace, cfg: RuntimeConfig) -> None:
 
     if not args.ticker and not args.asset_id:
         raise ValueError("Provide at least --ticker or --asset-id")
 
-    s3 = s3_client(REGION)
-    raw = _load_trades(s3, start=args.start, end=args.end)
+    s3 = s3_client(cfg)
+    raw = _load_trades(s3, cfg=cfg, start=args.start, end=args.end)
+
     trades: list[TradeRow] = []
 
     for r in raw:
@@ -623,9 +612,21 @@ def main() -> None:
 
         if args.ticker and t.ticker != str(args.ticker).upper().strip():
             continue
+
         if args.asset_id and t.asset_id != str(args.asset_id).strip():
             continue
+
         trades.append(t)
+
+    print("\n=== TRACE OPEN POSITION ===")
+    print(f"env:      {cfg.env}")
+    print(f"bucket:   {cfg.bucket}")
+    print(f"root:     {cfg.engine_root}")
+    print(f"ticker:   {args.ticker}")
+    print(f"asset_id: {args.asset_id}")
+    print(f"start:    {args.start}")
+    print(f"end:      {args.end}")
+    print("")
 
     if not trades:
         print("No matching trades found.")
@@ -634,10 +635,19 @@ def main() -> None:
     trace = trace_open_position(trades)
 
     print("\n=== MATCHED TRADES ===")
-    for t in sorted(trades, key=lambda x: (_parse_ts(x.ts_utc), _action_pri(x.action_tag), _side_pri(x.side), x.trade_id)):
+    for t in sorted(
+        trades,
+        key=lambda x: (
+            _parse_ts(x.ts_utc),
+            _action_pri(x.action_tag),
+            _side_pri(x.side),
+            x.trade_id,
+        ),
+    ):
         print(
             f"{t.as_of} {t.ts_utc} | {t.trade_id} | {t.ticker} | "
-            f"{t.side} {t.action_tag} | qty={t.quantity} | px={t.price} | val={t.value} | unit={t.quantity_unit}"
+            f"{t.side} {t.action_tag} | qty={t.quantity} | px={t.price} | "
+            f"val={t.value} | unit={t.quantity_unit}"
         )
 
     print("\n=== TRACE EVENTS ===")
@@ -646,6 +656,7 @@ def main() -> None:
             f"{e['trade_id']} | route={e['route']} | {e['side']} {e['action_tag']} | "
             f"qty={e['quantity']} | px={e['price']} | val={e['value']} | status={e['status']}"
         )
+
         if e["consumed_from"]:
             for c in e["consumed_from"]:
                 if "qty_consumed" in c:
@@ -658,6 +669,7 @@ def main() -> None:
                         f"    consumes open_trade={c['open_trade_id']} | "
                         f"value_consumed={c['value_consumed']} | value_left_in_lot={c['value_left_in_lot']}"
                     )
+
         if e["status"] != "OK":
             print(f"    ERROR: {e['error']}")
 
@@ -670,6 +682,7 @@ def main() -> None:
     ]:
         rows = trace[section]
         print(f"\n{section}: {len(rows)}")
+
         for r in rows:
             if "quantity_remaining" in r:
                 print(
@@ -687,7 +700,21 @@ def main() -> None:
     if args.json_out:
         with open(args.json_out, "w", encoding="utf-8") as f:
             json.dump(trace, f, indent=2)
+
         print(f"\n[OK] Wrote JSON trace to {args.json_out}")
+
+
+def main() -> None:
+    args = parse_args()
+    cfg = load_runtime_config(args.env)
+
+    with capture_script_run(
+        cfg=cfg,
+        script_name="operations/trace_open_position.py",
+        input_args=vars(args),
+        dry_run=False,
+    ):
+        _main_impl(args, cfg)
 
 
 if __name__ == "__main__":

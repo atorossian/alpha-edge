@@ -1,0 +1,202 @@
+===== SEARCH DIRS =====
+src
+scripts
+
+===== hardcoded bucket: alpha-edge-algo =====
+src/alpha_edge/backtest/config.py:8:    bucket: str = "alpha-edge-algo"
+src/alpha_edge/backtest/config.py:12:    returns_wide_cache_path: str = "s3://alpha-edge-algo/market/cache/v1/returns_wide_min5y.parquet"
+src/alpha_edge/config/config.py:9:    bucket: str = os.getenv("S3_BUCKET", "alpha-edge-algo")
+src/alpha_edge/core/runtime.py:11:DEFAULT_BUCKET = "alpha-edge-algo"
+src/alpha_edge/jobs/run_daily_report.py:71:DEFAULT_BUCKET = "alpha-edge-algo"
+src/alpha_edge/jobs/run_daily_report.py:225:    s3_bucket: str = "alpha-edge-algo",
+src/alpha_edge/jobs/run_portfolio_search.py:34:DEFAULT_BUCKET = "alpha-edge-algo"
+src/alpha_edge/jobs/run_quarantine_analysis.py:28:DEFAULT_ENGINE_BUCKET = "alpha-edge-algo"
+src/alpha_edge/jobs/run_reports_backfill.py:22:DEFAULT_BUCKET = "alpha-edge-algo"
+src/alpha_edge/jobs/run_score_weights_tuning.py:29:DEFAULT_BUCKET = "alpha-edge-algo"
+src/alpha_edge/jobs/run_universe_update.py:19:DEFAULT_BUCKET = "alpha-edge-algo"
+src/alpha_edge/jobs/run_update_score_caps.py:16:DEFAULT_ENGINE_BUCKET = "alpha-edge-algo"
+src/alpha_edge/jobs/run_warehouse_backfill.py:16:DEFAULT_BUCKET = "alpha-edge-algo"
+src/alpha_edge/maintenance/cleanup_partitions.py:12:DEFAULT_BUCKET = "alpha-edge-algo"
+src/alpha_edge/maintenance/dedupe_ohlcv_partitions_keep_one.py:15:DEFAULT_BUCKET = "alpha-edge-algo"
+src/alpha_edge/maintenance/migrate_local_history_to_s3.py:14:DEFAULT_BUCKET = "alpha-edge-algo"
+src/alpha_edge/maintenance/reset_ticker_history.py:17:DEFAULT_BUCKET = "alpha-edge-algo"
+src/alpha_edge/market/build_corporate_actions.py:16:DEFAULT_BUCKET = "alpha-edge-algo"
+src/alpha_edge/market/build_returns_wide_cache.py:23:    bucket: str = "alpha-edge-algo"
+src/alpha_edge/market/build_returns_wide_cache.py:409:    bucket = str(args.bucket or getattr(runtime_cfg, "bucket", "alpha-edge-algo")).strip()
+src/alpha_edge/market/compute_market_regime.py:29:DEFAULT_BUCKET = "alpha-edge-algo"
+src/alpha_edge/market/download_market_data_from_s3.py:14:    ap.add_argument("--bucket", default="alpha-edge-algo")
+src/alpha_edge/market/ingest_market_data.py:62:DEFAULT_BUCKET = "alpha-edge-algo"
+src/alpha_edge/operations/apply_portfolio_choice.py:16:DEFAULT_BUCKET = "alpha-edge-algo"
+src/alpha_edge/operations/audit_crypto_trade_quantities.py:15:DEFAULT_BUCKET = "alpha-edge-algo"
+src/alpha_edge/operations/backfill_trades_asset_id.py:16:DEFAULT_BUCKET = "alpha-edge-algo"
+src/alpha_edge/operations/build_trade_repair_plan.py:16:DEFAULT_BUCKET = "alpha-edge-algo"
+scripts/audit_env_paths.sh:9:  echo "===== alpha-edge-algo ====="
+scripts/audit_env_paths.sh:11:    "alpha-edge-algo" -n "${SEARCH_DIRS[@]}" 2>/dev/null || true
+scripts/dev_smoke_pipeline.sh:25:BUCKET="${BUCKET:-alpha-edge-algo}"
+scripts/dev_smoke_pipeline.sh:118:#   s3://alpha-edge-algo/dev/engine/v1/trades/
+scripts/dev_smoke_pipeline.sh:119:#   s3://alpha-edge-algo/dev/engine/v1/cashflows/
+scripts/dev_smoke_pipeline.sh:120:#   s3://alpha-edge-algo/dev/engine/v1/dividends/
+
+===== hardcoded engine root: engine/v1 =====
+src/alpha_edge/core/data_loader.py:156:    table_prefix example: "engine/v1/daily_reports"
+src/alpha_edge/core/runtime.py:46:            engine_root="engine/v1",
+src/alpha_edge/core/runtime.py:48:            warehouse_root="engine/v1/warehouse",
+src/alpha_edge/core/runtime.py:56:        engine_root=f"{env_norm}/engine/v1",
+src/alpha_edge/core/runtime.py:58:        warehouse_root=f"{env_norm}/engine/v1/warehouse",
+src/alpha_edge/jobs/run_daily_report.py:73:DEFAULT_ENGINE_ROOT_PREFIX = "engine/v1"
+src/alpha_edge/jobs/run_portfolio_search.py:36:DEFAULT_ENGINE_ROOT = "engine/v1"
+src/alpha_edge/jobs/run_portfolio_search.py:303:      - dev/staging write under cfg.engine_root, not prod engine/v1.
+src/alpha_edge/jobs/run_quarantine_analysis.py:30:DEFAULT_ENGINE_ROOT_PREFIX = "engine/v1"
+src/alpha_edge/jobs/run_reports_backfill.py:24:DEFAULT_ENGINE_ROOT = "engine/v1"
+src/alpha_edge/jobs/run_score_weights_tuning.py:31:DEFAULT_ENGINE_ROOT = "engine/v1"
+src/alpha_edge/jobs/run_universe_update.py:21:DEFAULT_ENGINE_ROOT = "engine/v1"
+src/alpha_edge/jobs/run_update_score_caps.py:18:DEFAULT_ENGINE_ROOT_PREFIX = "engine/v1"
+src/alpha_edge/jobs/run_warehouse_backfill.py:18:DEFAULT_ENGINE_ROOT = "engine/v1"
+src/alpha_edge/maintenance/migrate_local_history_to_s3.py:16:DEFAULT_ENGINE_ROOT = "engine/v1"
+src/alpha_edge/market/compute_market_regime.py:31:DEFAULT_ENGINE_ROOT = "engine/v1"
+src/alpha_edge/operations/apply_portfolio_choice.py:18:DEFAULT_ENGINE_ROOT = "engine/v1"
+src/alpha_edge/operations/audit_crypto_trade_quantities.py:17:DEFAULT_ENGINE_ROOT = "engine/v1"
+src/alpha_edge/operations/backfill_trades_asset_id.py:18:DEFAULT_ENGINE_ROOT = "engine/v1"
+src/alpha_edge/operations/build_trade_repair_plan.py:18:DEFAULT_ENGINE_ROOT = "engine/v1"
+scripts/audit_env_paths.sh:14:  echo "===== engine/v1 ====="
+scripts/audit_env_paths.sh:16:    "engine/v1" -n "${SEARCH_DIRS[@]}" 2>/dev/null || true
+scripts/dev_smoke_pipeline.sh:118:#   s3://alpha-edge-algo/dev/engine/v1/trades/
+scripts/dev_smoke_pipeline.sh:119:#   s3://alpha-edge-algo/dev/engine/v1/cashflows/
+scripts/dev_smoke_pipeline.sh:120:#   s3://alpha-edge-algo/dev/engine/v1/dividends/
+
+===== hardcoded market root fragments =====
+src/alpha_edge/backtest/config.py:12:    returns_wide_cache_path: str = "s3://alpha-edge-algo/market/cache/v1/returns_wide_min5y.parquet"
+src/alpha_edge/jobs/run_daily_report.py:226:    s3_root_prefix: str = "market/ohlcv_usd/v1",
+src/alpha_edge/maintenance/dedupe_ohlcv_partitions_keep_one.py:28:#   market/ohlcv_usd/v1/asset_id=XYZ/year=2024/file.parquet
+src/alpha_edge/maintenance/dedupe_ohlcv_partitions_keep_one.py:29:#   market/ohlcv_usd/v1/ticker=SPY/year=2024/file.parquet
+src/alpha_edge/maintenance/dedupe_ohlcv_partitions_keep_one.py:30:#   dev/market/ohlcv_usd/v1/asset_id=XYZ/year=2024/file.parquet
+src/alpha_edge/market/build_returns_wide_cache.py:28:    #   prod -> market/cache/v1
+src/alpha_edge/market/build_returns_wide_cache.py:29:    #   dev  -> dev/market/cache/v1
+src/alpha_edge/market/build_returns_wide_cache.py:175:    root = store.returns_prefix  # e.g. market/returns_usd/v1
+
+===== suspicious runtime constants =====
+src/alpha_edge/core/runtime.py:11:DEFAULT_BUCKET = "alpha-edge-algo"
+src/alpha_edge/core/runtime.py:38:    bucket = os.getenv("ALPHA_EDGE_BUCKET", DEFAULT_BUCKET).strip()
+src/alpha_edge/jobs/run_daily_report.py:71:DEFAULT_BUCKET = "alpha-edge-algo"
+src/alpha_edge/jobs/run_daily_report.py:73:DEFAULT_ENGINE_ROOT_PREFIX = "engine/v1"
+src/alpha_edge/jobs/run_daily_report.py:74:DEFAULT_MARKET_ROOT = "market"
+src/alpha_edge/jobs/run_portfolio_search.py:34:DEFAULT_BUCKET = "alpha-edge-algo"
+src/alpha_edge/jobs/run_portfolio_search.py:36:DEFAULT_ENGINE_ROOT = "engine/v1"
+src/alpha_edge/jobs/run_portfolio_search.py:37:DEFAULT_MARKET_ROOT = "market"
+src/alpha_edge/jobs/run_portfolio_search.py:41:    return str(getattr(cfg, "bucket", DEFAULT_BUCKET)).strip()
+src/alpha_edge/jobs/run_portfolio_search.py:49:    return str(getattr(cfg, "engine_root", DEFAULT_ENGINE_ROOT)).strip("/")
+src/alpha_edge/jobs/run_portfolio_search.py:53:    return str(getattr(cfg, "market_root", DEFAULT_MARKET_ROOT)).strip("/")
+src/alpha_edge/jobs/run_quarantine_analysis.py:28:DEFAULT_ENGINE_BUCKET = "alpha-edge-algo"
+src/alpha_edge/jobs/run_quarantine_analysis.py:29:DEFAULT_ENGINE_REGION = "eu-west-1"
+src/alpha_edge/jobs/run_quarantine_analysis.py:30:DEFAULT_ENGINE_ROOT_PREFIX = "engine/v1"
+src/alpha_edge/jobs/run_quarantine_analysis.py:44:    return str(getattr(cfg, "bucket", DEFAULT_ENGINE_BUCKET))
+src/alpha_edge/jobs/run_quarantine_analysis.py:48:    return str(getattr(cfg, "region", DEFAULT_ENGINE_REGION))
+src/alpha_edge/jobs/run_quarantine_analysis.py:52:    return str(getattr(cfg, "engine_root", DEFAULT_ENGINE_ROOT_PREFIX)).strip("/")
+src/alpha_edge/jobs/run_quarantine_analysis.py:426:    bucket: str = DEFAULT_ENGINE_BUCKET,
+src/alpha_edge/jobs/run_quarantine_analysis.py:427:    region: str = DEFAULT_ENGINE_REGION,
+src/alpha_edge/jobs/run_quarantine_analysis.py:428:    engine_root: str = DEFAULT_ENGINE_ROOT_PREFIX,
+src/alpha_edge/jobs/run_reports_backfill.py:22:DEFAULT_BUCKET = "alpha-edge-algo"
+src/alpha_edge/jobs/run_reports_backfill.py:24:DEFAULT_ENGINE_ROOT = "engine/v1"
+src/alpha_edge/jobs/run_reports_backfill.py:31:    return str(getattr(cfg, "bucket", DEFAULT_BUCKET))
+src/alpha_edge/jobs/run_reports_backfill.py:39:    return str(getattr(cfg, "engine_root", DEFAULT_ENGINE_ROOT)).strip("/")
+src/alpha_edge/jobs/run_score_weights_tuning.py:29:DEFAULT_BUCKET = "alpha-edge-algo"
+src/alpha_edge/jobs/run_score_weights_tuning.py:31:DEFAULT_ENGINE_ROOT = "engine/v1"
+src/alpha_edge/jobs/run_score_weights_tuning.py:32:DEFAULT_MARKET_ROOT = "market"
+src/alpha_edge/jobs/run_score_weights_tuning.py:36:    return str(getattr(cfg, "bucket", DEFAULT_BUCKET)).strip()
+src/alpha_edge/jobs/run_score_weights_tuning.py:44:    return str(getattr(cfg, "engine_root", DEFAULT_ENGINE_ROOT)).strip("/")
+src/alpha_edge/jobs/run_score_weights_tuning.py:48:    return str(getattr(cfg, "market_root", DEFAULT_MARKET_ROOT)).strip("/")
+src/alpha_edge/jobs/run_universe_update.py:19:DEFAULT_BUCKET = "alpha-edge-algo"
+src/alpha_edge/jobs/run_universe_update.py:21:DEFAULT_ENGINE_ROOT = "engine/v1"
+src/alpha_edge/jobs/run_universe_update.py:47:    return str(getattr(cfg, "bucket", DEFAULT_BUCKET))
+src/alpha_edge/jobs/run_universe_update.py:55:    return str(getattr(cfg, "engine_root", DEFAULT_ENGINE_ROOT)).strip("/")
+src/alpha_edge/jobs/run_update_score_caps.py:16:DEFAULT_ENGINE_BUCKET = "alpha-edge-algo"
+src/alpha_edge/jobs/run_update_score_caps.py:17:DEFAULT_ENGINE_REGION = "eu-west-1"
+src/alpha_edge/jobs/run_update_score_caps.py:18:DEFAULT_ENGINE_ROOT_PREFIX = "engine/v1"
+src/alpha_edge/jobs/run_update_score_caps.py:36:    return str(getattr(cfg, "bucket", DEFAULT_ENGINE_BUCKET))
+src/alpha_edge/jobs/run_update_score_caps.py:40:    return str(getattr(cfg, "region", DEFAULT_ENGINE_REGION))
+src/alpha_edge/jobs/run_update_score_caps.py:44:    return str(getattr(cfg, "engine_root", DEFAULT_ENGINE_ROOT_PREFIX)).strip("/")
+src/alpha_edge/jobs/run_warehouse_backfill.py:16:DEFAULT_BUCKET = "alpha-edge-algo"
+src/alpha_edge/jobs/run_warehouse_backfill.py:18:DEFAULT_ENGINE_ROOT = "engine/v1"
+src/alpha_edge/jobs/run_warehouse_backfill.py:34:    return str(getattr(cfg, "bucket", DEFAULT_BUCKET))
+src/alpha_edge/jobs/run_warehouse_backfill.py:42:    return str(getattr(cfg, "engine_root", DEFAULT_ENGINE_ROOT)).strip("/")
+src/alpha_edge/maintenance/cleanup_partitions.py:12:DEFAULT_BUCKET = "alpha-edge-algo"
+src/alpha_edge/maintenance/cleanup_partitions.py:14:DEFAULT_MARKET_ROOT = "market"
+src/alpha_edge/maintenance/cleanup_partitions.py:21:    return str(getattr(cfg, "bucket", DEFAULT_BUCKET)).strip()
+src/alpha_edge/maintenance/cleanup_partitions.py:33:    return str(getattr(cfg, "market_root", DEFAULT_MARKET_ROOT)).strip("/")
+src/alpha_edge/maintenance/dedupe_ohlcv_partitions_keep_one.py:15:DEFAULT_BUCKET = "alpha-edge-algo"
+src/alpha_edge/maintenance/dedupe_ohlcv_partitions_keep_one.py:17:DEFAULT_MARKET_ROOT = "market"
+src/alpha_edge/maintenance/dedupe_ohlcv_partitions_keep_one.py:38:    return str(getattr(cfg, "bucket", DEFAULT_BUCKET)).strip()
+src/alpha_edge/maintenance/dedupe_ohlcv_partitions_keep_one.py:46:    return str(getattr(cfg, "market_root", DEFAULT_MARKET_ROOT)).strip("/")
+src/alpha_edge/maintenance/migrate_local_history_to_s3.py:14:DEFAULT_BUCKET = "alpha-edge-algo"
+src/alpha_edge/maintenance/migrate_local_history_to_s3.py:16:DEFAULT_ENGINE_ROOT = "engine/v1"
+src/alpha_edge/maintenance/migrate_local_history_to_s3.py:58:    return str(getattr(cfg, "bucket", DEFAULT_BUCKET)).strip()
+src/alpha_edge/maintenance/migrate_local_history_to_s3.py:66:    return str(getattr(cfg, "engine_root", DEFAULT_ENGINE_ROOT)).strip("/")
+src/alpha_edge/maintenance/reset_ticker_history.py:17:DEFAULT_BUCKET = "alpha-edge-algo"
+src/alpha_edge/maintenance/reset_ticker_history.py:19:DEFAULT_MARKET_ROOT = "market"
+src/alpha_edge/maintenance/reset_ticker_history.py:26:    return str(getattr(cfg, "bucket", DEFAULT_BUCKET)).strip()
+src/alpha_edge/maintenance/reset_ticker_history.py:34:    return str(getattr(cfg, "market_root", DEFAULT_MARKET_ROOT)).strip("/")
+src/alpha_edge/market/build_corporate_actions.py:16:DEFAULT_BUCKET = "alpha-edge-algo"
+src/alpha_edge/market/build_corporate_actions.py:24:    return str(getattr(cfg, "bucket", DEFAULT_BUCKET))
+src/alpha_edge/market/compute_market_regime.py:29:DEFAULT_BUCKET = "alpha-edge-algo"
+src/alpha_edge/market/compute_market_regime.py:31:DEFAULT_ENGINE_ROOT = "engine/v1"
+src/alpha_edge/market/compute_market_regime.py:32:DEFAULT_MARKET_ROOT = "market"
+src/alpha_edge/market/compute_market_regime.py:42:    return str(getattr(cfg, "bucket", DEFAULT_BUCKET)).strip()
+src/alpha_edge/market/compute_market_regime.py:50:    return str(getattr(cfg, "engine_root", DEFAULT_ENGINE_ROOT)).strip("/")
+src/alpha_edge/market/compute_market_regime.py:54:    return str(getattr(cfg, "market_root", DEFAULT_MARKET_ROOT)).strip("/")
+src/alpha_edge/market/ingest_market_data.py:62:DEFAULT_BUCKET = "alpha-edge-algo"
+src/alpha_edge/market/ingest_market_data.py:64:DEFAULT_MARKET_ROOT = "market"
+src/alpha_edge/market/ingest_market_data.py:68:    return str(getattr(cfg, "bucket", DEFAULT_BUCKET)).strip()
+src/alpha_edge/market/ingest_market_data.py:76:    return str(getattr(cfg, "market_root", DEFAULT_MARKET_ROOT)).strip("/")
+src/alpha_edge/market/ingest_market_data.py:91:        if str(market_root).strip("/") != DEFAULT_MARKET_ROOT:
+src/alpha_edge/market/ingest_market_data.py:797:    bucket: str = DEFAULT_BUCKET,
+src/alpha_edge/market/ingest_market_data.py:799:    market_root: str = DEFAULT_MARKET_ROOT,
+src/alpha_edge/operations/apply_portfolio_choice.py:16:DEFAULT_BUCKET = "alpha-edge-algo"
+src/alpha_edge/operations/apply_portfolio_choice.py:18:DEFAULT_ENGINE_ROOT = "engine/v1"
+src/alpha_edge/operations/apply_portfolio_choice.py:34:    return str(getattr(cfg, "bucket", DEFAULT_BUCKET))
+src/alpha_edge/operations/apply_portfolio_choice.py:42:    return str(getattr(cfg, "engine_root", DEFAULT_ENGINE_ROOT)).strip("/")
+src/alpha_edge/operations/audit_crypto_trade_quantities.py:15:DEFAULT_BUCKET = "alpha-edge-algo"
+src/alpha_edge/operations/audit_crypto_trade_quantities.py:17:DEFAULT_ENGINE_ROOT = "engine/v1"
+src/alpha_edge/operations/audit_crypto_trade_quantities.py:27:    return str(getattr(cfg, "bucket", DEFAULT_BUCKET))
+src/alpha_edge/operations/audit_crypto_trade_quantities.py:35:    return str(getattr(cfg, "engine_root", DEFAULT_ENGINE_ROOT)).strip("/")
+src/alpha_edge/operations/backfill_trades_asset_id.py:16:DEFAULT_BUCKET = "alpha-edge-algo"
+src/alpha_edge/operations/backfill_trades_asset_id.py:18:DEFAULT_ENGINE_ROOT = "engine/v1"
+src/alpha_edge/operations/backfill_trades_asset_id.py:39:    return str(getattr(cfg, "bucket", DEFAULT_BUCKET))
+src/alpha_edge/operations/backfill_trades_asset_id.py:47:    return str(getattr(cfg, "engine_root", DEFAULT_ENGINE_ROOT)).strip("/")
+src/alpha_edge/operations/build_trade_repair_plan.py:16:DEFAULT_BUCKET = "alpha-edge-algo"
+src/alpha_edge/operations/build_trade_repair_plan.py:18:DEFAULT_ENGINE_ROOT = "engine/v1"
+src/alpha_edge/operations/build_trade_repair_plan.py:39:    return str(getattr(cfg, "bucket", DEFAULT_BUCKET))
+src/alpha_edge/operations/build_trade_repair_plan.py:47:    return str(getattr(cfg, "engine_root", DEFAULT_ENGINE_ROOT)).strip("/")
+scripts/audit_env_paths.sh:26:    "ENGINE_BUCKET\|ENGINE_REGION\|ENGINE_ROOT\|ENGINE_ROOT_PREFIX\|OHLCV_USD_ROOT\|RETURNS_WIDE_CACHE_PATH" \
+
+===== direct MarketStore constructors =====
+src/alpha_edge/backtest/engine.py:83:    store = MarketStore(bucket=cfg.bucket, region=cfg.region)
+src/alpha_edge/jobs/run_daily_report.py:791:    market = MarketStore(bucket=bucket, region=region)
+src/alpha_edge/jobs/run_portfolio_search.py:65:        return MarketStore(
+src/alpha_edge/jobs/run_portfolio_search.py:71:        return MarketStore(
+src/alpha_edge/jobs/run_quarantine_analysis.py:449:        _market = MarketStore(bucket=bucket, region=region, base_prefix=market_root)
+src/alpha_edge/jobs/run_quarantine_analysis.py:451:        _market = MarketStore(bucket=bucket, region=region)
+src/alpha_edge/maintenance/reset_ticker_history.py:43:        return MarketStore(
+src/alpha_edge/maintenance/reset_ticker_history.py:49:        return MarketStore(
+src/alpha_edge/market/build_corporate_actions.py:268:    store = MarketStore(bucket=bucket, region=region)
+src/alpha_edge/market/build_returns_wide_cache.py:107:        return MarketStore(
+src/alpha_edge/market/build_returns_wide_cache.py:118:        return MarketStore(bucket=cfg.bucket, region=cfg.region)
+src/alpha_edge/market/compute_market_regime.py:65:        return MarketStore(
+src/alpha_edge/market/compute_market_regime.py:71:        return MarketStore(
+src/alpha_edge/market/download_market_data_from_s3.py:22:    store = MarketStore(bucket=args.bucket)
+src/alpha_edge/market/engine_market_loader.py:72:    store = MarketStore(bucket=bucket)
+src/alpha_edge/market/ingest_market_data.py:89:        return MarketStore(bucket=bucket, region=region, base_prefix=market_root)
+src/alpha_edge/market/ingest_market_data.py:96:        return MarketStore(bucket=bucket, region=region)
+src/alpha_edge/operations/rebuild_ledger.py:423:    store = MarketStore(bucket=cfg.bucket, region=cfg.region)
+src/alpha_edge/operations/rebuild_ledger.py:1549:    _ = MarketStore(bucket=cfg.bucket, region=cfg.region)
+
+===== direct CacheConfig constructors =====
+src/alpha_edge/jobs/run_daily_report.py:772:    cache_cfg = CacheConfig(bucket=bucket, min_years=float(5.0))
+src/alpha_edge/jobs/run_portfolio_search.py:99:      CacheConfig(bucket=..., region=..., market_root=..., min_years=...)
+src/alpha_edge/jobs/run_portfolio_search.py:102:      CacheConfig(bucket=..., cache_prefix=..., min_years=...)
+src/alpha_edge/jobs/run_portfolio_search.py:105:      CacheConfig(bucket=..., min_years=...)
+src/alpha_edge/jobs/run_portfolio_search.py:113:        return CacheConfig(
+src/alpha_edge/jobs/run_portfolio_search.py:123:        return CacheConfig(
+src/alpha_edge/jobs/run_portfolio_search.py:131:    return CacheConfig(
+src/alpha_edge/market/build_returns_wide_cache.py:416:    cfg = CacheConfig(
+
+===== direct pd.read_parquet s3 paths =====

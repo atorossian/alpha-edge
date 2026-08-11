@@ -14,7 +14,7 @@ from alpha_edge.portfolio.optimizer_engine import _spectral_profiles_df, evaluat
 
 
 # ----------------------------
-# Fingerprint / archive
+# Fingerprint / archive / diversity diagnostics
 # ----------------------------
 
 def _weights_fingerprint(weights: Dict[str, float], decimals: int = 6) -> Tuple[Tuple[str, float], ...]:
@@ -22,16 +22,115 @@ def _weights_fingerprint(weights: Dict[str, float], decimals: int = 6) -> Tuple[
     Stable fingerprint for deduplication.
     - sort tickers
     - round weights to avoid tiny float differences
-    - keep signed weights (so long_short portfolios don't collide with long_only)
+    - keep signed weights so long/short portfolios do not collide with long-only
     """
     items = tuple(
         sorted(
-            (t, round(float(w), decimals))
+            (str(t).upper().strip(), round(float(w), decimals))
             for t, w in weights.items()
-            if abs(float(w)) > 0.0
+            if np.isfinite(float(w)) and abs(float(w)) > 0.0
         )
     )
     return items
+
+
+def _weight_l1_distance(a: Dict[str, float], b: Dict[str, float]) -> float:
+    """Signed L1 distance over the union of assets. Higher means more structurally different."""
+    keys = set(str(k).upper().strip() for k in (a or {}).keys())
+    keys |= set(str(k).upper().strip() for k in (b or {}).keys())
+    if not keys:
+        return 0.0
+    dist = 0.0
+    for k in keys:
+        dist += abs(float((a or {}).get(k, 0.0) or 0.0) - float((b or {}).get(k, 0.0) or 0.0))
+    return float(dist)
+
+
+def _asset_overlap_ratio(a: Dict[str, float], b: Dict[str, float]) -> float:
+    """Jaccard overlap of active asset sets. Higher means more similar."""
+    sa = {str(k).upper().strip() for k, v in (a or {}).items() if abs(float(v)) > 1e-12}
+    sb = {str(k).upper().strip() for k, v in (b or {}).items() if abs(float(v)) > 1e-12}
+    if not sa and not sb:
+        return 1.0
+    union = sa | sb
+    if not union:
+        return 1.0
+    return float(len(sa & sb) / len(union))
+
+
+def _schedule_value(
+    *,
+    gen_idx: int,
+    generations: int,
+    start: float,
+    end: float,
+    power: float = 1.5,
+) -> float:
+    """Anneal a value from start to end across generations."""
+    if generations <= 1:
+        return float(end)
+    x = float(gen_idx) / float(max(1, generations - 1))
+    x = min(1.0, max(0.0, x))
+    return float(end + (float(start) - float(end)) * (1.0 - x) ** float(power))
+
+
+def _portfolio_diversity_summary(population: list[EvalMetrics]) -> dict:
+    """Lightweight generation-level exploration diagnostics."""
+    candidates = [m for m in (population or []) if getattr(m, "weights", None)]
+    if not candidates:
+        return {
+            "population_size": 0,
+            "unique_assets_used": 0,
+            "avg_assets_per_candidate": 0.0,
+            "avg_pairwise_asset_overlap": 0.0,
+            "avg_pairwise_weight_l1_distance": 0.0,
+            "top_asset_frequency": [],
+            "avg_net_exposure": 0.0,
+            "avg_short_gross": 0.0,
+        }
+
+    asset_counts: dict[str, int] = {}
+    asset_counts_per_candidate: list[int] = []
+    net_exposures: list[float] = []
+    short_grosses: list[float] = []
+
+    for m in candidates:
+        weights = {str(k).upper().strip(): float(v) for k, v in m.weights.items() if abs(float(v)) > 1e-12}
+        asset_counts_per_candidate.append(len(weights))
+        net_exposures.append(float(sum(weights.values())))
+        short_grosses.append(float(sum(-v for v in weights.values() if v < 0.0)))
+        for t in weights:
+            asset_counts[t] = asset_counts.get(t, 0) + 1
+
+    overlaps: list[float] = []
+    distances: list[float] = []
+    max_pairs = 500
+    pair_count = 0
+    for i in range(len(candidates)):
+        for j in range(i + 1, len(candidates)):
+            overlaps.append(_asset_overlap_ratio(candidates[i].weights, candidates[j].weights))
+            distances.append(_weight_l1_distance(candidates[i].weights, candidates[j].weights))
+            pair_count += 1
+            if pair_count >= max_pairs:
+                break
+        if pair_count >= max_pairs:
+            break
+
+    n = float(len(candidates))
+    top_assets = sorted(asset_counts.items(), key=lambda kv: (-kv[1], kv[0]))[:10]
+
+    return {
+        "population_size": int(len(candidates)),
+        "unique_assets_used": int(len(asset_counts)),
+        "avg_assets_per_candidate": float(np.mean(asset_counts_per_candidate)) if asset_counts_per_candidate else 0.0,
+        "avg_pairwise_asset_overlap": float(np.mean(overlaps)) if overlaps else 0.0,
+        "avg_pairwise_weight_l1_distance": float(np.mean(distances)) if distances else 0.0,
+        "top_asset_frequency": [
+            {"ticker": str(t), "count": int(c), "frequency": float(c / n)} for t, c in top_assets
+        ],
+        "avg_net_exposure": float(np.mean(net_exposures)) if net_exposures else 0.0,
+        "avg_short_gross": float(np.mean(short_grosses)) if short_grosses else 0.0,
+    }
 
 
 def _archive_add(
@@ -40,11 +139,42 @@ def _archive_add(
     *,
     decimals: int = 6,
     archive_limit: int | None = None,
+    diversity_min_l1: float = 0.0,
+    diversity_check_top_k: int = 250,
 ) -> None:
+    """
+    Add candidate to archive with optional diversity-aware retention.
+
+    Exact duplicates are still deduplicated by fingerprint. When diversity_min_l1
+    is enabled, a new candidate that is very close to an existing high-score
+    archived candidate only replaces it if the new score is better.
+    """
     fp = _weights_fingerprint(m.weights, decimals=decimals)
     cur = archive.get(fp)
-    if (cur is None) or (m.score > cur.score):
-        archive[fp] = m
+    if cur is not None:
+        if m.score > cur.score:
+            archive[fp] = m
+        return
+
+    if diversity_min_l1 > 0.0 and archive:
+        top_existing = sorted(archive.items(), key=lambda kv: kv[1].score, reverse=True)[: int(diversity_check_top_k)]
+        nearest_fp = None
+        nearest_m = None
+        nearest_dist = float("inf")
+        for ex_fp, ex_m in top_existing:
+            d = _weight_l1_distance(m.weights, ex_m.weights)
+            if d < nearest_dist:
+                nearest_dist = d
+                nearest_fp = ex_fp
+                nearest_m = ex_m
+
+        if nearest_m is not None and nearest_dist < float(diversity_min_l1):
+            if m.score > nearest_m.score and nearest_fp is not None:
+                del archive[nearest_fp]
+                archive[fp] = m
+            return
+
+    archive[fp] = m
 
     if archive_limit is not None and len(archive) > archive_limit:
         if len(archive) > int(archive_limit * 1.10):
@@ -421,9 +551,19 @@ def evolve_portfolios_ga(
     *,
     weight_mode: str = "long_only",
     return_archive: bool = False,
+    return_diagnostics: bool = False,
     archive_limit: int | None = 50000,
     archive_fp_decimals: int = 6,
-) -> List[EvalMetrics] | Tuple[List[EvalMetrics], List[EvalMetrics]]:
+    mutation_sigma_start: float = 0.30,
+    mutation_sigma_end: float = 0.05,
+    replace_prob_start: float = 0.40,
+    replace_prob_end: float = 0.05,
+    immigrant_rate_start: float = 0.20,
+    immigrant_rate_end: float = 0.03,
+    exploration_power: float = 1.5,
+    archive_diversity_min_l1: float = 0.15,
+    archive_diversity_check_top_k: int = 250,
+) -> List[EvalMetrics] | Tuple[List[EvalMetrics], List[EvalMetrics]] | Tuple[List[EvalMetrics], List[EvalMetrics], dict]:
 
     if rng is None:
         rng = np.random.default_rng()
@@ -588,10 +728,33 @@ def evolve_portfolios_ga(
 
         # ---------- generations ----------
         n_elite = max(1, int(pop_size * elite_frac))
+        generation_diagnostics: list[dict] = []
 
         for gen in range(generations):
             n_paths = int(n_paths_init + (n_paths_final - n_paths_init) * (gen / max(1, generations - 1)))
             population.sort(key=lambda m: m.score, reverse=True)
+
+            sigma_gen = _schedule_value(
+                gen_idx=gen,
+                generations=generations,
+                start=float(mutation_sigma_start),
+                end=float(mutation_sigma_end),
+                power=float(exploration_power),
+            )
+            replace_prob_gen = _schedule_value(
+                gen_idx=gen,
+                generations=generations,
+                start=float(replace_prob_start),
+                end=float(replace_prob_end),
+                power=float(exploration_power),
+            )
+            immigrant_rate_gen = _schedule_value(
+                gen_idx=gen,
+                generations=generations,
+                start=float(immigrant_rate_start),
+                end=float(immigrant_rate_end),
+                power=float(exploration_power),
+            )
 
             if generations > 1 and (gen / float(generations - 1)) >= elite_strict_after:
                 feasible = [m for m in population if m.ruin_prob_1y <= ruin_cap_strict]
@@ -602,19 +765,33 @@ def evolve_portfolios_ga(
             new_population = elites.copy()
 
             for em in elites:
-                _archive_add(archive, em, decimals=archive_fp_decimals, archive_limit=archive_limit)
+                _archive_add(
+                    archive,
+                    em,
+                    decimals=archive_fp_decimals,
+                    archive_limit=archive_limit,
+                    diversity_min_l1=float(archive_diversity_min_l1),
+                    diversity_check_top_k=int(archive_diversity_check_top_k),
+                )
+
+            remaining_slots = max(0, pop_size - len(new_population))
+            n_immigrants = min(remaining_slots, max(0, int(round(pop_size * float(immigrant_rate_gen)))))
+            n_children = max(0, remaining_slots - n_immigrants)
 
             children: list[dict[str, float]] = []
-            while len(children) < (pop_size - len(new_population)):
+            parent_pool = population[: max(pop_size // 2, n_elite)]
+            while len(children) < n_children:
                 try:
-                    parents = rng.choice(population[: max(pop_size // 2, n_elite)], size=2, replace=False)
+                    replace_parents = len(parent_pool) < 2
+                    parents = rng.choice(parent_pool, size=2, replace=replace_parents)
                     p_a, p_b = parents[0], parents[1]
 
                     child_w = crossover_weights(
-                        p_a.weights, p_b.weights,
+                        p_a.weights,
+                        p_b.weights,
                         max_assets=max_assets,
                         rng=rng,
-                        weight_mode=weight_mode
+                        weight_mode=weight_mode,
                     )
                     child_w = mutate_weights(
                         child_w,
@@ -622,49 +799,144 @@ def evolve_portfolios_ga(
                         max_assets=max_assets,
                         min_assets=min_assets,
                         rng=rng,
-                        sigma=0.15,
-                        replace_prob=0.25,
+                        sigma=float(sigma_gen),
+                        replace_prob=float(replace_prob_gen),
                         weight_mode=weight_mode,
                     )
                     children.append(child_w)
                 except Exception:
                     continue
 
-            tasks = _build_tasks(children, n_paths=n_paths)
+            immigrants: list[dict[str, float]] = []
+            for _ in range(n_immigrants):
+                try:
+                    immigrants.append(
+                        sample_random_weights(
+                            universe,
+                            max_assets=max_assets,
+                            min_assets=min_assets,
+                            rng=rng,
+                            weight_mode=weight_mode,
+                        )
+                    )
+                except Exception:
+                    continue
+
+            tasks = _build_tasks(children + immigrants, n_paths=n_paths)
             cap_gen = ruin_cap_for_gen(gen)
+            gen_eval_ok = 0
+            gen_eval_failed = 0
+            gen_rejected_ruin = 0
 
             for metrics in _map_tasks(ex, tasks):
                 if metrics is None:
+                    gen_eval_failed += 1
                     continue
 
-                _archive_add(archive, metrics, decimals=archive_fp_decimals, archive_limit=archive_limit)
+                gen_eval_ok += 1
+                _archive_add(
+                    archive,
+                    metrics,
+                    decimals=archive_fp_decimals,
+                    archive_limit=archive_limit,
+                    diversity_min_l1=float(archive_diversity_min_l1),
+                    diversity_check_top_k=int(archive_diversity_check_top_k),
+                )
 
                 if metrics.ruin_prob_1y > cap_gen:
+                    gen_rejected_ruin += 1
                     continue
 
                 new_population.append(metrics)
                 if len(new_population) >= pop_size:
                     break
 
+            # If the generation was too heavily filtered, top up with prior best candidates.
+            # This avoids parent-pool collapse in the next generation while keeping the run moving.
+            if len(new_population) < max(2, n_elite) and population:
+                for m in population:
+                    if m not in new_population:
+                        new_population.append(m)
+                    if len(new_population) >= max(2, n_elite):
+                        break
+
             population = new_population
+            population.sort(key=lambda m: m.score, reverse=True)
 
             best = population[0]
+            diversity = _portfolio_diversity_summary(population)
+            generation_diagnostics.append(
+                {
+                    "generation": int(gen + 1),
+                    "generation_index": int(gen),
+                    "n_paths": int(n_paths),
+                    "ruin_cap": float(cap_gen),
+                    "mutation_sigma": float(sigma_gen),
+                    "replace_prob": float(replace_prob_gen),
+                    "immigrant_rate": float(immigrant_rate_gen),
+                    "immigrants_requested": int(n_immigrants),
+                    "children_requested": int(n_children),
+                    "eval_ok": int(gen_eval_ok),
+                    "eval_failed": int(gen_eval_failed),
+                    "rejected_ruin": int(gen_rejected_ruin),
+                    "accepted_population_size": int(len(population)),
+                    "archive_size": int(len(archive)),
+                    "best_score": float(best.score),
+                    "best_ruin_prob_1y": float(best.ruin_prob_1y),
+                    "diversity": diversity,
+                }
+            )
+
             g1, g2, g3 = goals
             print(
                 f"Gen {gen+1}/{generations} | best score={best.score:.4f} "
                 f"P({g1:.0f})={best.p_hit_goal_1_1y:.2%} "
                 f"P({g2:.0f})={best.p_hit_goal_2_1y:.2%} "
                 f"P({g3:.0f})={best.p_hit_goal_3_1y:.2%} "
-                f"ruin={best.ruin_prob_1y:.2%}",
-                flush=True
+                f"ruin={best.ruin_prob_1y:.2%} "
+                f"sigma={sigma_gen:.3f} replace={replace_prob_gen:.3f} immigrants={n_immigrants} "
+                f"unique_assets={diversity.get('unique_assets_used', 0)}",
+                flush=True,
             )
 
     population.sort(key=lambda m: m.score, reverse=True)
+    archive_sorted = sorted(archive.values(), key=lambda m: m.score, reverse=True)
+
+    diagnostics = {
+        "schema_version": "ga_exploration_diagnostics_v1",
+        "config": {
+            "mutation_sigma_start": float(mutation_sigma_start),
+            "mutation_sigma_end": float(mutation_sigma_end),
+            "replace_prob_start": float(replace_prob_start),
+            "replace_prob_end": float(replace_prob_end),
+            "immigrant_rate_start": float(immigrant_rate_start),
+            "immigrant_rate_end": float(immigrant_rate_end),
+            "exploration_power": float(exploration_power),
+            "archive_diversity_min_l1": float(archive_diversity_min_l1),
+            "archive_diversity_check_top_k": int(archive_diversity_check_top_k),
+        },
+        "init": {
+            "tasks_total": int(tasks_total),
+            "eval_ok": int(eval_ok),
+            "eval_failed": int(eval_failed),
+            "accepted": int(accepted),
+            "rejected_ruin": int(rejected_ruin),
+            "ruin_cap_init": float(ruin_cap_init),
+        },
+        "generations": generation_diagnostics,
+        "final_population": _portfolio_diversity_summary(population),
+        "archive": {
+            "size": int(len(archive_sorted)),
+            "diversity": _portfolio_diversity_summary(archive_sorted[: min(250, len(archive_sorted))]),
+        },
+    }
 
     if not return_archive:
         return population
 
-    archive_sorted = sorted(archive.values(), key=lambda m: m.score, reverse=True)
+    if return_diagnostics:
+        return population, archive_sorted, diagnostics
+
     return population, archive_sorted
 
 
@@ -778,3 +1050,79 @@ def refine_portfolio_annealing(
                 current = cand
 
     return best
+
+
+def evaluate_weights_for_search(
+    *,
+    returns: pd.DataFrame,
+    weights: dict[str, float],
+    equity0: float,
+    notional: float,
+    goals: list[float],
+    main_goal: float,
+    score_config: ScoreConfig | None = None,
+    n_paths: int = 5000,
+    mc_seed: int | None = 123,
+    block_size: int | tuple[int, int] | None = (8, 12),
+    weight_mode: str = "long_short",
+) -> EvalMetrics:
+    """
+    Evaluate an existing weight dictionary using the same array-based evaluator
+    used by GA workers and annealing.
+
+    This is intended for:
+      - current live portfolio evaluation
+      - local transition optimizer baseline
+      - shadow/current comparisons
+
+    It keeps Milestone 17 aligned with the portfolio search engine.
+    """
+    if score_config is None:
+        score_config = ScoreConfig()
+
+    weights_n = {
+        str(k): float(v)
+        for k, v in (weights or {}).items()
+        if str(k) in returns.columns and np.isfinite(float(v)) and abs(float(v)) > 1e-12
+    }
+
+    if not weights_n:
+        raise ValueError("No valid weights overlap returns columns.")
+
+    tickers = list(weights_n.keys())
+
+    returns_clean = returns[tickers].dropna(how="all")
+    if returns_clean.empty:
+        raise ValueError("No returns rows available for selected weights.")
+
+    spec_df_full = _spectral_profiles_df(
+        returns[tickers].fillna(0.0),
+        bands_days=score_config.fft_bands_days,
+    )
+
+    try:
+        spec_rows = spec_df_full.loc[tickers, ["hf", "mf", "lf", "entropy"]].to_numpy(
+            dtype=np.float32,
+            copy=False,
+        )
+    except Exception:
+        spec_rows = None
+
+    X = returns[tickers].to_numpy(dtype=np.float32, copy=False)
+
+    return evaluate_portfolio_from_arrays(
+        rets_assets=X,
+        tickers=tickers,
+        weights=weights_n,
+        equity0=float(equity0),
+        notional=float(notional),
+        goals=(float(goals[0]), float(goals[1]), float(goals[2])),
+        main_goal=float(main_goal),
+        score_config=score_config,
+        mc_seed=mc_seed,
+        spec_rows=spec_rows,
+        n_paths=int(n_paths),
+        days=252,
+        block_size=block_size,
+        weight_mode=weight_mode,
+    )

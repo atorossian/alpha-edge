@@ -1,0 +1,97 @@
+name: Validate Alpha Edge
+
+on:
+  pull_request:
+    branches: [beta, main]
+  push:
+    branches: [beta, main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: validate-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  branch-policy:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Enforce feature to beta and beta to main flow
+        env:
+          BASE_REF: ${{ github.base_ref }}
+          HEAD_REF: ${{ github.head_ref }}
+        run: |
+          set -euo pipefail
+          echo "Validating ${HEAD_REF} -> ${BASE_REF}"
+
+          if [[ "${BASE_REF}" == "main" ]]; then
+            [[ "${HEAD_REF}" == "beta" ]] || {
+              echo "Only beta may be merged into main."
+              exit 1
+            }
+          elif [[ "${BASE_REF}" == "beta" ]]; then
+            [[ "${HEAD_REF}" =~ ^(feature/[^/]+|bugfix/[^/]+|hotfix/[^/]+)$ ]] || {
+              echo "beta only accepts feature/*, bugfix/*, or hotfix/* branches."
+              exit 1
+            }
+          fi
+
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      ALPHA_EDGE_ENV: dev
+      ALPHA_EDGE_BUCKET: alpha-edge-tests
+      ALPHA_EDGE_REGION: eu-west-1
+      AWS_ACCESS_KEY_ID: testing
+      AWS_SECRET_ACCESS_KEY: testing
+      AWS_DEFAULT_REGION: eu-west-1
+      AWS_EC2_METADATA_DISABLED: "true"
+      PYTHONPATH: src
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12.8
+        uses: actions/setup-python@v5
+        with:
+          python-version: 3.12.8
+          cache: pip
+
+      - name: Install Poetry 2.1.2
+        run: pip install poetry==2.1.2
+
+      - name: Install project and CI dependencies
+        run: |
+          poetry install --no-interaction --no-ansi
+          poetry run pip install -r requirements-dev.txt
+
+      - name: Compile source tree
+        run: poetry run python -m compileall -q src
+
+      - name: Ruff format check
+        run: poetry run ruff format --check tests
+
+      - name: Ruff lint
+        run: poetry run ruff check tests src/alpha_edge/core/audit.py src/alpha_edge/core/run_logging.py src/alpha_edge/core/runtime.py src/alpha_edge/operations/operation_lifecycle.py
+
+      - name: Test suite with coverage
+        run: |
+          poetry run pytest \
+            --cov=alpha_edge.core.audit \
+            --cov=alpha_edge.core.run_logging \
+            --cov=alpha_edge.core.runtime \
+            --cov=alpha_edge.operations.operation_lifecycle \
+            --cov=alpha_edge.operations.record_trade \
+            --cov-report=term-missing \
+            --cov-report=xml \
+            --cov-fail-under=20
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-xml
+          path: coverage.xml

@@ -1,6 +1,10 @@
 # run_daily_report.py
 from __future__ import annotations
 
+from alpha_edge.core.audit import build_audit_event, write_audit_event
+from alpha_edge.core.run_logging import capture_script_run
+
+import argparse
 import datetime as dt
 from dataclasses import asdict
 from typing import Dict, Any
@@ -31,6 +35,11 @@ from alpha_edge.portfolio.report_engine import (
     print_decision_addendum,
 )
 from alpha_edge.portfolio.reinvest_engine import reinvest_leftover_with_frozen_core
+
+from alpha_edge.risk.actuarial.portfolio_search_output import (
+    build_actuarial_diagnostic_from_portfolio_report,
+    maybe_print_actuarial_diagnostic_section,
+)
 
 from alpha_edge.market.hmm_engine import (
     GaussianHMM,
@@ -65,10 +74,12 @@ from alpha_edge.portfolio.rebalance_engine import (
     build_rescale_plan,
     compute_gross_notional_from_positions,
 )
+from alpha_edge.core.runtime import load_runtime_config, require_prod_confirmation
 
-ENGINE_BUCKET = "alpha-edge-algo"
-ENGINE_REGION = "eu-west-1"
-ENGINE_ROOT_PREFIX = "engine/v1"
+DEFAULT_BUCKET = "alpha-edge-algo"
+DEFAULT_REGION = "eu-west-1"
+DEFAULT_ENGINE_ROOT_PREFIX = "engine/v1"
+DEFAULT_MARKET_ROOT = "market"
 
 TAKE_PROFIT_STATE_TABLE = "take_profit/state"
 TAKE_PROFIT_PLAN_TABLE = "take_profit/plan"
@@ -79,28 +90,289 @@ TAKE_PROFIT_ASSETS_PLAN_TABLE = "take_profit/assets_plan"
 
 MARKET_RESCALE_STATE_TABLE = "regimes/market_rescale_state"
 
-RETURNS_WIDE_CACHE_PATH = "s3://alpha-edge-algo/market/cache/v1/returns_wide_min5y.parquet"
-OHLCV_USD_ROOT = "s3://alpha-edge-algo/market/ohlcv_usd/v1"
 
-
-def _resolve_root_prefix(*, backtest_run_id: str | None) -> str:
+def _resolve_root_prefix(*, engine_root: str, backtest_run_id: str | None) -> str:
+    engine_root = str(engine_root).strip("/")
     if backtest_run_id:
-        return f"{ENGINE_ROOT_PREFIX}/backtests/{backtest_run_id}"
-    return ENGINE_ROOT_PREFIX
+        return f"{engine_root}/backtests/{backtest_run_id}"
+    return engine_root
+
+
+def _load_returns_wide_cache(
+    *, bucket: str, market_root: str, as_of_ts: pd.Timestamp, refresh: bool = False
+) -> pd.DataFrame:
+    if refresh:
+        cache_cfg = CacheConfig(bucket=bucket, min_years=float(5.0))
+        build_returns_wide_cache(cache_cfg)
+    else:
+        print("[returns_wide] using existing S3 cache; pass --refresh-returns-cache to rebuild")
+    path = f"s3://{bucket}/{market_root.strip('/')}/cache/v1/returns_wide_min5y.parquet"
+    df = pd.read_parquet(path, engine="pyarrow").sort_index()
+    df, _ = clean_returns_matrix(df)
+    df.index = pd.to_datetime(df.index, errors="coerce").tz_localize(None).normalize()
+    df = df.loc[df.index <= as_of_ts]
+    if df.shape[0] < 252:
+        raise RuntimeError(f"Not enough returns history up to as_of={as_of_ts.date()}: rows={df.shape[0]}")
+    return df
+
+
+def _compute_live_equity_from_ledger_and_prices(*, pnl_summary: dict, spot_rows: list[dict], prices_for_valuation: pd.Series) -> float:
+    net_cashflow = float(pnl_summary.get("net_cashflow_usd", 0.0) or 0.0)
+    realized = float(pnl_summary.get("realized_pnl", 0.0) or 0.0)
+    dividends = float(pnl_summary.get("dividends_pnl_usd", 0.0) or 0.0)
+    unrealized = 0.0
+    missing = []
+    for r in spot_rows:
+        t = str(r.get("ticker") or "").upper().strip()
+        if not t:
+            continue
+        qty = float(r.get("quantity") or 0.0)
+        if abs(qty) <= 0.0:
+            continue
+        avg_cost = r.get("avg_cost")
+        if avg_cost is None:
+            raise RuntimeError(f"Cannot compute live equity: missing avg_cost for {t}")
+        px = prices_for_valuation.get(t, np.nan)
+        if not np.isfinite(float(px)):
+            missing.append(t)
+            continue
+        unrealized += (float(px) - float(avg_cost)) * qty if qty > 0 else (float(avg_cost) - float(px)) * abs(qty)
+    if missing:
+        raise RuntimeError("Cannot compute live equity: missing valuation prices for " + ", ".join(sorted(set(missing))))
+    equity = net_cashflow + realized + dividends + unrealized
+    print("[equity] source=ledger_cashflows_realized_dividends_plus_live_marks "
+          f"net_cashflow={net_cashflow:.2f} realized={realized:.2f} dividends={dividends:.2f} "
+          f"live_unrealized={unrealized:.2f} equity={equity:.2f}")
+    return float(equity)
+
+
+def _asset_id_ticker_maps_from_ledger_rows(*, spot_rows: list[dict], deriv_rows: list[dict]) -> tuple[dict[str, str], dict[str, str]]:
+    asset_to_ticker, ticker_to_asset = {}, {}
+    for r in list(spot_rows or []) + list(deriv_rows or []):
+        aid = str(r.get("asset_id") or "").strip()
+        t = str(r.get("ticker") or "").upper().strip()
+        if not aid or not t:
+            continue
+        if t in ticker_to_asset and ticker_to_asset[t] != aid:
+            raise RuntimeError(f"Ticker {t} maps to multiple live asset_ids: {ticker_to_asset[t]} and {aid}")
+        asset_to_ticker[aid] = t
+        ticker_to_asset[t] = aid
+    return asset_to_ticker, ticker_to_asset
+
+
+def _build_live_augmented_returns_for_portfolio(
+    *, returns_wide: pd.DataFrame, spot_rows: list[dict], deriv_rows: list[dict],
+    latest_close_prices: pd.Series, prices_for_valuation: pd.Series, as_of_run_date: str,
+) -> tuple[pd.DataFrame, dict[str, Any]]:
+    asset_to_ticker, ticker_to_asset = _asset_id_ticker_maps_from_ledger_rows(spot_rows=spot_rows, deriv_rows=deriv_rows)
+    if not asset_to_ticker:
+        raise RuntimeError("No asset_id/ticker pairs in ledger positions for returns_wide evaluation.")
+    missing = [aid for aid in asset_to_ticker if aid not in returns_wide.columns]
+    if missing:
+        raise RuntimeError("Portfolio asset_ids missing from returns_wide: " + ", ".join(missing[:20]))
+    df = returns_wide[list(asset_to_ticker.keys())].copy().rename(columns=asset_to_ticker)
+    df.columns = [str(c).upper().strip() for c in df.columns]
+    df = df.dropna(how="any")
+    live = {}
+    missing_live = []
+    for t in df.columns:
+        last_close = latest_close_prices.get(t, np.nan)
+        live_px = prices_for_valuation.get(t, np.nan)
+        if not np.isfinite(float(last_close)) or float(last_close) <= 0 or not np.isfinite(float(live_px)):
+            missing_live.append(t)
+            continue
+        live[t] = float(live_px) / float(last_close) - 1.0
+    if missing_live:
+        raise RuntimeError("Cannot append live returns row; missing prices for " + ", ".join(sorted(set(missing_live))))
+    live_idx = pd.Timestamp(as_of_run_date).tz_localize(None).normalize()
+    if not df.empty:
+        last_idx = pd.Timestamp(df.index.max()).tz_localize(None).normalize()
+        if live_idx <= last_idx:
+            live_idx = last_idx + pd.Timedelta(days=1)
+    df = pd.concat([df, pd.DataFrame([live], index=[live_idx])], axis=0).sort_index()
+    df = df[~df.index.duplicated(keep="last")].dropna(how="any")
+    meta = {
+        "source": "returns_wide_plus_live_mark_row",
+        "key_type_internal": "asset_id",
+        "display_columns": list(df.columns),
+        "asset_id_by_ticker": ticker_to_asset,
+        "last_historical_return_date": None if len(df.index) <= 1 else str(pd.Timestamp(df.index[-2]).date()),
+        "live_return_date": str(pd.Timestamp(live_idx).date()),
+        "live_returns": {k: float(v) for k, v in live.items()},
+        "rows": int(len(df)),
+    }
+    print(f"[returns_eval] source=returns_wide_plus_live_row assets={len(df.columns)} rows={len(df)} live_date={meta['live_return_date']}")
+    return df, meta
+
+
+def _clamp01(x: float) -> float:
+    try: v = float(x)
+    except Exception: return 0.0
+    return 0.0 if not np.isfinite(v) else float(min(1.0, max(0.0, v)))
+
+
+def _safe_ratio_good(value: float, cap: float) -> float:
+    try: v, c = abs(float(value)), abs(float(cap))
+    except Exception: return 0.0
+    if not np.isfinite(v) or not np.isfinite(c) or c <= 0: return 0.0
+    return _clamp01(1.0 - v / c)
+
+
+_HEALTH_LATEST_EXTRA_KEYS = {
+    "schema_version",
+    "health_score",
+    "normalized_health_score",
+    "portfolio_health_score",
+    "health_grade",
+    "raw_score",
+    "raw_optimizer_score",
+    "score_semantics",
+    "health_score_semantics",
+    "health_score_payload",
+    "legacy_portfolio_health",
+    "meta",
+}
+
+
+def _parse_portfolio_health_compat(raw: dict | None):
+    """
+    Parse the legacy PortfolioHealth payload while tolerating the extra
+    normalized-health fields added to health/latest.json.
+
+    This keeps the daily-report baseline logic backward-compatible even after
+    health/latest.json starts carrying explicit normalized health_score fields.
+    """
+    if not raw:
+        return None
+
+    try:
+        return parse_portfolio_health(raw)
+    except TypeError:
+        if not isinstance(raw, dict):
+            raise
+
+        cleaned = {
+            k: v
+            for k, v in raw.items()
+            if k not in _HEALTH_LATEST_EXTRA_KEYS
+        }
+        return parse_portfolio_health(cleaned)
+
+
+def _none_if_not_finite(x: Any) -> float | None:
+    try:
+        v = float(x)
+    except Exception:
+        return None
+    if not np.isfinite(v):
+        return None
+    return float(v)
+
+
+def _build_health_latest_payload(
+    *,
+    current_health,
+    health_score_payload: dict[str, Any],
+    as_of_market_date: str,
+    as_of_run_date: str,
+    pricing_as_of_utc: str,
+    returns_eval_meta: dict[str, Any],
+) -> dict[str, Any]:
+    """
+    Build the canonical health/latest.json payload.
+
+    Rules:
+    - `health_score` is normalized 0-100 and is safe for transition logic.
+    - `score` remains the legacy/raw daily health/evaluator score and may be negative.
+    - `raw_score` and `raw_optimizer_score` make the raw score semantics explicit.
+    """
+    legacy = asdict(current_health)
+
+    normalized_health_score = _none_if_not_finite(
+        health_score_payload.get("health_score")
+    )
+    raw_optimizer_score = _none_if_not_finite(
+        health_score_payload.get("raw_optimizer_score")
+    )
+
+    out = {
+        **legacy,
+
+        # Explicit normalized health fields for consumers such as transition
+        # assessment and shadow validation.
+        "schema_version": "portfolio_health_latest_v2",
+        "health_score": normalized_health_score,
+        "normalized_health_score": normalized_health_score,
+        "portfolio_health_score": normalized_health_score,
+        "health_grade": health_score_payload.get("health_grade"),
+
+        # Keep the old `score` field from `current_health` for backward
+        # compatibility, but expose explicit raw aliases so consumers do not
+        # confuse it with normalized health.
+        "raw_score": raw_optimizer_score,
+        "raw_optimizer_score": raw_optimizer_score,
+        "score_semantics": "legacy_raw_daily_report_score_not_normalized",
+        "health_score_semantics": "normalized_0_100_daily_report_health_score",
+
+        # Full explainability payload.
+        "health_score_payload": dict(health_score_payload),
+        "legacy_portfolio_health": legacy,
+        "meta": {
+            "as_of_market_date": as_of_market_date,
+            "as_of_run_date": as_of_run_date,
+            "pricing_as_of_utc": pricing_as_of_utc,
+            "returns_eval": dict(returns_eval_meta or {}),
+            "producer": "run_daily_report.py",
+        },
+    }
+
+    return out
+
+
+def _compute_daily_health_score(*, metrics, score_cfg: ScoreConfig, goals: list[float], main_goal: float) -> dict[str, Any]:
+    p_map = {float(goals[0]): float(getattr(metrics, "p_hit_goal_1_1y", 0.0)), float(goals[1]): float(getattr(metrics, "p_hit_goal_2_1y", 0.0)), float(goals[2]): float(getattr(metrics, "p_hit_goal_3_1y", 0.0))}
+    p_main = float(p_map.get(float(main_goal), 0.0))
+    comp = {
+        "goal_probability": _clamp01(p_main),
+        "ruin": _safe_ratio_good(getattr(metrics, "ruin_prob_1y", np.nan), getattr(score_cfg, "ruin_cap", 0.10)),
+        "max_drawdown": _safe_ratio_good(abs(float(getattr(metrics, "max_drawdown", np.nan))), 0.40),
+        "cvar_95": _safe_ratio_good(abs(float(getattr(metrics, "cvar_95", np.nan))), getattr(score_cfg, "cvar_cap", 0.03)),
+        "stability_energy": _safe_ratio_good(getattr(metrics, "stability_energy", np.nan), 2.00),
+        "path_mdd_mean": _safe_ratio_good(getattr(metrics, "path_mdd_mean", np.nan), getattr(score_cfg, "path_mdd_mean_cap", 0.30)),
+        "cdar_95": _safe_ratio_good(getattr(metrics, "cdar_95", np.nan), 0.60),
+        "p_dd_breach": _safe_ratio_good(getattr(metrics, "p_dd_breach", np.nan), getattr(score_cfg, "p_dd_breach_cap", 0.25)),
+        "underwater_mean": _safe_ratio_good(getattr(metrics, "underwater_mean", np.nan), getattr(score_cfg, "underwater_mean_cap", 1.0)),
+        "ttr_mean_days": _safe_ratio_good(getattr(metrics, "ttr_mean_days", np.nan), getattr(score_cfg, "ttr_cap_days", 252.0)),
+        "deployment": 1.0, "cash": 1.0, "weight_drift": 1.0, "dropped_weight": 1.0,
+    }
+    risk = float(np.mean([comp["ruin"], comp["max_drawdown"], comp["cvar_95"]]))
+    stability = float(np.mean([comp["stability_energy"], comp["path_mdd_mean"], comp["cdar_95"], comp["p_dd_breach"], comp["underwater_mean"], comp["ttr_mean_days"]]))
+    execution = float(np.mean([comp["deployment"], comp["cash"], comp["weight_drift"], comp["dropped_weight"]]))
+    health_score = 100.0 * (0.30 * comp["goal_probability"] + 0.30 * risk + 0.30 * stability + 0.10 * execution)
+    grade = "A" if health_score >= 80 else "B" if health_score >= 70 else "C" if health_score >= 60 else "D" if health_score >= 50 else "F"
+    return {"schema_version": "portfolio_health_score_v1_daily_report", "health_score": float(health_score), "health_grade": grade, "raw_optimizer_score": float(getattr(metrics, "score", np.nan)), "components": {"goal_probability": float(comp["goal_probability"]), "risk": risk, "stability": stability, "execution": execution}, "component_details": {k: float(v) for k, v in comp.items()}, "note": "health_score is normalized 0-100; raw_optimizer_score may be negative."}
 
 def s3_load_ledger_positions_dt(s3, *, bucket: str, root_prefix: str, as_of: str) -> dict | None:
-    key = f"{root_prefix.strip('/')}/ledger/dt={as_of}/positions.json"
-    return s3_get_json(s3, bucket=bucket, key=key)  # use your existing helper
+    key = f"{str(root_prefix).strip('/')}/ledger/dt={as_of}/positions.json"
+    return s3_get_json(s3, bucket=bucket, key=key)
+
 
 def s3_load_ledger_pnl_dt(s3, *, bucket: str, root_prefix: str, as_of: str) -> dict | None:
-    key = f"{root_prefix.strip('/')}/ledger/dt={as_of}/pnl.json"
+    key = f"{str(root_prefix).strip('/')}/ledger/dt={as_of}/pnl.json"
     return s3_get_json(s3, bucket=bucket, key=key)
 
 
 UNIVERSE_CSV_LOCAL = paths.universe_dir() / "universe.csv"
 
-
 def _load_universe_ticker_to_asset_id() -> dict[str, str]:
+    """
+    Temporary ticker -> asset_id map for the still ticker-based daily-report path.
+
+    Long-term rule: asset_id is the primary key. Duplicate tickers are allowed in
+    the universe, so this helper only returns unambiguous ticker mappings. If a
+    ledger position uses an ambiguous ticker, _load_closes_usd_from_ohlcv() will
+    fail for that requested ticker instead of silently choosing the wrong asset.
+    """
     df = pd.read_csv(UNIVERSE_CSV_LOCAL)
     if df is None or df.empty:
         raise RuntimeError(f"Universe is empty: {UNIVERSE_CSV_LOCAL}")
@@ -109,22 +381,54 @@ def _load_universe_ticker_to_asset_id() -> dict[str, str]:
         if c not in df.columns:
             raise RuntimeError(f"Universe missing required column '{c}': {UNIVERSE_CSV_LOCAL}")
 
+    df = df.copy()
     df["ticker"] = df["ticker"].astype(str).str.strip().str.upper()
     df["asset_id"] = df["asset_id"].astype(str).str.strip()
+
+    if "yahoo_ticker" not in df.columns:
+        df["yahoo_ticker"] = df["ticker"]
+    df["yahoo_ticker"] = df["yahoo_ticker"].astype(str).str.strip()
+
+    if "yahoo_ticker_norm" not in df.columns:
+        df["yahoo_ticker_norm"] = df["yahoo_ticker"]
+    df["yahoo_ticker_norm"] = df["yahoo_ticker_norm"].astype(str).str.strip()
+
+    if "name" not in df.columns:
+        df["name"] = df["ticker"]
+    df["name"] = df["name"].astype(str).str.strip()
 
     if "include" in df.columns:
         df["include"] = pd.to_numeric(df["include"], errors="coerce").fillna(1).astype(int)
     else:
         df["include"] = 1
 
-    df = df[(df["ticker"] != "") & (df["asset_id"] != "")].copy()
+    df = df[
+        (df["include"] == 1)
+        & (df["ticker"] != "")
+        & (df["asset_id"] != "")
+    ].copy()
+
     if df.empty:
-        raise RuntimeError("Universe has no (ticker,asset_id) pairs after normalization.")
+        raise RuntimeError("Universe has no active (ticker, asset_id) pairs after normalization.")
 
-    df = df.sort_values(["ticker", "include"], ascending=[True, False])
-    df = df.drop_duplicates(subset=["ticker"], keep="first")
-    return dict(zip(df["ticker"].tolist(), df["asset_id"].tolist()))
+    dup_asset = df[df["asset_id"].duplicated(keep=False)].sort_values("asset_id")
+    if not dup_asset.empty:
+        cols = [c for c in ["asset_id", "ticker", "yahoo_ticker_norm", "yahoo_ticker", "name", "include"] if c in dup_asset.columns]
+        raise RuntimeError(
+            "Duplicate active asset_id values found in universe. asset_id must be unique.\n"
+            + dup_asset[cols].head(50).to_string(index=False)
+        )
 
+    counts = df.groupby("ticker")["asset_id"].nunique()
+    ambiguous = sorted(counts[counts > 1].index.tolist())
+    if ambiguous:
+        print(
+            "[universe][warn] duplicate active tickers exist and will not be used "
+            f"as unique lookup keys. ambiguous_count={len(ambiguous)} sample={ambiguous[:10]}"
+        )
+
+    unique_df = df[df["ticker"].map(counts).eq(1)].copy()
+    return dict(zip(unique_df["ticker"].tolist(), unique_df["asset_id"].tolist()))
 
 def _diagnose_hmm_history(*, closes: pd.DataFrame, tickers: list[str], as_of_date: str) -> None:
     """
@@ -735,8 +1039,26 @@ def run_daily_cycle_asof(
     equity_override: float | None = None,
     goals_override: list[float] | None = None,
     main_goal_override: float | None = None,
+    env: str | None = None,
+    confirm_prod_write: bool = False,
+    actuarial_max_allowed_leverage: float = 2.0,
+    actuarial_n_paths: int = 20_000,
+    refresh_returns_cache: bool = False,
 ) -> dict:
-    root_prefix = ENGINE_ROOT_PREFIX
+    cfg = load_runtime_config(env)
+
+    if write_outputs:
+        require_prod_confirmation(cfg, bool(confirm_prod_write))
+
+    bucket = cfg.bucket
+    region = cfg.region
+    engine_root = cfg.engine_root
+    market_root = cfg.market_root
+
+    root_prefix = _resolve_root_prefix(
+        engine_root=engine_root,
+        backtest_run_id=backtest_run_id,
+    )
     mode = "backtest" if backtest_run_id else "live"
 
     as_of_ts = pd.Timestamp(as_of).tz_localize(None).normalize()
@@ -745,32 +1067,19 @@ def run_daily_cycle_asof(
     run_dt = pd.Timestamp(dt.date.today()).normalize() if mode == "live" else as_of_ts
     as_of_run_date = run_dt.strftime("%Y-%m-%d")
 
-    # --- RETURNS_WIDE (universe-wide) ---
-    u = pd.read_csv(UNIVERSE_CSV_LOCAL)
-    u = u[u.get("include", 1).fillna(1).astype(int) == 1].copy()
-    u["asset_id"] = u["asset_id"].astype(str).str.strip()
-    u["ticker"] = u.get("ticker", u["asset_id"]).astype(str).str.upper().str.strip()
-    asset_to_ticker = dict(zip(u["asset_id"], u["ticker"]))
-
-    cache_cfg = CacheConfig(bucket=ENGINE_BUCKET, min_years=float(5.0))
-    build_returns_wide_cache(cache_cfg)
-
-    returns_wide = pd.read_parquet(RETURNS_WIDE_CACHE_PATH, engine="pyarrow").sort_index()
-    returns_wide, _ = clean_returns_matrix(returns_wide)
-
-    returns_wide.index = pd.to_datetime(returns_wide.index, errors="coerce").tz_localize(None).normalize()
-    returns_wide = returns_wide.loc[returns_wide.index <= as_of_ts]
-    if returns_wide.shape[0] < 252:
-        raise RuntimeError(f"Not enough returns history up to as_of={as_of_date}: rows={returns_wide.shape[0]}")
-
-    returns_wide = returns_wide.rename(columns=lambda c: asset_to_ticker.get(str(c).strip(), str(c).strip()))
-    returns_wide.columns = [str(c).upper().strip() for c in returns_wide.columns]
+    # --- RETURNS_WIDE (asset_id-keyed canonical return source) ---
+    returns_wide = _load_returns_wide_cache(
+        bucket=bucket,
+        market_root=market_root,
+        as_of_ts=as_of_ts,
+        refresh=bool(refresh_returns_cache),
+    )
 
     if mode == "backtest" and equity_override is None:
         raise ValueError("backtest requires equity_override (do not rely on hardcoded equity).")
 
-    s3 = s3_init(ENGINE_REGION)
-    market = MarketStore(bucket=ENGINE_BUCKET)
+    s3 = s3_init(region)
+    market = MarketStore(bucket=bucket, region=region)
 
     BENCH_PROXY = ["VT", "SPY", "QQQ", "IWM", "TLT", "VCIT", "GLD"]
     BENCH_NAME = "EQW(VT,SPY,QQQ,IWM,TLT,VCIT,GLD)"
@@ -781,11 +1090,12 @@ def run_daily_cycle_asof(
 
     GOALS = goals_override if goals_override is not None else [7500.0, 10000.0, 12500.0]
     MAIN_GOAL = float(main_goal_override if main_goal_override is not None else 10000.0)
-    equity = float(equity_override) if equity_override is not None else 8940.70
+    # Live equity is resolved after ledger positions and current valuation prices are loaded.
+    equity = float(equity_override) if equity_override is not None else None
 
     # ---------- Load MARKET regime (GLOBAL path) ----------
     market_hmm_payload = s3_load_latest_json(
-        s3, bucket=ENGINE_BUCKET, root_prefix=ENGINE_ROOT_PREFIX, table="regimes/market_hmm"
+        s3, bucket=bucket, root_prefix=engine_root, table="regimes/market_hmm"
     ) or {}
 
     market_as_of = market_hmm_payload.get("as_of")
@@ -803,13 +1113,14 @@ def run_daily_cycle_asof(
 
     # ---------- Inputs ----------
     raw_ledger_positions = s3_load_ledger_positions_dt(
-        s3, bucket=ENGINE_BUCKET, root_prefix=ENGINE_ROOT_PREFIX, as_of=as_of_date
+        s3, bucket=bucket, root_prefix=root_prefix, as_of=as_of_date
     )
     raw_pnl = s3_load_ledger_pnl_dt(
-        s3, bucket=ENGINE_BUCKET, root_prefix=ENGINE_ROOT_PREFIX, as_of=as_of_date
+        s3, bucket=bucket, root_prefix=root_prefix, as_of=as_of_date
     ) or {}
 
-    equity_from_ledger = raw_pnl.get("equity") or raw_pnl.get("equity_usd")
+    pnl_summary = raw_pnl.get("summary", {}) if isinstance(raw_pnl, dict) else {}
+    equity_from_ledger = pnl_summary.get("equity_usd")
     if not raw_ledger_positions:
         raise RuntimeError(f"Missing S3 latest ledger positions under {root_prefix}/ledger/positions/latest.json")
 
@@ -818,16 +1129,16 @@ def run_daily_cycle_asof(
         raise RuntimeError("Ledger positions payload has no spot_positions and no derivatives_positions.")
 
     raw_score_cfg = s3_load_latest_json(
-        s3, bucket=ENGINE_BUCKET, root_prefix=root_prefix, table="configs/score_config"
+        s3, bucket=bucket, root_prefix=root_prefix, table="configs/score_config"
     )
     if not raw_score_cfg:
         raise RuntimeError("Missing S3 latest score_config.")
     score_cfg = ScoreConfig(**raw_score_cfg)
 
-    raw_baseline = s3_load_latest_json(s3, bucket=ENGINE_BUCKET, root_prefix=root_prefix, table="health")
-    baseline = parse_portfolio_health(raw_baseline) if raw_baseline else None
+    raw_baseline = s3_load_latest_json(s3, bucket=bucket, root_prefix=root_prefix, table="health")
+    baseline = _parse_portfolio_health_compat(raw_baseline) if raw_baseline else None
 
-    last_score = s3_load_latest_report_score(s3, bucket=ENGINE_BUCKET, root_prefix=root_prefix)
+    last_score = s3_load_latest_report_score(s3, bucket=bucket, root_prefix=root_prefix)
     if last_score is not None:
         print(f"[last run] previous daily report score: {last_score:.4f}")
     else:
@@ -841,7 +1152,14 @@ def run_daily_cycle_asof(
 
     # ---------- Load closes USD (as_of) ----------
     end_date = as_of_date
-    closes_all = _load_closes_usd_from_ohlcv(tickers=tickers_all, start=START_HISTORY, end=end_date)
+    closes_all = _load_closes_usd_from_ohlcv(
+        tickers=tickers_all,
+        start=START_HISTORY,
+        end=end_date,
+        s3_bucket=bucket,
+        s3_root_prefix=f"{market_root.strip('/')}/ohlcv_usd/v1",
+        s3_region=region,
+        )
     latest_close_prices = closes_all.iloc[-1]
 
     pricing_as_of_utc = (
@@ -864,6 +1182,31 @@ def run_daily_cycle_asof(
     prices_for_valuation = prices_for_valuation.reindex(latest_close_prices.index).combine_first(latest_close_prices)
 
     exec_prices = latest_close_prices.copy() if mode == "backtest" else prices_for_valuation.copy()
+
+    # ---------- Resolve equity and canonical evaluation returns ----------
+    if mode == "live":
+        if equity_override is not None:
+            print(f"[equity][warn] using explicit equity_override={float(equity_override):.2f}")
+            equity = float(equity_override)
+        else:
+            equity = _compute_live_equity_from_ledger_and_prices(
+                pnl_summary=pnl_summary,
+                spot_rows=spot_rows,
+                prices_for_valuation=prices_for_valuation,
+            )
+    else:
+        if equity_override is None:
+            raise ValueError("backtest requires equity_override.")
+        equity = float(equity_override)
+
+    returns_for_eval, returns_eval_meta = _build_live_augmented_returns_for_portfolio(
+        returns_wide=returns_wide,
+        spot_rows=spot_rows,
+        deriv_rows=deriv_rows,
+        latest_close_prices=latest_close_prices,
+        prices_for_valuation=prices_for_valuation,
+        as_of_run_date=as_of_run_date,
+    )
 
     # ---------- Build Position objects ----------
     positions: dict[str, Position] = {}
@@ -902,7 +1245,8 @@ def run_daily_cycle_asof(
         raise RuntimeError("No usable tickers after building positions.")
 
     closes = closes_all[tickers].copy()
-    rets_assets = closes.pct_change().dropna(how="any")
+    returns_for_eval = returns_for_eval[[t for t in tickers if t in returns_for_eval.columns]].dropna(how="any")
+    rets_assets = returns_for_eval.copy()
 
     _diagnose_hmm_history(closes=closes, tickers=tickers, as_of_date=as_of_date)
 
@@ -917,73 +1261,18 @@ def run_daily_cycle_asof(
     as_of_market_date = as_of_market_dt.strftime("%Y-%m-%d")
     print(f"[dates] as_of_market_date={as_of_market_date} | as_of_run_date={as_of_run_date}")
 
-    # ---------- Portfolio HMM ----------
-    r = port_rets.to_numpy(dtype=np.float64)
-    vol20 = pd.Series(r, index=port_rets.index).rolling(20).std().to_numpy(dtype=np.float64)
-    mask = np.isfinite(vol20)
-    X = np.column_stack([r[mask], vol20[mask]])
-
-    hmm_res = None
+    # ---------- Market regime ----------
+    # Single source of truth: morning routine payload under regimes/market_hmm.
+    hmm_payload_for_output = market_hmm_payload.get("hmm") if isinstance(market_hmm_payload, dict) else None
     regime_labels = None
-    if X.shape[0] >= 80:
-        hmm = GaussianHMM(n_states=4, n_dim=2, seed=42)
-        fit_res = hmm.fit(X, max_iter=150, tol=1e-4, verbose=False)
-
-        filtered = hmm.predict_proba(X)
-        p_today = filtered[-1]
-
-        r_aligned = r[mask]
-        diags = compute_state_diagnostics(r_aligned, filtered)
-        mapping = label_states_4(diags)
-
+    if hmm_payload_for_output:
+        print("\n[market regime] source=regimes/market_hmm/latest.json (morning routine)")
         try:
-            idx = port_rets.index[mask]
-            labs = []
-            for p_state in filtered:
-                k = int(np.argmax(p_state))
-                labs.append(mapping.get(k, "UNKNOWN"))
-            regime_labels = pd.Series(labs, index=idx, name="regime")
-        except Exception:
-            regime_labels = None
-
-        p_label_today = regime_probs_from_state_probs(p_today, mapping)
-        label_commit = select_regime_label(p_label_today, commit_threshold=0.65)
-
-        hmm_res = {
-            "n_states": 4,
-            "obs_dim": 2,
-            "loglik": float(fit_res.loglik),
-            "n_iter": int(fit_res.n_iter),
-            "converged": bool(fit_res.converged),
-            "p_state_today": [float(x) for x in p_today],
-            "state_to_label": {str(k): v for k, v in mapping.items()},
-            "p_label_today": {k: float(v) for k, v in p_label_today.items()},
-            "label_commit": label_commit,
-            "state_diagnostics": {
-                str(k): {
-                    "drift": float(diags[k].drift),
-                    "vol": float(diags[k].vol),
-                    "neg_rate": float(diags[k].neg_rate),
-                    "weight": float(diags[k].weight),
-                }
-                for k in range(4)
-            },
-            "params": {
-                "pi": [float(x) for x in fit_res.params.pi],
-                "A": [[float(x) for x in row] for row in fit_res.params.A],
-                "means": [[float(x) for x in row] for row in fit_res.params.means],
-                "vars": [[float(x) for x in row] for row in fit_res.params.vars],
-            },
-            "meta": {
-                "uses": "filtered_probs",
-                "commit_threshold": 0.65,
-                "features": ["port_return", "vol20"],
-                "last_date_used": as_of_market_date,
-            },
-        }
-        print_hmm_summary(hmm_res)
+            print_hmm_summary(hmm_payload_for_output, market_hmm_payload.get("leverage_recommendation"))
+        except Exception as e:
+            print(f"[market regime][warn] failed to print persisted HMM summary: {type(e).__name__}: {e}")
     else:
-        print("\n[HMM] Not enough history to fit 4-state HMM (need >= ~80 after vol window).")
+        print("\n[market regime][warn] missing persisted market HMM payload; daily report will not fit a local market HMM.")
 
     st_raw = market.read_regime_filter_state() or {}
     filter_state = RegimeFilterState(
@@ -993,24 +1282,15 @@ def run_daily_cycle_asof(
         probs_smoothed=st_raw.get("probs_smoothed"),
     )
 
-    lev_rec = leverage_from_hmm(
-        hmm_res or {},
-        default=1.0,
-        risk_appetite=0.8,
-        hard_cap=12.0,
-        filter_state=filter_state,
-        as_of=as_of_market_date,
-        filter_alpha=0.20,
-        min_hold_days=3,
-        min_prob_to_switch=0.60,
-        min_margin_to_switch=0.12,
-    )
-    if isinstance(lev_rec.get("filter_state"), dict):
-        market.write_regime_filter_state(lev_rec["filter_state"])
+    # Daily report consumes the morning routine's persisted market leverage.
+    # It must not recompute or mutate the market regime filter state.
+    lev_rec = market_hmm_payload.get("leverage_recommendation") if isinstance(market_hmm_payload, dict) else None
+    if not isinstance(lev_rec, dict):
+        lev_rec = {"leverage": float(market_lev), "mode": "persisted_or_default", "label": None, "conf": 0.0}
 
     # ---------- Market RESCALE trigger (ONLY on regime / leverage change) ----------
     raw_mkt_state = s3_load_latest_json(
-        s3, bucket=ENGINE_BUCKET, root_prefix=root_prefix, table=MARKET_RESCALE_STATE_TABLE
+        s3, bucket=bucket, root_prefix=root_prefix, table=MARKET_RESCALE_STATE_TABLE
     ) or {}
     prev_label = raw_mkt_state.get("label")
     prev_lev = raw_mkt_state.get("leverage")
@@ -1018,7 +1298,8 @@ def run_daily_cycle_asof(
     fs = (lev_rec or {}).get("filter_state") or {}
     cur_label = str(
         fs.get("chosen_label")
-        or (hmm_res or {}).get("label_commit")
+        or (lev_rec or {}).get("label")
+        or (hmm_payload_for_output or {}).get("label_commit")
         or "UNKNOWN"
     )
     cur_lev = float(market_lev)
@@ -1044,8 +1325,59 @@ def run_daily_cycle_asof(
         main_goal=MAIN_GOAL,
         score_config=score_cfg,
         prices_usd=prices_for_valuation,
+        asset_returns=returns_for_eval,
+    )
+    health_score_payload = _compute_daily_health_score(
+        metrics=report.eval,
+        score_cfg=score_cfg,
+        goals=list(GOALS),
+        main_goal=float(MAIN_GOAL),
     )
     print(summarize_report(report))
+    print(f"Health Score: {health_score_payload['health_score']:.1f} / 100 ({health_score_payload['health_grade']})")
+    print(f"Raw optimizer score: {health_score_payload['raw_optimizer_score']:.4f}")
+
+    # ---------- Actuarial diagnostics ----------
+    actuarial_diagnostics = None
+    actuarial_text = None
+
+    try:
+        _actuarial_report, actuarial_text, actuarial_diagnostics = (
+            build_actuarial_diagnostic_from_portfolio_report(
+                report=report,
+                closes=closes,
+                goals=GOALS,
+                main_goal=float(MAIN_GOAL),
+                score_config=score_cfg,
+                portfolio_id="current_portfolio",
+                run_id=f"daily_report_{as_of_run_date}_{as_of_market_date}",
+                source="daily_report",
+                terminal_title="ACTUARIAL RISK DIAGNOSTICS - DAILY REPORT",
+                current_leverage=float(report.snapshot.leverage),
+                max_allowed_leverage=float(actuarial_max_allowed_leverage),
+                days=252,
+                n_paths=int(actuarial_n_paths),
+                mc_seed=97531,
+                path_source="bootstrap",
+                pca_k=5,
+                block_size=(8, 12),
+                metadata={
+                    "mode": mode,
+                    "as_of_market_date": as_of_market_date,
+                    "as_of_run_date": as_of_run_date,
+                    "root_prefix": root_prefix,
+                },
+            )
+        )
+        maybe_print_actuarial_diagnostic_section(actuarial_text, enabled=True)
+    except Exception as e:
+        actuarial_diagnostics = {
+            "status": "failed",
+            "source": "daily_report",
+            "error_type": type(e).__name__,
+            "error": str(e),
+        }
+        print(f"[actuarial][daily][warn] failed to build diagnostics: {type(e).__name__}: {e}")
 
     # ---------- Benchmark ----------
     bench_rets = None
@@ -1057,6 +1389,9 @@ def run_daily_cycle_asof(
             tickers=BENCH_PROXY,
             start=START_HISTORY,
             end=end_date,
+            s3_bucket=bucket,
+            s3_root_prefix=f"{market_root.strip('/')}/ohlcv_usd/v1",
+            s3_region=region,
         )
 
         cols = [c for c in BENCH_PROXY if c in bench_closes_df.columns]
@@ -1094,6 +1429,15 @@ def run_daily_cycle_asof(
         regime_labels=regime_labels,
     )
 
+    health_latest_payload = _build_health_latest_payload(
+        current_health=current_health,
+        health_score_payload=health_score_payload,
+        as_of_market_date=as_of_market_date,
+        as_of_run_date=as_of_run_date,
+        pricing_as_of_utc=pricing_as_of_utc,
+        returns_eval_meta=returns_eval_meta,
+    )
+
     if getattr(current_health, "alpha_report_json", None):
         try:
             ar = json.loads(current_health.alpha_report_json)
@@ -1110,7 +1454,7 @@ def run_daily_cycle_asof(
 
     # ---------- Take Profit (portfolio-level) ----------
     raw_tp_state = s3_load_latest_json(
-        s3, bucket=ENGINE_BUCKET, root_prefix=root_prefix, table=TAKE_PROFIT_STATE_TABLE
+        s3, bucket=bucket, root_prefix=root_prefix, table=TAKE_PROFIT_STATE_TABLE
     ) or {}
 
     tp_state = TakeProfitState(
@@ -1168,7 +1512,7 @@ def run_daily_cycle_asof(
 
     if tp_res.do_harvest:
         raw_asset_state = s3_load_latest_json(
-            s3, bucket=ENGINE_BUCKET, root_prefix=root_prefix, table=TAKE_PROFIT_ASSETS_STATE_TABLE
+            s3, bucket=bucket, root_prefix=root_prefix, table=TAKE_PROFIT_ASSETS_STATE_TABLE
         )
         anchors_state = _load_asset_tp_anchors(raw_asset_state)
 
@@ -1198,7 +1542,7 @@ def run_daily_cycle_asof(
         if write_outputs and asset_tp_plan_df is not None and not asset_tp_plan_df.empty:
             s3_write_parquet_partition(
                 s3,
-                bucket=ENGINE_BUCKET,
+                bucket=bucket,
                 root_prefix=root_prefix,
                 table=TAKE_PROFIT_ASSETS_PLAN_TABLE,
                 dt=run_dt,
@@ -1209,7 +1553,7 @@ def run_daily_cycle_asof(
         if write_outputs and (next_asset_anchors is not None):
             s3_write_json_event(
                 s3,
-                bucket=ENGINE_BUCKET,
+                bucket=bucket,
                 root_prefix=root_prefix,
                 table=TAKE_PROFIT_ASSETS_STATE_TABLE,
                 dt=run_dt,
@@ -1386,7 +1730,7 @@ def run_daily_cycle_asof(
     if write_outputs:
         s3_write_json_event(
             s3,
-            bucket=ENGINE_BUCKET,
+            bucket=bucket,
             root_prefix=root_prefix,
             table="reinvest/runs",
             dt=run_dt,
@@ -1398,7 +1742,7 @@ def run_daily_cycle_asof(
     # ---------- Rebalance planning (market-rescale only) ----------
     # FIX: reb_state was missing in your latest version
     raw_reb_state = s3_load_latest_json(
-        s3, bucket=ENGINE_BUCKET, root_prefix=root_prefix, table="rescale/state"
+        s3, bucket=bucket, root_prefix=root_prefix, table="rescale/state"
     )
     reb_state = RebalanceState(
         last_rebalance_date=(raw_reb_state or {}).get("last_rebalance_date"),
@@ -1489,7 +1833,7 @@ def run_daily_cycle_asof(
         if write_outputs:
             s3_write_parquet_partition(
                 s3,
-                bucket=ENGINE_BUCKET,
+                bucket=bucket,
                 root_prefix=root_prefix,
                 table="rescale/plan",
                 dt=run_dt,
@@ -1499,7 +1843,7 @@ def run_daily_cycle_asof(
 
             s3_write_json_event(
                 s3,
-                bucket=ENGINE_BUCKET,
+                bucket=bucket,
                 root_prefix=root_prefix,
                 table="rescale/state",
                 dt=run_dt,
@@ -1520,7 +1864,7 @@ def run_daily_cycle_asof(
             if tp_plan_df is not None:
                 s3_write_parquet_partition(
                     s3,
-                    bucket=ENGINE_BUCKET,
+                    bucket=bucket,
                     root_prefix=root_prefix,
                     table=TAKE_PROFIT_PLAN_TABLE,
                     dt=run_dt,
@@ -1550,7 +1894,7 @@ def run_daily_cycle_asof(
     if write_outputs:
         s3_write_json_event(
             s3,
-            bucket=ENGINE_BUCKET,
+            bucket=bucket,
             root_prefix=root_prefix,
             table="regimes/hmm",
             dt=run_dt,
@@ -1558,8 +1902,8 @@ def run_daily_cycle_asof(
             payload={
                 "as_of": as_of_market_date,
                 "tickers": list(tickers),
-                "hmm": hmm_res,
-                "leverage_recommendation": lev_rec,
+                "hmm": hmm_payload_for_output,
+                "leverage_recommendation": market_hmm_payload.get("leverage_recommendation") if isinstance(market_hmm_payload, dict) else None,
                 "meta": {
                     "as_of_market_date": as_of_market_date,
                     "as_of_run_date": as_of_run_date,
@@ -1571,7 +1915,7 @@ def run_daily_cycle_asof(
 
         s3_write_json_event(
             s3,
-            bucket=ENGINE_BUCKET,
+            bucket=bucket,
             root_prefix=root_prefix,
             table="daily_reports",
             dt=run_dt,
@@ -1584,10 +1928,13 @@ def run_daily_cycle_asof(
                     "pricing_as_of_utc": pricing_as_of_utc,
                 },
                 "report": asdict(report),
+                "actuarial_diagnostics": actuarial_diagnostics,
                 "inputs": {
                     "equity": equity,
                     "goals": GOALS,
                     "main_goal": MAIN_GOAL,
+                    "returns_eval": returns_eval_meta,
+                    "health_score": health_score_payload,
                     "benchmark": {
                         "name": bench_meta.get("name"),
                         "tickers": bench_meta.get("tickers"),
@@ -1614,7 +1961,7 @@ def run_daily_cycle_asof(
         holdings_df = pd.DataFrame(report.snapshot.positions_table)
         s3_write_parquet_partition(
             s3,
-            bucket=ENGINE_BUCKET,
+            bucket=bucket,
             root_prefix=root_prefix,
             table="holdings",
             dt=run_dt,
@@ -1624,18 +1971,18 @@ def run_daily_cycle_asof(
 
         s3_write_json_event(
             s3,
-            bucket=ENGINE_BUCKET,
+            bucket=bucket,
             root_prefix=root_prefix,
             table="health",
             dt=run_dt,
             filename="health.json",
-            payload=asdict(current_health),
+            payload=health_latest_payload,
             update_latest=update_latest,
         )
 
         s3_write_json_event(
             s3,
-            bucket=ENGINE_BUCKET,
+            bucket=bucket,
             root_prefix=root_prefix,
             table="configs/score_config",
             dt=run_dt,
@@ -1646,7 +1993,7 @@ def run_daily_cycle_asof(
 
         s3_write_json_event(
             s3,
-            bucket=ENGINE_BUCKET,
+            bucket=bucket,
             root_prefix=root_prefix,
             table=MARKET_RESCALE_STATE_TABLE,
             dt=run_dt,
@@ -1657,7 +2004,7 @@ def run_daily_cycle_asof(
 
         s3_write_json_event(
             s3,
-            bucket=ENGINE_BUCKET,
+            bucket=bucket,
             root_prefix=root_prefix,
             table="inputs/positions",
             dt=run_dt,
@@ -1668,7 +2015,7 @@ def run_daily_cycle_asof(
 
         s3_write_json_event(
             s3,
-            bucket=ENGINE_BUCKET,
+            bucket=bucket,
             root_prefix=root_prefix,
             table=TAKE_PROFIT_STATE_TABLE,
             dt=run_dt,
@@ -1701,6 +2048,9 @@ def run_daily_cycle_asof(
         "rebalance": asdict(decision),
         "should_reoptimize": bool(reopt),
         "health": asdict(current_health),
+        "health_latest": health_latest_payload,
+        "health_score": health_score_payload,
+        "actuarial_diagnostics": actuarial_diagnostics,
         "bench_ann_return": None if bench_ann_ret is None else float(bench_ann_ret),
         "take_profit": {
             "do_harvest": bool(tp_res.do_harvest),
@@ -1717,19 +2067,220 @@ def run_daily_cycle_asof(
         "reinvest": reinvest_meta,
     }
 
+def _parse_goals_arg(x: str | None) -> list[float] | None:
+    if x is None:
+        return None
 
-def main():
-    as_of = pd.Timestamp(dt.date.today()).strftime("%Y-%m-%d")
-    run_daily_cycle_asof(
-        as_of=as_of,
-        backtest_run_id=None,
-        write_outputs=True,
-        update_latest=True,
-        equity_override=None,
-        goals_override=None,
-        main_goal_override=None,
+    parts = [p.strip() for p in str(x).split(",") if p.strip()]
+    if not parts:
+        return None
+
+    if len(parts) != 3:
+        raise ValueError(
+            f"--goals must contain exactly 3 comma-separated numbers, got {x!r}. "
+            "Example: --goals 7500,10000,12500"
+        )
+
+    return [float(p) for p in parts]
+
+
+def parse_args() -> argparse.Namespace:
+    ap = argparse.ArgumentParser(description="Run Alpha Edge daily report.")
+
+    ap.add_argument("--env", default=None, choices=["dev", "staging", "prod"])
+    ap.add_argument("--confirm-prod-write", action="store_true")
+
+    ap.add_argument(
+        "--as-of",
+        default=None,
+        help="Report as-of date YYYY-MM-DD. Default: today.",
     )
+    ap.add_argument(
+        "--backtest-run-id",
+        default=None,
+        help="Optional backtest run id. Writes under <engine_root>/backtests/<id>.",
+    )
+
+    ap.add_argument(
+        "--no-write",
+        action="store_true",
+        help="Run computation but do not write outputs to S3.",
+    )
+    ap.add_argument(
+        "--no-latest",
+        action="store_true",
+        help="Write dated outputs but do not update latest.json pointers.",
+    )
+
+    ap.add_argument(
+        "--equity-override",
+        type=float,
+        default=None,
+        help="Override equity used for report computation.",
+    )
+    ap.add_argument(
+        "--goals",
+        default=None,
+        help="Comma-separated goal ladder, e.g. 7500,10000,12500.",
+    )
+    ap.add_argument(
+        "--main-goal",
+        type=float,
+        default=None,
+        help="Main goal used by report scoring.",
+    )
+    ap.add_argument(
+        "--actuarial-max-allowed-leverage",
+        type=float,
+        default=2.0,
+        help="Policy cap used by actuarial safe-leverage diagnostics.",
+    )
+    ap.add_argument(
+        "--actuarial-n-paths",
+        type=int,
+        default=20000,
+        help="Number of Monte Carlo paths used for daily-report actuarial diagnostics.",
+    )
+    ap.add_argument(
+        "--refresh-returns-cache",
+        action="store_true",
+        help="Rebuild returns_wide cache before the report. Default is to read the existing cache.",
+    )
+
+    return ap.parse_args()
+
+def main() -> None:
+    args = parse_args()
+
+    if args.as_of:
+        as_of = pd.Timestamp(args.as_of).strftime("%Y-%m-%d")
+    else:
+        # Live daily report should default to the latest reconciled ledger date,
+        # not to today's calendar date. The market pipeline/report can run before
+        # a same-day ledger exists, and defaulting to today causes NoSuchKey on
+        # ledger/dt=<today>/positions.json.
+        if args.backtest_run_id:
+            raise ValueError(
+                "--as-of is required when --backtest-run-id is provided."
+            )
+
+        cfg = load_runtime_config(args.env)
+        s3 = s3_init(cfg.region)
+        latest_pnl = s3_load_latest_json(
+            s3,
+            bucket=cfg.bucket,
+            root_prefix=cfg.engine_root,
+            table="ledger/pnl",
+        )
+        latest_summary = (
+            latest_pnl.get("summary", {})
+            if isinstance(latest_pnl, dict)
+            else {}
+        )
+        resolved_as_of = (
+            (latest_pnl or {}).get("as_of")
+            or latest_summary.get("as_of")
+        )
+        if not resolved_as_of:
+            raise RuntimeError(
+                "Could not resolve --as-of from "
+                f"s3://{cfg.bucket}/{cfg.engine_root.strip('/')}/ledger/pnl/latest.json. "
+                "Pass --as-of explicitly."
+            )
+        as_of = pd.Timestamp(resolved_as_of).strftime("%Y-%m-%d")
+        print(f"[as_of] resolved from ledger/pnl/latest.json: {as_of}")
+
+    goals_override = _parse_goals_arg(args.goals)
+
+    out = run_daily_cycle_asof(
+        as_of=as_of,
+        backtest_run_id=(args.backtest_run_id if args.backtest_run_id else None),
+        write_outputs=(not bool(args.no_write)),
+        update_latest=(not bool(args.no_latest)),
+        equity_override=args.equity_override,
+        goals_override=goals_override,
+        main_goal_override=args.main_goal,
+        env=args.env,
+        confirm_prod_write=bool(args.confirm_prod_write),
+        actuarial_max_allowed_leverage=float(args.actuarial_max_allowed_leverage),
+        actuarial_n_paths=int(args.actuarial_n_paths),
+        refresh_returns_cache=bool(args.refresh_returns_cache),
+    )
+
+    print("\n=== DAILY REPORT RESULT ===")
+    print(f"env:                 {load_runtime_config(args.env).env}")
+    print(f"mode:                {out.get('mode')}")
+    print(f"root_prefix:         {out.get('root_prefix')}")
+    print(f"run_dt:              {out.get('run_dt')}")
+    print(f"as_of_market_date:   {out.get('as_of_market_date')}")
+    print(f"as_of_run_date:      {out.get('as_of_run_date')}")
+    print(f"equity:              {out.get('equity')}")
+    hs = out.get("health_score") or {}
+    if hs:
+        print(f"health_score:        {hs.get('health_score')} / 100 ({hs.get('health_grade')})")
+    print(f"market_leverage:     {out.get('market_target_leverage')}")
+    print(f"should_reoptimize:   {out.get('should_reoptimize')}")
+
+# ----------------------------
+# Audit/logging entrypoint wrapper
+# ----------------------------
+def _tier1_audit_is_dry_run(args: argparse.Namespace) -> bool:
+    return bool(getattr(args, "dry_run", False) or getattr(args, "no_write", False))
+
+
+def main_with_audit() -> None:
+    args = parse_args()
+    cfg = load_runtime_config(getattr(args, "env", None))
+    is_dry_run = _tier1_audit_is_dry_run(args)
+
+    with capture_script_run(
+        cfg=cfg,
+        script_name="run_daily_report.py",
+        input_args=vars(args),
+        dry_run=is_dry_run,
+    ) as run_id:
+        try:
+            main()
+
+            event = build_audit_event(
+                cfg=cfg,
+                run_id=run_id,
+                event_type="build_dataset",
+                entity_type="daily_report",
+                entity_id=None,
+                as_of=str(getattr(args, "as_of", None) or getattr(args, "dt", None) or getattr(args, "run_dt", None) or ""),
+                source_script="run_daily_report.py",
+                source_mode="daily_report",
+                status=("dry_run" if is_dry_run else "success"),
+                input_args=vars(args),
+                metadata={
+                    "tier": "tier_1",
+                    "payload_policy": "large_dataset_metadata_only",
+                    "note": "Tier 1 audit event is entrypoint-level. Detailed output keys/row counts are available in the script log stdout and script-specific metadata where emitted by the script.",
+                },
+            )
+            write_audit_event(cfg=cfg, event=event, dry_run=is_dry_run)
+        except Exception as exc:
+            event = build_audit_event(
+                cfg=cfg,
+                run_id=run_id,
+                event_type="build_dataset",
+                entity_type="daily_report",
+                entity_id=None,
+                as_of=str(getattr(args, "as_of", None) or getattr(args, "dt", None) or getattr(args, "run_dt", None) or ""),
+                source_script="run_daily_report.py",
+                source_mode="daily_report",
+                status="failed",
+                input_args=vars(args),
+                metadata={
+                    "tier": "tier_1",
+                    "payload_policy": "large_dataset_metadata_only",
+                },
+                error=f"{type(exc).__name__}: {exc}",
+            )
+            write_audit_event(cfg=cfg, event=event, dry_run=is_dry_run)
+            raise
 
 
 if __name__ == "__main__":
-    main()
+    main_with_audit()

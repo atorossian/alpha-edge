@@ -1,40 +1,58 @@
 from __future__ import annotations
 
+from alpha_edge.core.audit import build_audit_event, write_audit_event
+from alpha_edge.core.run_logging import capture_script_run
+
 import argparse
-from dataclasses import dataclass
-from typing import Optional, Any
+from dataclasses import asdict
+from typing import Any
 
 import pandas as pd
 import yfinance as yf
 
 from alpha_edge import paths
 from alpha_edge.core.market_store import MarketStore
+from alpha_edge.core.runtime import RuntimeConfig, load_runtime_config, require_prod_confirmation
+from alpha_edge.core.schemas import CorporateActionRow
 
 
 DEFAULT_BUCKET = "alpha-edge-algo"
 DEFAULT_REGION = "eu-west-1"
 
 
-@dataclass(frozen=True)
-class CorporateActionRow:
-    asset_id: str
-    ticker: str
-    yahoo_ticker: str
-    effective_date: str
-    action_type: str
-    split_factor: float
-    source: str
-    source_action_id: str | None
-    detected_at_utc: str
-    notes: str | None
+# ----------------------------
+# Runtime helpers
+# ----------------------------
+def cfg_bucket(cfg: RuntimeConfig) -> str:
+    return str(getattr(cfg, "bucket", DEFAULT_BUCKET))
 
 
+def cfg_region(cfg: RuntimeConfig) -> str:
+    return str(getattr(cfg, "region", DEFAULT_REGION))
+
+
+def cfg_env(cfg: RuntimeConfig) -> str:
+    return str(getattr(cfg, "env", "dev"))
+
+
+# ----------------------------
+# Helpers
+# ----------------------------
 def _now_utc_iso() -> str:
     return pd.Timestamp.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _normalize_yahoo_symbol(sym: str) -> str:
     return str(sym or "").strip().upper()
+
+
+def asdict_safe(obj: Any) -> dict:
+    try:
+        return asdict(obj)
+    except TypeError:
+        if hasattr(obj, "__dict__"):
+            return dict(obj.__dict__)
+        raise TypeError(f"Cannot convert object to dict: {type(obj)}")
 
 
 def _load_universe(universe_path: str) -> pd.DataFrame:
@@ -55,7 +73,15 @@ def _load_universe(universe_path: str) -> pd.DataFrame:
 
     if "yahoo_ticker" in u.columns:
         u["yahoo_ticker"] = u["yahoo_ticker"].astype(str).str.strip()
-        u["yahoo_ticker"] = u["yahoo_ticker"].replace({"": None, "NAN": None, "None": None})
+        u["yahoo_ticker"] = u["yahoo_ticker"].replace(
+            {
+                "": None,
+                "NAN": None,
+                "nan": None,
+                "None": None,
+                "NONE": None,
+            }
+        )
     else:
         u["yahoo_ticker"] = None
 
@@ -65,7 +91,9 @@ def _load_universe(universe_path: str) -> pd.DataFrame:
         u["include"] = pd.to_numeric(u["include"], errors="coerce").fillna(0).astype(int)
         u = u[u["include"] == 1].copy()
 
+    u = u[(u["asset_id"] != "") & (u["ticker"] != "")].copy()
     u = u.drop_duplicates(subset=["asset_id"], keep="last").reset_index(drop=True)
+
     return u
 
 
@@ -90,6 +118,7 @@ def _fetch_splits_for_symbol(yahoo_ticker: str) -> pd.Series:
     s = s[~s.index.isna()]
     s = s[~s.index.duplicated(keep="last")]
     s = s.sort_index()
+
     return s
 
 
@@ -119,8 +148,6 @@ def _build_rows_for_asset(asset_id: str, ticker: str, yahoo_ticker: str) -> list
         eff = pd.Timestamp(idx).date().isoformat()
         factor_f = float(factor)
 
-        # yfinance split ratios are suitable for the same convention you are already
-        # using in rebuild_ledger: if trade_date < effective_date, qty *= factor, px /= factor
         rows.append(
             asdict_safe(
                 CorporateActionRow(
@@ -139,12 +166,6 @@ def _build_rows_for_asset(asset_id: str, ticker: str, yahoo_ticker: str) -> list
         )
 
     return rows
-
-
-def asdict_safe(obj: Any) -> dict:
-    if hasattr(obj, "__dict__"):
-        return dict(obj.__dict__)
-    raise TypeError(f"Cannot convert object to dict: {type(obj)}")
 
 
 def build_corporate_actions_df(
@@ -168,6 +189,7 @@ def build_corporate_actions_df(
         u = u[u["yahoo_ticker_norm"] == yt].copy()
 
     rows: list[dict] = []
+
     for _, r in u.iterrows():
         rows.extend(
             _build_rows_for_asset(
@@ -179,42 +201,49 @@ def build_corporate_actions_df(
 
     df = pd.DataFrame(rows)
 
-    if df.empty:
-        return pd.DataFrame(
-            columns=[
-                "asset_id",
-                "ticker",
-                "yahoo_ticker",
-                "effective_date",
-                "action_type",
-                "split_factor",
-                "source",
-                "source_action_id",
-                "detected_at_utc",
-                "notes",
-            ]
-        )
+    columns = [
+        "asset_id",
+        "ticker",
+        "yahoo_ticker",
+        "effective_date",
+        "action_type",
+        "split_factor",
+        "source",
+        "source_action_id",
+        "detected_at_utc",
+        "notes",
+    ]
 
-    # Keep only real corporate actions in the canonical table
+    if df.empty:
+        return pd.DataFrame(columns=columns)
+
+    # Keep only real corporate actions in the canonical table.
     df = df[df["action_type"] == "SPLIT"].copy()
 
-    if not df.empty:
-        df["asset_id"] = df["asset_id"].astype(str).str.strip()
-        df["ticker"] = df["ticker"].astype(str).str.upper().str.strip()
-        df["yahoo_ticker"] = df["yahoo_ticker"].astype(str).str.strip()
-        df["effective_date"] = pd.to_datetime(df["effective_date"], errors="coerce").dt.date
-        df["split_factor"] = pd.to_numeric(df["split_factor"], errors="coerce")
-        df = df.dropna(subset=["asset_id", "ticker", "effective_date", "split_factor"])
-        df = df.drop_duplicates(subset=["asset_id", "effective_date", "action_type"], keep="last")
-        df = df.sort_values(["asset_id", "effective_date"], kind="stable").reset_index(drop=True)
+    if df.empty:
+        return pd.DataFrame(columns=columns)
 
-    return df
+    df["asset_id"] = df["asset_id"].astype(str).str.strip()
+    df["ticker"] = df["ticker"].astype(str).str.upper().str.strip()
+    df["yahoo_ticker"] = df["yahoo_ticker"].astype(str).str.strip()
+    df["effective_date"] = pd.to_datetime(df["effective_date"], errors="coerce").dt.date
+    df["split_factor"] = pd.to_numeric(df["split_factor"], errors="coerce")
+
+    df = df.dropna(subset=["asset_id", "ticker", "effective_date", "split_factor"])
+    df = df.drop_duplicates(subset=["asset_id", "effective_date", "action_type"], keep="last")
+    df = df.sort_values(["asset_id", "effective_date"], kind="stable").reset_index(drop=True)
+
+    return df[columns]
 
 
+# ----------------------------
+# CLI
+# ----------------------------
 def parse_args() -> argparse.Namespace:
     ap = argparse.ArgumentParser(description="Build corporate actions parquet storage from Yahoo splits.")
-    ap.add_argument("--bucket", default=DEFAULT_BUCKET)
-    ap.add_argument("--region", default=DEFAULT_REGION)
+
+    ap.add_argument("--bucket", default=None)
+    ap.add_argument("--region", default=None)
     ap.add_argument("--universe-path", default=str(paths.universe_dir() / "universe.csv"))
 
     ap.add_argument("--asset-id", default=None)
@@ -222,13 +251,24 @@ def parse_args() -> argparse.Namespace:
     ap.add_argument("--yahoo-ticker", default=None)
 
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--env", default=None, choices=["dev", "staging", "prod"])
+    ap.add_argument("--confirm-prod-write", action="store_true")
+
     return ap.parse_args()
 
 
-def main() -> None:
+def _main_impl() -> None:
     args = parse_args()
 
-    store = MarketStore(bucket=str(args.bucket), region=str(args.region))
+    cfg = load_runtime_config(args.env)
+
+    bucket = str(args.bucket or cfg_bucket(cfg))
+    region = str(args.region or cfg_region(cfg))
+
+    if not bool(args.dry_run):
+        require_prod_confirmation(cfg, bool(args.confirm_prod_write))
+
+    store = MarketStore(bucket=bucket, region=region)
 
     df = build_corporate_actions_df(
         universe_path=str(args.universe_path),
@@ -238,8 +278,10 @@ def main() -> None:
     )
 
     print("\n=== BUILD CORPORATE ACTIONS ===")
+    print(f"env={cfg_env(cfg)}")
     print(f"rows={len(df)}")
-    print(f"bucket={args.bucket}")
+    print(f"bucket={bucket}")
+    print(f"region={region}")
     print(f"prefix={store.corporate_actions_prefix}")
 
     if df.empty:
@@ -252,11 +294,77 @@ def main() -> None:
         return
 
     written = store.write_corporate_actions_partitioned(df)
+
     print(f"[OK] wrote partitions={len(written)}")
     for k in written[:20]:
-        print(f"  s3://{args.bucket}/{k}")
+        print(f"  s3://{bucket}/{k}")
     if len(written) > 20:
         print(f"  ... ({len(written) - 20} more)")
+
+
+# ----------------------------
+# Audit/logging entrypoint wrapper
+# ----------------------------
+def _tier1_audit_is_dry_run(args: argparse.Namespace) -> bool:
+    return bool(getattr(args, "dry_run", False) or getattr(args, "no_write", False))
+
+
+def main_with_audit() -> None:
+    args = parse_args()
+    cfg = load_runtime_config(getattr(args, "env", None))
+    is_dry_run = _tier1_audit_is_dry_run(args)
+
+    with capture_script_run(
+        cfg=cfg,
+        script_name="build_corporate_actions.py",
+        input_args=vars(args),
+        dry_run=is_dry_run,
+    ) as run_id:
+        try:
+            _main_impl()
+
+            event = build_audit_event(
+                cfg=cfg,
+                run_id=run_id,
+                event_type="build_dataset",
+                entity_type="corporate_actions",
+                entity_id=None,
+                as_of=str(getattr(args, "as_of", None) or getattr(args, "dt", None) or getattr(args, "run_dt", None) or ""),
+                source_script="build_corporate_actions.py",
+                source_mode="corporate_actions",
+                status=("dry_run" if is_dry_run else "success"),
+                input_args=vars(args),
+                metadata={
+                    "tier": "tier_1",
+                    "payload_policy": "large_dataset_metadata_only",
+                    "note": "Tier 1 audit event is entrypoint-level. Detailed output keys/row counts are available in the script log stdout and script-specific metadata where emitted by the script.",
+                },
+            )
+            write_audit_event(cfg=cfg, event=event, dry_run=is_dry_run)
+        except Exception as exc:
+            event = build_audit_event(
+                cfg=cfg,
+                run_id=run_id,
+                event_type="build_dataset",
+                entity_type="corporate_actions",
+                entity_id=None,
+                as_of=str(getattr(args, "as_of", None) or getattr(args, "dt", None) or getattr(args, "run_dt", None) or ""),
+                source_script="build_corporate_actions.py",
+                source_mode="corporate_actions",
+                status="failed",
+                input_args=vars(args),
+                metadata={
+                    "tier": "tier_1",
+                    "payload_policy": "large_dataset_metadata_only",
+                },
+                error=f"{type(exc).__name__}: {exc}",
+            )
+            write_audit_event(cfg=cfg, event=event, dry_run=is_dry_run)
+            raise
+
+
+def main() -> None:
+    main_with_audit()
 
 
 if __name__ == "__main__":

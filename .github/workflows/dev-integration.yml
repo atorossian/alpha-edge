@@ -1,0 +1,44 @@
+name: Dev AWS Integration
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 5 * * 1"
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  dev-smoke:
+    runs-on: ubuntu-latest
+    environment: dev
+    timeout-minutes: 30
+    env:
+      ALPHA_EDGE_ENV: dev
+      PYTHONPATH: src
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: 3.12.8
+          cache: pip
+
+      - name: Install Poetry 2.1.2
+        run: pip install poetry==2.1.2
+
+      - name: Install project
+        run: |
+          poetry install --no-interaction --no-ansi
+          poetry run pip install -r requirements-dev.txt
+
+      - name: Configure AWS credentials using GitHub OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEV_CI_ROLE_ARN }}
+          aws-region: eu-west-1
+
+      - name: Run dev environment smoke test
+        run: poetry run python -m alpha_edge.scripts.smoke_test_env --env dev

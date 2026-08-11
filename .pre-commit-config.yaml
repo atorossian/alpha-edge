@@ -1,0 +1,16 @@
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.9.10
+    hooks:
+      - id: ruff
+        args: [--fix]
+        files: ^(tests/|src/alpha_edge/core/(audit|run_logging|runtime)\.py|src/alpha_edge/operations/operation_lifecycle\.py)
+      - id: ruff-format
+        files: ^tests/
+  - repo: local
+    hooks:
+      - id: pytest-fast
+        name: pytest fast suite
+        entry: poetry run pytest tests/unit tests/integration tests/smoke -q
+        language: system
+        pass_filenames: false

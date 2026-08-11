@@ -1,0 +1,177 @@
+src/alpha_edge/backtest/goals.py:44:    def main_goal(self) -> float:
+src/alpha_edge/cli/app.py:31:def main() -> None:
+src/alpha_edge/cli/app.py:35:if __name__ == "__main__":
+src/alpha_edge/cli/commands/pipeline_cmd.py:385:def main() -> None:
+src/alpha_edge/jobs/run_daily_report.py:4:import argparse
+src/alpha_edge/jobs/run_daily_report.py:1766:def parse_args() -> argparse.Namespace:
+src/alpha_edge/jobs/run_daily_report.py:1767:    ap = argparse.ArgumentParser(description="Run Alpha Edge daily report.")
+src/alpha_edge/jobs/run_daily_report.py:1814:def main() -> None:
+src/alpha_edge/jobs/run_daily_report.py:1848:if __name__ == "__main__":
+src/alpha_edge/jobs/run_portfolio_search.py:4:import argparse
+src/alpha_edge/jobs/run_portfolio_search.py:866:def parse_args() -> argparse.Namespace:
+src/alpha_edge/jobs/run_portfolio_search.py:867:    ap = argparse.ArgumentParser(description="Run Alpha Edge portfolio search.")
+src/alpha_edge/jobs/run_portfolio_search.py:927:def main():
+src/alpha_edge/jobs/run_portfolio_search.py:977:if __name__ == "__main__":
+src/alpha_edge/jobs/run_quarantine_analysis.py:4:import argparse
+src/alpha_edge/jobs/run_quarantine_analysis.py:992:def parse_args() -> argparse.Namespace:
+src/alpha_edge/jobs/run_quarantine_analysis.py:993:    ap = argparse.ArgumentParser(description="Run Alpha Edge quarantine analysis.")
+src/alpha_edge/jobs/run_quarantine_analysis.py:1013:def main() -> None:
+src/alpha_edge/jobs/run_quarantine_analysis.py:1061:if __name__ == "__main__":
+src/alpha_edge/jobs/run_reports_backfill.py:4:import argparse
+src/alpha_edge/jobs/run_reports_backfill.py:171:def parse_args() -> argparse.Namespace:
+src/alpha_edge/jobs/run_reports_backfill.py:172:    ap = argparse.ArgumentParser(description="Backfill daily_reports for historical dates.")
+src/alpha_edge/jobs/run_reports_backfill.py:198:def main() -> None:
+src/alpha_edge/jobs/run_reports_backfill.py:322:if __name__ == "__main__":
+src/alpha_edge/jobs/run_score_weights_tuning.py:5:import argparse
+src/alpha_edge/jobs/run_score_weights_tuning.py:390:def parse_args() -> argparse.Namespace:
+src/alpha_edge/jobs/run_score_weights_tuning.py:391:    ap = argparse.ArgumentParser(description="Tune ScoreConfig lambda weights using GA candidate archive.")
+src/alpha_edge/jobs/run_score_weights_tuning.py:454:def main() -> None:
+src/alpha_edge/jobs/run_score_weights_tuning.py:502:if __name__ == "__main__":
+src/alpha_edge/jobs/run_universe_update.py:4:import argparse
+src/alpha_edge/jobs/run_universe_update.py:744:def parse_args() -> argparse.Namespace:
+src/alpha_edge/jobs/run_universe_update.py:745:    ap = argparse.ArgumentParser(description="Update Alpha Edge universe.csv from Quantfury + manual overrides.")
+src/alpha_edge/jobs/run_universe_update.py:765:def main() -> None:
+src/alpha_edge/jobs/run_universe_update.py:1076:if __name__ == "__main__":
+src/alpha_edge/jobs/run_update_score_caps.py:4:import argparse
+src/alpha_edge/jobs/run_update_score_caps.py:145:def parse_args() -> argparse.Namespace:
+src/alpha_edge/jobs/run_update_score_caps.py:146:    p = argparse.ArgumentParser(
+src/alpha_edge/jobs/run_update_score_caps.py:178:def main() -> None:
+src/alpha_edge/jobs/run_update_score_caps.py:253:if __name__ == "__main__":
+src/alpha_edge/jobs/run_warehouse_backfill.py:3:import argparse
+src/alpha_edge/jobs/run_warehouse_backfill.py:261:def parse_args() -> argparse.Namespace:
+src/alpha_edge/jobs/run_warehouse_backfill.py:262:    ap = argparse.ArgumentParser(
+src/alpha_edge/jobs/run_warehouse_backfill.py:320:def main() -> None:
+src/alpha_edge/jobs/run_warehouse_backfill.py:547:if __name__ == "__main__":
+Binary file src/alpha_edge/jobs/__pycache__/run_daily_report.cpython-310.pyc matches
+Binary file src/alpha_edge/jobs/__pycache__/run_portfolio_search.cpython-310.pyc matches
+Binary file src/alpha_edge/jobs/__pycache__/run_quarantine_analysis.cpython-310.pyc matches
+Binary file src/alpha_edge/jobs/__pycache__/run_quarantine_analysis.cpython-312.pyc matches
+Binary file src/alpha_edge/jobs/__pycache__/run_score_weights_tuning.cpython-310.pyc matches
+Binary file src/alpha_edge/jobs/__pycache__/run_universe_update.cpython-310.pyc matches
+Binary file src/alpha_edge/jobs/__pycache__/run_universe_update.cpython-312.pyc matches
+Binary file src/alpha_edge/jobs/__pycache__/run_warehouse_backfill.cpython-310.pyc matches
+src/alpha_edge/maintenance/cleanup_partitions.py:3:import argparse
+src/alpha_edge/maintenance/cleanup_partitions.py:109:def parse_args() -> argparse.Namespace:
+src/alpha_edge/maintenance/cleanup_partitions.py:110:    ap = argparse.ArgumentParser(
+src/alpha_edge/maintenance/cleanup_partitions.py:129:def main() -> None:
+src/alpha_edge/maintenance/cleanup_partitions.py:207:if __name__ == "__main__":
+src/alpha_edge/maintenance/dedupe_ohlcv_partitions_keep_one.py:73:def main():
+src/alpha_edge/maintenance/dedupe_ohlcv_partitions_keep_one.py:118:if __name__ == "__main__":
+src/alpha_edge/maintenance/migrate_local_history_to_s3.py:158:def main():
+src/alpha_edge/maintenance/migrate_local_history_to_s3.py:221:if __name__ == "__main__":
+src/alpha_edge/maintenance/reset_ticker_history.py:3:import argparse
+src/alpha_edge/maintenance/reset_ticker_history.py:81:def parse_args() -> argparse.Namespace:
+src/alpha_edge/maintenance/reset_ticker_history.py:82:    ap = argparse.ArgumentParser(description="Delete market data partitions and reset ticker ingestion state.")
+src/alpha_edge/maintenance/reset_ticker_history.py:97:def main() -> None:
+src/alpha_edge/maintenance/reset_ticker_history.py:170:if __name__ == "__main__":
+src/alpha_edge/market/build_corporate_actions.py:3:import argparse
+src/alpha_edge/market/build_corporate_actions.py:239:def parse_args() -> argparse.Namespace:
+src/alpha_edge/market/build_corporate_actions.py:240:    ap = argparse.ArgumentParser(description="Build corporate actions parquet storage from Yahoo splits.")
+src/alpha_edge/market/build_corporate_actions.py:257:def main() -> None:
+src/alpha_edge/market/build_corporate_actions.py:302:if __name__ == "__main__":
+src/alpha_edge/market/build_returns_wide_cache.py:4:import argparse
+src/alpha_edge/market/build_returns_wide_cache.py:370:def parse_args() -> argparse.Namespace:
+src/alpha_edge/market/build_returns_wide_cache.py:371:    ap = argparse.ArgumentParser(description="Build Alpha Edge returns wide cache.")
+src/alpha_edge/market/build_returns_wide_cache.py:401:def main() -> None:
+src/alpha_edge/market/build_returns_wide_cache.py:455:if __name__ == "__main__":
+src/alpha_edge/market/compute_market_regime.py:4:import argparse
+src/alpha_edge/market/compute_market_regime.py:468:def parse_args() -> argparse.Namespace:
+src/alpha_edge/market/compute_market_regime.py:469:    ap = argparse.ArgumentParser(description="Compute Alpha Edge market regime HMM.")
+src/alpha_edge/market/compute_market_regime.py:484:def main() -> None:
+src/alpha_edge/market/compute_market_regime.py:504:if __name__ == "__main__":
+src/alpha_edge/market/download_market_data_from_s3.py:3:import argparse
+src/alpha_edge/market/download_market_data_from_s3.py:12:def main():
+src/alpha_edge/market/download_market_data_from_s3.py:13:    ap = argparse.ArgumentParser()
+src/alpha_edge/market/download_market_data_from_s3.py:47:if __name__ == "__main__":
+src/alpha_edge/market/ingest_market_data.py:4:import argparse
+src/alpha_edge/market/ingest_market_data.py:1528:def parse_args() -> argparse.Namespace:
+src/alpha_edge/market/ingest_market_data.py:1529:    ap = argparse.ArgumentParser(description="Ingest Alpha Edge market data into S3.")
+src/alpha_edge/market/ingest_market_data.py:1553:def main() -> None:
+src/alpha_edge/market/ingest_market_data.py:1579:if __name__ == "__main__":
+Binary file src/alpha_edge/market/__pycache__/build_corporate_actions.cpython-310.pyc matches
+Binary file src/alpha_edge/market/__pycache__/build_returns_wide_cache.cpython-310.pyc matches
+Binary file src/alpha_edge/market/__pycache__/compute_market_regime.cpython-310.pyc matches
+Binary file src/alpha_edge/market/__pycache__/ingest_market_data.cpython-310.pyc matches
+src/alpha_edge/operations/apply_portfolio_choice.py:3:import argparse
+src/alpha_edge/operations/apply_portfolio_choice.py:385:def parse_args() -> argparse.Namespace:
+src/alpha_edge/operations/apply_portfolio_choice.py:386:    ap = argparse.ArgumentParser(description="Portfolio choice promotion tools.")
+src/alpha_edge/operations/apply_portfolio_choice.py:400:def main() -> None:
+src/alpha_edge/operations/apply_portfolio_choice.py:417:if __name__ == "__main__":
+src/alpha_edge/operations/audit_crypto_trade_quantities.py:3:import argparse
+src/alpha_edge/operations/audit_crypto_trade_quantities.py:495:def main() -> None:
+src/alpha_edge/operations/audit_crypto_trade_quantities.py:496:    ap = argparse.ArgumentParser(description="Audit crypto trade quantity consistency for SPOT migration.")
+src/alpha_edge/operations/audit_crypto_trade_quantities.py:548:if __name__ == "__main__":
+src/alpha_edge/operations/backfill_trades_asset_id.py:3:import argparse
+src/alpha_edge/operations/backfill_trades_asset_id.py:689:def main() -> None:
+src/alpha_edge/operations/backfill_trades_asset_id.py:690:    ap = argparse.ArgumentParser(
+src/alpha_edge/operations/backfill_trades_asset_id.py:738:if __name__ == "__main__":
+src/alpha_edge/operations/build_trade_repair_plan.py:3:import argparse
+src/alpha_edge/operations/build_trade_repair_plan.py:689:def main() -> None:
+src/alpha_edge/operations/build_trade_repair_plan.py:690:    ap = argparse.ArgumentParser(
+src/alpha_edge/operations/build_trade_repair_plan.py:738:if __name__ == "__main__":
+src/alpha_edge/operations/bulk_import_trades.py:4:import argparse
+src/alpha_edge/operations/bulk_import_trades.py:300:def main() -> None:
+src/alpha_edge/operations/bulk_import_trades.py:301:    ap = argparse.ArgumentParser(description="Bulk import trades from CSV using record_trade().")
+src/alpha_edge/operations/bulk_import_trades.py:340:if __name__ == "__main__":
+src/alpha_edge/operations/edit_trades_asset_id.py:3:import argparse
+src/alpha_edge/operations/edit_trades_asset_id.py:285:def parse_args() -> argparse.Namespace:
+src/alpha_edge/operations/edit_trades_asset_id.py:286:    ap = argparse.ArgumentParser(description="Plan/apply edits to trade JSONs in S3.")
+src/alpha_edge/operations/edit_trades_asset_id.py:302:def main() -> None:
+src/alpha_edge/operations/edit_trades_asset_id.py:332:if __name__ == "__main__":
+src/alpha_edge/operations/rebuild_ledger.py:3:import argparse
+src/alpha_edge/operations/rebuild_ledger.py:1517:def main() -> None:
+src/alpha_edge/operations/rebuild_ledger.py:1518:    ap = argparse.ArgumentParser(description="Rebuild positions + PnL from trade ledger.")
+src/alpha_edge/operations/rebuild_ledger.py:1868:if __name__ == "__main__":
+src/alpha_edge/operations/record_cashflow.py:3:import argparse
+src/alpha_edge/operations/record_cashflow.py:137:def parse_args() -> argparse.Namespace:
+src/alpha_edge/operations/record_cashflow.py:138:    ap = argparse.ArgumentParser(description="Append exactly one cashflow record to S3.")
+src/alpha_edge/operations/record_cashflow.py:157:def main() -> None:
+src/alpha_edge/operations/record_cashflow.py:179:if __name__ == "__main__":
+src/alpha_edge/operations/record_dividend.py:3:import argparse
+src/alpha_edge/operations/record_dividend.py:659:def parse_args() -> argparse.Namespace:
+src/alpha_edge/operations/record_dividend.py:660:    ap = argparse.ArgumentParser(description="Record/edit/migrate dividend records in S3.")
+src/alpha_edge/operations/record_dividend.py:701:def main() -> None:
+src/alpha_edge/operations/record_dividend.py:799:if __name__ == "__main__":
+src/alpha_edge/operations/record_trade.py:4:import argparse
+src/alpha_edge/operations/record_trade.py:632:def parse_args() -> argparse.Namespace:
+src/alpha_edge/operations/record_trade.py:633:    ap = argparse.ArgumentParser(description="Record/edit trades in S3.")
+src/alpha_edge/operations/record_trade.py:673:def main() -> None:
+src/alpha_edge/operations/record_trade.py:753:if __name__ == "__main__":
+src/alpha_edge/operations/repair_all_trade_chains.py:3:import argparse
+src/alpha_edge/operations/repair_all_trade_chains.py:889:def main() -> None:
+src/alpha_edge/operations/repair_all_trade_chains.py:890:    ap = argparse.ArgumentParser(description="Chain-aware quantity repair for all trade types.")
+src/alpha_edge/operations/repair_all_trade_chains.py:948:if __name__ == "__main__":
+src/alpha_edge/operations/repair_asset_history.py:3:import argparse
+src/alpha_edge/operations/repair_asset_history.py:159:    ap = argparse.ArgumentParser(
+src/alpha_edge/operations/repair_asset_history.py:204:def main():
+src/alpha_edge/operations/repair_asset_history.py:339:if __name__ == "__main__":
+src/alpha_edge/operations/trace_open_position.py:3:import argparse
+src/alpha_edge/operations/trace_open_position.py:583:def main() -> None:
+src/alpha_edge/operations/trace_open_position.py:584:    ap = argparse.ArgumentParser(description="Trace which trade(s) still leave an open position.")
+src/alpha_edge/operations/trace_open_position.py:705:if __name__ == "__main__":
+Binary file src/alpha_edge/operations/__pycache__/rebuild_ledger.cpython-310.pyc matches
+Binary file src/alpha_edge/operations/__pycache__/repair_asset_history.cpython-310.pyc matches
+src/alpha_edge/portfolio/optimizer_data.py:5:def main():
+src/alpha_edge/portfolio/optimizer_data.py:15:if __name__ == "__main__":
+src/alpha_edge/scripts/dev_seed_fixture.py:4:import argparse
+src/alpha_edge/scripts/dev_seed_fixture.py:429:def parse_args() -> argparse.Namespace:
+src/alpha_edge/scripts/dev_seed_fixture.py:430:    ap = argparse.ArgumentParser(description="Seed a minimal Alpha Edge dev fixture.")
+src/alpha_edge/scripts/dev_seed_fixture.py:448:def main() -> None:
+src/alpha_edge/scripts/dev_seed_fixture.py:487:if __name__ == "__main__":
+src/alpha_edge/scripts/smoke_test_env.py:3:import argparse
+src/alpha_edge/scripts/smoke_test_env.py:46:def main() -> None:
+src/alpha_edge/scripts/smoke_test_env.py:47:    ap = argparse.ArgumentParser(description="Smoke-test Alpha Edge runtime environment.")
+src/alpha_edge/scripts/smoke_test_env.py:100:if __name__ == "__main__":
+Binary file src/alpha_edge/scripts/__pycache__/smoke_test_env.cpython-310.pyc matches
+src/alpha_edge/tuning/tune_score_weights.py:255:if __name__ == "__main__":
+src/alpha_edge/warehouse/build_report_stats.py:3:import argparse
+src/alpha_edge/warehouse/build_report_stats.py:31:def parse_args() -> argparse.Namespace:
+src/alpha_edge/warehouse/build_report_stats.py:32:    ap = argparse.ArgumentParser(
+src/alpha_edge/warehouse/build_report_stats.py:54:def main() -> None:
+src/alpha_edge/warehouse/build_report_stats.py:115:if __name__ == "__main__":
+src/alpha_edge/warehouse/build_warehouse.py:3:import argparse
+src/alpha_edge/warehouse/build_warehouse.py:418:def parse_args() -> argparse.Namespace:
+src/alpha_edge/warehouse/build_warehouse.py:419:    ap = argparse.ArgumentParser(description="Build Alpha Edge warehouse partitions for a single date.")
+src/alpha_edge/warehouse/build_warehouse.py:446:def main() -> None:
+src/alpha_edge/warehouse/build_warehouse.py:563:if __name__ == "__main__":
+Binary file src/alpha_edge/warehouse/__pycache__/build_warehouse.cpython-310.pyc matches

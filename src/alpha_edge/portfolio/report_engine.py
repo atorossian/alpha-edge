@@ -105,11 +105,13 @@ def build_portfolio_report(
     path_source: str = "bootstrap",
     pca_k: int | None = 5,
     prices_usd: pd.Series | None = None,  # valuation prices at report time
+    asset_returns: pd.DataFrame | None = None,  # canonical returns_wide subset, optionally live-augmented
 ) -> PortfolioReport:
     """
     Long/short aware report:
 
-    - Historical risk/returns are estimated from `closes` (daily history).
+    - Historical risk/returns are estimated from `asset_returns` when provided,
+      otherwise from `closes` (legacy fallback).
     - Valuation uses `prices_usd` if provided (spot at report time), else last close.
     - Notional is GROSS: sum(abs(exposure)).
     - Weights passed to evaluator are SIGNED weights scaled by gross notional:
@@ -179,8 +181,10 @@ def build_portfolio_report(
         )
         weights[ticker] = float(w_signed)
 
+    report_as_of = pd.Timestamp(asset_returns.index[-1]) if asset_returns is not None and not asset_returns.empty else pd.Timestamp(closes.index[-1])
+
     snapshot = PortfolioSnapshot(
-        as_of=pd.Timestamp(closes.index[-1]),
+        as_of=report_as_of,
         total_notional=float(gross_notional),
         equity=float(equity),
         leverage=float(leverage),
@@ -192,12 +196,18 @@ def build_portfolio_report(
     if not tickers:
         raise ValueError("No tickers overlap between positions and closes")
 
-    closes_sub = closes[tickers].dropna(how="any")
-    asset_returns = compute_daily_returns(closes_sub)
+    if asset_returns is None:
+        closes_sub = closes[tickers].dropna(how="any")
+        asset_returns_eval = compute_daily_returns(closes_sub)
+    else:
+        cols = [t for t in tickers if t in asset_returns.columns]
+        if not cols:
+            raise ValueError("No tickers overlap between positions and asset_returns")
+        asset_returns_eval = asset_returns[cols].dropna(how="any")
 
     # --- canonical evaluation ---
     eval_metrics = evaluate_portfolio(
-        returns=asset_returns,
+        returns=asset_returns_eval,
         weights=weights,                    # SIGNED weights (gross-scaled)
         equity0=float(equity),
         notional=float(gross_notional),     # GROSS notional
@@ -242,6 +252,14 @@ Risk Metrics:
 - 1-day VaR(95): {m.var_95:.2%}
 - 1-day CVaR(95): {m.cvar_95:.2%}
 
+Path Stability (leveraged MC):
+- Stability Energy: {getattr(m, 'stability_energy', None) if getattr(m, 'stability_energy', None) is not None else 'N/A'}
+- Avg Path MDD: {getattr(m, 'path_mdd_mean', 0.0) if getattr(m, 'path_mdd_mean', None) is not None else 0.0:.2%}
+- CDaR@95: {getattr(m, 'cdar_95', 0.0) if getattr(m, 'cdar_95', None) is not None else 0.0:.2%}
+- P(MDD breach): {getattr(m, 'p_dd_breach', 0.0) if getattr(m, 'p_dd_breach', None) is not None else 0.0:.2%}
+- Underwater Time: {getattr(m, 'underwater_mean', 0.0) if getattr(m, 'underwater_mean', None) is not None else 0.0:.2%}
+- Avg TTR: {getattr(m, 'ttr_mean_days', None) if getattr(m, 'ttr_mean_days', None) is not None else 'N/A'} days
+
 Leveraged Monte Carlo (1 year):
 - Ruin Probability: {m.ruin_prob_1y:.2%}
 - P(>= {g1:.0f}): {m.p_hit_goal_1_1y:.2%} | Median time: {m.med_t_goal_1_days or 'N/A'} days
@@ -255,7 +273,7 @@ Ending Equity Percentiles:
 - P75: {m.ending_equity_p75:,.2f} USD
 - P95: {m.ending_equity_p95:,.2f} USD
 
-Score: {m.score:.4f}
+Raw Optimizer Score: {m.score:.4f}
 """
 
 def print_hmm_summary(hmm_res: dict, lev_rec: dict | None = None) -> None:

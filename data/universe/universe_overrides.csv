@@ -130,4 +130,13 @@ E01F0823B529EE80,BMED,BMED.MI,1,Banca Mediolanum SpA,triage:add_suffix_by_region
 31D845ED83156CA4,AIR,AIR.PA,1,Airbus SE,triage:add_suffix_by_region_hint;conf=HIGH
 5EF2B2C3B2222EBB,FER,FER.MC,1,Ferrovial S.A.,triage:add_suffix_by_region_hint;conf=HIGH
 028BDA11B8D55D6F,TTE,TTE.PA,1,TotalEnergies SE,triage:add_suffix_by_region_hint;conf=HIGH
-EA6F8A2B8A81FF41,ALV,ALV.DE,1,Allianz SE,triage:add_suffix_by_region_hint;conf=HIGHA
+EA6F8A2B8A81FF41,ALV,ALV.DE,1,Allianz SE,triage:add_suffix_by_region_hint;conf=HIGH
+382DFEAD76339C5A,ATGE,CVSA,1,Covista Inc.,Asset changed tickers
+68501C9A13BCCE91,REC,REC.MI,1,Recordati Industria Chimica e Farmaceutica SpA,triage:add_suffix_by_region_hint;conf=HIGH
+6F6060AD68D462D3,SAB,SAB.MC,1,Banco de Sabadell SA,triage:add_suffix_by_region_hint;conf=HIGH
+9059137D5D42924F,ELIS,ELIS.PA,1,Elis SA,triage:add_suffix_by_region_hint;conf=HIGH
+9DC70B7B1682B24F,SAF,SAF.PA,1,Safran S.A.,triage:add_suffix_by_region_hint;conf=HIGH
+9687825206BB0061,IPN,IPN.PA,1,Ipsen SA,triage:add_suffix_by_region_hint;conf=HIGH
+A17CD4A39DA129F8,CA,CA.PA,1,Carrefour S.A.,triage:add_suffix_by_region_hint;conf=HIGH
+3FC16F40E497A6EC,LANC,MZTI,1,Lancaster Colony Corp.,Asset changed tickers
+0C743F6DBAA2E867,VSCO,VSXY,1,Victoria's Secret & Co.,Asset changed tickers

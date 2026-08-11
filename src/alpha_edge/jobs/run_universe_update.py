@@ -1,23 +1,30 @@
 # run_universe_update.py
 from __future__ import annotations
 
+from alpha_edge.core.audit import build_audit_event, write_audit_event
+from alpha_edge.core.run_logging import capture_script_run
+
 import argparse
 import hashlib
 import json
 import re
-import time
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
 import requests
 from bs4 import BeautifulSoup
 
 from alpha_edge import paths
+from alpha_edge.core.runtime import RuntimeConfig, load_runtime_config, require_prod_confirmation
 from alpha_edge.universe.universe import enrich_universe_csv, resolve_ticker_strict
 
 
+DEFAULT_BUCKET = "alpha-edge-algo"
+DEFAULT_REGION = "eu-west-1"
+DEFAULT_ENGINE_ROOT = "engine/v1"
+
 UNIVERSE_CSV = paths.universe_dir() / "universe.csv"
+
 MANUAL_CSV = paths.universe_dir() / "universe_manual_additions.csv"
 OVERRIDES_CSV = paths.universe_dir() / "universe_overrides.csv"
 ASSET_EXCLUDED_CSV = paths.universe_dir() / "asset_excluded.csv"
@@ -34,6 +41,25 @@ SAFE_SCRAPE_UPDATE_COLS = ["name", "asset_class", "role", "region", "include", "
 
 SNAP_DIR = paths.universe_dir() / "snapshots"
 SNAP_DIR.mkdir(parents=True, exist_ok=True)
+
+
+# ----------------------------
+# Runtime helpers
+# ----------------------------
+def cfg_bucket(cfg: RuntimeConfig) -> str:
+    return str(getattr(cfg, "bucket", DEFAULT_BUCKET))
+
+
+def cfg_region(cfg: RuntimeConfig) -> str:
+    return str(getattr(cfg, "region", DEFAULT_REGION))
+
+
+def cfg_engine_root(cfg: RuntimeConfig) -> str:
+    return str(getattr(cfg, "engine_root", DEFAULT_ENGINE_ROOT)).strip("/")
+
+
+def cfg_env(cfg: RuntimeConfig) -> str:
+    return str(getattr(cfg, "env", "dev"))
 
 
 # ----------------------------
@@ -74,7 +100,7 @@ def parse_first_table(html: str) -> pd.DataFrame:
     soup = BeautifulSoup(html, "html.parser")
     tbody = soup.find("tbody")
     if tbody is None:
-        raise ValueError("No <tbody> found on page (page layout may have changed)")
+        raise ValueError("No <tbody> found on page. Page layout may have changed.")
 
     rows: list[list[str]] = []
     for tr in tbody.find_all("tr"):
@@ -118,11 +144,11 @@ def ensure_columns(df: pd.DataFrame) -> pd.DataFrame:
         "include": 1,
         "lock_yahoo_ticker": 0,
     }
+
     for c, default in base_cols.items():
         if c not in df.columns:
             df[c] = default
 
-    # fill NaNs before string ops
     for c in ["row_id", "asset_id", "ticker", "broker_ticker", "yahoo_ticker", "name", "asset_class", "role", "region"]:
         df[c] = df[c].fillna("")
 
@@ -144,7 +170,6 @@ def ensure_columns(df: pd.DataFrame) -> pd.DataFrame:
     df["region"] = df["region"].astype(str).fillna("").str.strip()
     df["name"] = df["name"].astype(str).fillna("").str.strip()
 
-    # defaults
     m = (df["yahoo_ticker"] == "") & (df["ticker"] != "")
     df.loc[m, "yahoo_ticker"] = df.loc[m, "ticker"]
 
@@ -157,11 +182,11 @@ def ensure_columns(df: pd.DataFrame) -> pd.DataFrame:
 def compute_row_id(df: pd.DataFrame) -> pd.Series:
     tmp = ensure_columns(df.copy())
     key = (
-        tmp["ticker"] + "|" +
-        tmp["name"] + "|" +
-        tmp["region"] + "|" +
-        tmp["role"] + "|" +
-        tmp["asset_class"]
+        tmp["ticker"] + "|"
+        + tmp["name"] + "|"
+        + tmp["region"] + "|"
+        + tmp["role"] + "|"
+        + tmp["asset_class"]
     )
     return key.apply(lambda s: hashlib.sha1(s.encode("utf-8")).hexdigest()[:16]).astype(str).str.upper()
 
@@ -174,13 +199,17 @@ def drop_scr_columns(df: pd.DataFrame) -> pd.DataFrame:
 def load_existing_universe(path: Path) -> pd.DataFrame:
     if not path.exists():
         return pd.DataFrame()
+
     df = pd.read_csv(path)
     if df is None or df.empty:
         return pd.DataFrame()
-    df = drop_scr_columns(df)  # never carry _scr into next runs
+
+    df = drop_scr_columns(df)
     df = ensure_columns(df)
+
     if "row_id" not in df.columns or df["row_id"].astype(str).str.strip().eq("").all():
         df["row_id"] = compute_row_id(df)
+
     df["row_id"] = df["row_id"].astype(str).fillna("").str.strip().str.upper()
     return df
 
@@ -196,6 +225,7 @@ def backfill_from_scr(universe: pd.DataFrame, col: str) -> pd.DataFrame:
         return universe
     if col not in universe.columns:
         universe[col] = ""
+
     empty = _is_empty_series(universe[col])
     universe.loc[empty, col] = universe.loc[empty, sc]
     universe = universe.drop(columns=[sc], errors="ignore")
@@ -214,21 +244,13 @@ def dedup_by_row_id(
     out_path: Path | None = None,
     context: str = "dedup",
 ) -> pd.DataFrame:
-    """
-    Enforce PRIMARY KEY: 1 row per row_id.
-
-    Keep best row deterministically:
-      - Prefer row with asset_id that matches existing_asset_id_map[row_id] if provided
-      - Then prefer row with non-empty asset_id
-      - Then prefer include=1, yahoo_ok=True, non-empty yahoo_ticker/symbol, lock_yahoo_ticker
-      - Then prefer longer name
-    """
     u = ensure_columns(universe.copy())
     u["row_id"] = u.get("row_id", "").astype(str).fillna("").str.strip().str.upper()
 
     rid_empty = u["row_id"].str.strip().eq("")
     if rid_empty.any():
         u.loc[rid_empty, "row_id"] = compute_row_id(u.loc[rid_empty].copy())
+
     u["row_id"] = u["row_id"].astype(str).fillna("").str.strip().str.upper()
 
     if not u["row_id"].duplicated(keep=False).any():
@@ -259,7 +281,7 @@ def dedup_by_row_id(
         + u["_yok"] * 10
         + u["_has_yahoo"] * 5
         + u["_has_symbol"] * 2
-        + u["lock_yahoo_ticker"] * 1
+        + u["lock_yahoo_ticker"]
         + (u["_name_len"] > 0).astype(int)
     )
 
@@ -283,18 +305,20 @@ def dedup_by_row_id(
 def build_etfs() -> pd.DataFrame:
     df = parse_first_table(fetch_html(QF_PAGES["etf"]))
     raw = df["Ticker"].astype(str).str.upper().str.strip()
-    out = pd.DataFrame({
-        "broker_ticker": raw,
-        "ticker": raw,
-        "yahoo_ticker": raw,
-        "name": df["ETF"].astype(str),
-        "asset_class": "equity",
-        "role": "etf",
-        "region": df["Exchange"].astype(str),
-        "max_weight": 0.25,
-        "min_weight": 0.0,
-        "include": 1,
-    })
+    out = pd.DataFrame(
+        {
+            "broker_ticker": raw,
+            "ticker": raw,
+            "yahoo_ticker": raw,
+            "name": df["ETF"].astype(str),
+            "asset_class": "equity",
+            "role": "etf",
+            "region": df["Exchange"].astype(str),
+            "max_weight": 0.25,
+            "min_weight": 0.0,
+            "include": 1,
+        }
+    )
     out = ensure_columns(out)
     out["row_id"] = compute_row_id(out)
     return out
@@ -303,18 +327,20 @@ def build_etfs() -> pd.DataFrame:
 def build_stocks() -> pd.DataFrame:
     df = parse_first_table(fetch_html(QF_PAGES["stock"]))
     raw = df["Ticker"].astype(str).str.upper().str.strip()
-    out = pd.DataFrame({
-        "broker_ticker": raw,
-        "ticker": raw,
-        "yahoo_ticker": raw,
-        "name": df["Company"].astype(str),
-        "asset_class": "equity",
-        "role": "stock",
-        "region": df["Exchange"].astype(str),
-        "max_weight": 0.25,
-        "min_weight": 0.0,
-        "include": 1,
-    })
+    out = pd.DataFrame(
+        {
+            "broker_ticker": raw,
+            "ticker": raw,
+            "yahoo_ticker": raw,
+            "name": df["Company"].astype(str),
+            "asset_class": "equity",
+            "role": "stock",
+            "region": df["Exchange"].astype(str),
+            "max_weight": 0.25,
+            "min_weight": 0.0,
+            "include": 1,
+        }
+    )
     out = ensure_columns(out)
     out["row_id"] = compute_row_id(out)
     return out
@@ -324,18 +350,20 @@ def build_crypto_pairs() -> pd.DataFrame:
     df = parse_first_table(fetch_html(QF_PAGES["crypto"]))
     pair_col = "Pair" if "Pair" in df.columns else df.columns[0]
     internal = df[pair_col].astype(str).apply(canonical_crypto_pair)
-    out = pd.DataFrame({
-        "broker_ticker": internal,
-        "ticker": internal,
-        "yahoo_ticker": internal,
-        "name": internal,
-        "asset_class": "crypto",
-        "role": "crypto",
-        "region": df["Exchange"].astype(str) if "Exchange" in df.columns else "crypto",
-        "max_weight": 0.25,
-        "min_weight": 0.0,
-        "include": 1,
-    })
+    out = pd.DataFrame(
+        {
+            "broker_ticker": internal,
+            "ticker": internal,
+            "yahoo_ticker": internal,
+            "name": internal,
+            "asset_class": "crypto",
+            "role": "crypto",
+            "region": df["Exchange"].astype(str) if "Exchange" in df.columns else "crypto",
+            "max_weight": 0.25,
+            "min_weight": 0.0,
+            "include": 1,
+        }
+    )
     out = ensure_columns(out)
     out["row_id"] = compute_row_id(out)
     return out
@@ -348,25 +376,20 @@ def load_manual_additions(manual_path: Path) -> pd.DataFrame:
 
     manual.columns = [c.strip() for c in manual.columns]
 
-    # Your manual header uses expected_name; pipeline uses name
     if "expected_name" in manual.columns and "name" not in manual.columns:
         manual = manual.rename(columns={"expected_name": "name"})
 
     manual = ensure_columns(manual)
 
-    # Manual rows typically don't carry broker_ticker; enforce it
     bt_empty = manual["broker_ticker"].astype(str).str.strip().eq("")
     manual.loc[bt_empty, "broker_ticker"] = manual.loc[bt_empty, "ticker"]
 
-    # include default if not provided
     manual["include"] = pd.to_numeric(manual.get("include", 1), errors="coerce").fillna(1).astype(int)
 
-    # must have ticker
     bad = manual[manual["ticker"].astype(str).str.strip().eq("")]
     if not bad.empty:
         raise RuntimeError(f"Manual additions have empty ticker. Fix: {manual_path}. Columns={list(manual.columns)}")
 
-    # compute row_id if missing
     rid_empty = manual["row_id"].astype(str).str.strip().eq("")
     if rid_empty.any():
         manual.loc[rid_empty, "row_id"] = compute_row_id(manual.loc[rid_empty].copy())
@@ -376,11 +399,21 @@ def load_manual_additions(manual_path: Path) -> pd.DataFrame:
 
 
 # ----------------------------
-# Overrides / Exclusions (your current format)
+# Overrides / Exclusions
 # ----------------------------
 def load_overrides(path: Path) -> pd.DataFrame:
-    base_cols = ["target_row_id", "ticker", "yahoo_ticker", "lock_yahoo_ticker", "exclude", "exclude_reason", "expected_name", "note"]
+    base_cols = [
+        "target_row_id",
+        "ticker",
+        "yahoo_ticker",
+        "lock_yahoo_ticker",
+        "exclude",
+        "exclude_reason",
+        "expected_name",
+        "note",
+    ]
     df = _read_csv_or_empty(str(path), cols=base_cols)
+
     for c in base_cols:
         if c not in df.columns:
             df[c] = "" if c in {"target_row_id", "ticker", "yahoo_ticker", "exclude_reason", "expected_name", "note"} else 0
@@ -391,6 +424,7 @@ def load_overrides(path: Path) -> pd.DataFrame:
     df["lock_yahoo_ticker"] = pd.to_numeric(df["lock_yahoo_ticker"], errors="coerce").fillna(1).astype(int)
     df["exclude"] = pd.to_numeric(df["exclude"], errors="coerce").fillna(0).astype(int)
     df["expected_name"] = df.get("expected_name", "").astype(str).fillna("").str.strip()
+
     return df[base_cols]
 
 
@@ -398,18 +432,20 @@ def load_exclusions(path: Path) -> pd.DataFrame:
     df = _read_csv_or_empty(str(path), cols=["target_row_id", "ticker", "asset_class", "reason"])
     if df.empty:
         return df
+
     if "target_row_id" not in df.columns:
         df["target_row_id"] = ""
+
     df["target_row_id"] = df["target_row_id"].astype(str).fillna("").str.strip().str.upper()
     df["ticker"] = df["ticker"].astype(str).fillna("").str.strip().str.upper()
     df["asset_class"] = df.get("asset_class", "").astype(str).fillna("").str.strip().str.lower()
     df["reason"] = df.get("reason", "").astype(str).fillna("")
+
     return df[["target_row_id", "ticker", "asset_class", "reason"]]
 
 
 def apply_asset_exclusions_patch(universe: pd.DataFrame, excluded_df: pd.DataFrame) -> pd.DataFrame:
-    u = universe.copy()
-    u = ensure_columns(u)
+    u = ensure_columns(universe.copy())
 
     u["ticker"] = u["ticker"].astype(str).str.strip().str.upper()
     u["asset_class"] = u["asset_class"].astype(str).fillna("").str.strip().str.lower()
@@ -424,12 +460,10 @@ def apply_asset_exclusions_patch(universe: pd.DataFrame, excluded_df: pd.DataFra
     ex["ticker"] = ex.get("ticker", "").astype(str).fillna("").str.strip().str.upper()
     ex["asset_class"] = ex.get("asset_class", "").astype(str).fillna("").str.strip().str.lower()
 
-    # 1) row_id-targeted exclusions
     ex_rid = ex[ex["target_row_id"] != ""]
     if not ex_rid.empty:
         u.loc[u["row_id"].isin(set(ex_rid["target_row_id"])), "include"] = 0
 
-    # 2) legacy ticker exclusions
     ex_legacy = ex[ex["target_row_id"] == ""]
     if ex_legacy.empty:
         return u.reset_index(drop=True)
@@ -467,7 +501,6 @@ def apply_overrides_patch(universe: pd.DataFrame, overrides: pd.DataFrame, *, af
     if o.empty:
         return u.reset_index(drop=True)
 
-    # last wins per (ticker, target_row_id)
     o = o.drop_duplicates(subset=["ticker", "target_row_id"], keep="last")
 
     for _, r in o.iterrows():
@@ -495,7 +528,7 @@ def apply_overrides_patch(universe: pd.DataFrame, overrides: pd.DataFrame, *, af
 
 
 # ----------------------------
-# Resolver (ROW_ID SAFE)
+# Resolver
 # ----------------------------
 def resolve_bad_yahoo_symbols(universe_csv: Path, *, row_ids_subset: list[str] | None = None) -> list[str]:
     full = pd.read_csv(universe_csv)
@@ -503,6 +536,7 @@ def resolve_bad_yahoo_symbols(universe_csv: Path, *, row_ids_subset: list[str] |
         return []
 
     full = ensure_columns(full)
+
     if "row_id" not in full.columns or full["row_id"].astype(str).str.strip().eq("").all():
         full["row_id"] = compute_row_id(full)
 
@@ -566,7 +600,6 @@ def assign_asset_ids(universe: pd.DataFrame, existing: pd.DataFrame | None = Non
         u["row_id"] = compute_row_id(u)
     u["row_id"] = u["row_id"].astype(str).fillna("").str.strip().str.upper()
 
-    # preserve asset_id by row_id
     if existing is not None and not existing.empty and "asset_id" in existing.columns:
         ex = ensure_columns(existing.copy())
         if "row_id" not in ex.columns or ex["row_id"].astype(str).str.strip().eq("").all():
@@ -580,15 +613,14 @@ def assign_asset_ids(universe: pd.DataFrame, existing: pd.DataFrame | None = Non
         empty = (cur == "") | (cur.str.lower() == "nan")
         u.loc[empty, "asset_id"] = u.loc[empty, "row_id"].map(ex_map).fillna("")
 
-    # crypto deterministic
     cur = u["asset_id"].astype(str).fillna("").str.strip()
     empty = (cur == "") | (cur.str.lower() == "nan")
     is_crypto = u["asset_class"].astype(str).str.lower() == "crypto"
     u.loc[empty & is_crypto, "asset_id"] = "CRYPTO:" + u.loc[empty & is_crypto, "ticker"].astype(str).str.upper()
 
-    # equity fallback hash
     cur = u["asset_id"].astype(str).fillna("").str.strip()
     empty = (cur == "") | (cur.str.lower() == "nan")
+
     if empty.any():
         name = u.get("name", "")
         exchange = u.get("exchange", u.get("fullExchangeName", ""))
@@ -712,16 +744,47 @@ def _diff_exclusions(prev: pd.DataFrame, curr: pd.DataFrame) -> set[str]:
     return set(t for (t, _) in changed if t)
 
 
-# ----------------------------
-# MAIN
-# ----------------------------
-def main() -> None:
-    ap = argparse.ArgumentParser()
+def parse_args() -> argparse.Namespace:
+    ap = argparse.ArgumentParser(description="Update Alpha Edge universe.csv from Quantfury + manual overrides.")
     ap.add_argument("--mode", choices=["full", "patch"], default="full")
-    ap.add_argument("--sleep_s", type=float, default=0.25)
-    ap.add_argument("--assert_paths", action="store_true")
-    ap.add_argument("--debug_row_id", type=str, default="")
-    args = ap.parse_args()
+    ap.add_argument("--sleep-s", "--sleep_s", dest="sleep_s", type=float, default=0.25)
+    ap.add_argument("--assert-paths", "--assert_paths", dest="assert_paths", action="store_true")
+    ap.add_argument("--debug-row-id", "--debug_row_id", dest="debug_row_id", type=str, default="")
+    ap.add_argument("--dry-run", action="store_true")
+
+    ap.add_argument("--bucket", default=None)
+    ap.add_argument("--region", default=None)
+    ap.add_argument("--engine-root", default=None)
+
+    ap.add_argument("--env", default=None, choices=["dev", "staging", "prod"])
+    ap.add_argument("--confirm-prod-write", action="store_true")
+
+    return ap.parse_args()
+
+
+# ----------------------------
+# Main
+# ----------------------------
+def _main_impl() -> None:
+    args = parse_args()
+
+    cfg = load_runtime_config(args.env)
+
+    bucket = str(args.bucket or cfg_bucket(cfg))
+    region = str(args.region or cfg_region(cfg))
+    engine_root = str(args.engine_root or cfg_engine_root(cfg)).strip("/")
+
+    if not bool(args.dry_run):
+        require_prod_confirmation(cfg, bool(args.confirm_prod_write))
+
+    print("\n=== UNIVERSE UPDATE ===")
+    print(f"env:         {cfg_env(cfg)}")
+    print(f"bucket:      {bucket}")
+    print(f"region:      {region}")
+    print(f"engine_root: {engine_root}")
+    print(f"mode:        {args.mode}")
+    print(f"dry_run:     {bool(args.dry_run)}")
+    print("")
 
     if args.assert_paths:
         print(f"[paths] project_root={paths.project_root()}")
@@ -735,7 +798,6 @@ def main() -> None:
 
     existing = load_existing_universe(UNIVERSE_CSV)
 
-    # known-good asset_id per row_id to preserve identity during dedup
     existing_asset_id_map: dict[str, str] = {}
     if not existing.empty and "asset_id" in existing.columns:
         ex = ensure_columns(existing.copy())
@@ -744,7 +806,6 @@ def main() -> None:
         ex = ex[(ex["row_id"] != "") & (ex["asset_id"] != "")]
         existing_asset_id_map = ex.drop_duplicates(subset=["row_id"], keep="first").set_index("row_id")["asset_id"].to_dict()
 
-    # Always enforce PK on existing before any mode
     existing = dedup_by_row_id(
         existing,
         existing_asset_id_map=existing_asset_id_map,
@@ -759,6 +820,7 @@ def main() -> None:
         etfs = build_etfs()
         stocks = build_stocks()
         crypto = build_crypto_pairs()
+
         scraped = pd.concat([etfs, stocks, crypto], ignore_index=True)
         scraped = ensure_columns(scraped)
 
@@ -776,7 +838,6 @@ def main() -> None:
             scraped.loc[rid_empty, "row_id"] = compute_row_id(scraped.loc[rid_empty].copy())
         scraped["row_id"] = scraped["row_id"].astype(str).fillna("").str.strip().str.upper()
 
-        # PK enforce pre-merge scraped
         scraped = dedup_by_row_id(
             scraped,
             existing_asset_id_map=existing_asset_id_map,
@@ -789,7 +850,11 @@ def main() -> None:
             universe = scraped.copy()
         else:
             universe = existing.merge(
-                scraped[["row_id", "ticker", "broker_ticker"] + SAFE_SCRAPE_UPDATE_COLS + ["yahoo_ticker", "lock_yahoo_ticker"]],
+                scraped[
+                    ["row_id", "ticker", "broker_ticker"]
+                    + SAFE_SCRAPE_UPDATE_COLS
+                    + ["yahoo_ticker", "lock_yahoo_ticker"]
+                ],
                 on="row_id",
                 how="outer",
                 suffixes=("", "_scr"),
@@ -803,7 +868,6 @@ def main() -> None:
         universe = ensure_columns(universe)
         universe = universe[universe["ticker"].astype(str).str.strip().ne("")].copy()
 
-        # PK enforce post-merge
         universe = dedup_by_row_id(
             universe,
             existing_asset_id_map=existing_asset_id_map,
@@ -815,13 +879,17 @@ def main() -> None:
         affected_tickers = set(universe["ticker"].astype(str).str.strip().str.upper().tolist())
         universe = apply_overrides_patch(universe, overrides, affected_tickers=affected_tickers)
 
-        # PK enforce before write & enrichment
         universe = dedup_by_row_id(
             universe,
             existing_asset_id_map=existing_asset_id_map,
             out_path=paths.local_outputs_dir() / "universe_audit" / "dedup_row_id_removed_pre_write.csv",
             context="pre_write_pk",
         )
+
+        if args.dry_run:
+            print(f"[DRY RUN] would write universe rows={len(universe)} -> {UNIVERSE_CSV}")
+            print("[DRY RUN] would run enrich/resolve/asset_id assignment.")
+            return
 
         universe.to_csv(UNIVERSE_CSV, index=False)
         print(f"[ok] wrote universe rows={len(universe)} -> {UNIVERSE_CSV}")
@@ -876,9 +944,6 @@ def main() -> None:
         print("[ok] asset_id assigned + dedup_by_asset_id done.")
 
     else:
-        # ----------------------------
-        # PATCH MODE
-        # ----------------------------
         if existing is None or existing.empty:
             raise RuntimeError("Patch mode requires an existing universe.csv. Run --mode full first.")
 
@@ -891,17 +956,18 @@ def main() -> None:
         affected_tickers = {t for t in affected_tickers if t and t.lower() != "nan"}
 
         print(f"[patch] affected_tickers={len(affected_tickers)}")
+
         if not affected_tickers:
             print("[patch] no changes detected; nothing to do.")
-            # still update snapshots at end
         else:
             universe = pd.read_csv(UNIVERSE_CSV)
             universe = ensure_columns(drop_scr_columns(universe))
+
             if "row_id" not in universe.columns or universe["row_id"].astype(str).str.strip().eq("").all():
                 universe["row_id"] = compute_row_id(universe)
+
             universe["row_id"] = universe["row_id"].astype(str).fillna("").str.strip().str.upper()
 
-            # PK enforce before patch work (critical because enrich_universe_csv now raises)
             universe = dedup_by_row_id(
                 universe,
                 existing_asset_id_map=existing_asset_id_map,
@@ -909,11 +975,9 @@ def main() -> None:
                 context="patch_pre_pk",
             )
 
-            # apply exclusions + overrides only for affected tickers (override fn already filters internally)
             universe = apply_asset_exclusions_patch(universe, exclusions)
             universe = apply_overrides_patch(universe, overrides, affected_tickers=affected_tickers)
 
-            # PK enforce after patch changes
             universe = dedup_by_row_id(
                 universe,
                 existing_asset_id_map=existing_asset_id_map,
@@ -921,18 +985,35 @@ def main() -> None:
                 context="patch_post_apply_pk",
             )
 
+            if args.dry_run:
+                print(f"[DRY RUN] would write patched universe rows={len(universe)} -> {UNIVERSE_CSV}")
+                print("[DRY RUN] would run enrich/resolve/asset_id assignment for affected rows.")
+                return
+
             universe.to_csv(UNIVERSE_CSV, index=False)
 
-            # enrich only affected row_ids (by ticker -> row_id)
             mask = universe["ticker"].astype(str).str.upper().isin(affected_tickers)
             row_ids_affected = sorted(universe.loc[mask, "row_id"].astype(str).str.upper().unique().tolist())
 
             if debug_row_id:
                 print(f"[patch][dbg] rows for row_id={debug_row_id}")
-                cols = [c for c in ["row_id", "ticker", "name", "region", "role", "asset_class", "asset_id", "yahoo_ticker", "include"] if c in universe.columns]
+                cols = [
+                    c
+                    for c in [
+                        "row_id",
+                        "ticker",
+                        "name",
+                        "region",
+                        "role",
+                        "asset_class",
+                        "asset_id",
+                        "yahoo_ticker",
+                        "include",
+                    ]
+                    if c in universe.columns
+                ]
                 print(universe[universe["row_id"].eq(debug_row_id)][cols].head(50).to_string(index=False))
 
-            # IMPORTANT: enrich uses ticker_col=row_id and will now raise if duplicates exist
             enrich_universe_csv(
                 universe_csv=str(UNIVERSE_CSV),
                 out_csv=str(UNIVERSE_CSV),
@@ -954,11 +1035,9 @@ def main() -> None:
                     tickers_subset=changed,
                 )
 
-            # re-load and finalize identity fields
             u2 = pd.read_csv(UNIVERSE_CSV)
             u2 = ensure_columns(drop_scr_columns(u2))
 
-            # PK enforce again before asset_id assignment
             u2 = dedup_by_row_id(
                 u2,
                 existing_asset_id_map=existing_asset_id_map,
@@ -971,7 +1050,6 @@ def main() -> None:
             dedup_report = paths.local_outputs_dir() / "universe_audit" / "dedup_asset_id_removed_patch.csv"
             u2 = dedup_by_asset_id(u2, out_path=dedup_report)
 
-            # final PK enforce
             u2 = dedup_by_row_id(
                 u2,
                 existing_asset_id_map=existing_asset_id_map,
@@ -982,20 +1060,85 @@ def main() -> None:
             u2.to_csv(UNIVERSE_CSV, index=False)
             print("[patch][ok] universe patched + enriched by row_id + asset_id preserved.")
 
-    # snapshots for patch diff
-    try:
-        if OVERRIDES_CSV.exists():
-            pd.read_csv(OVERRIDES_CSV).to_csv(_snapshot_path("universe_overrides.prev.csv"), index=False)
-    except Exception:
-        pass
+    if not args.dry_run:
+        try:
+            if OVERRIDES_CSV.exists():
+                pd.read_csv(OVERRIDES_CSV).to_csv(_snapshot_path("universe_overrides.prev.csv"), index=False)
+        except Exception:
+            pass
 
-    try:
-        if ASSET_EXCLUDED_CSV.exists():
-            pd.read_csv(ASSET_EXCLUDED_CSV).to_csv(_snapshot_path("asset_excluded.prev.csv"), index=False)
-    except Exception:
-        pass
+        try:
+            if ASSET_EXCLUDED_CSV.exists():
+                pd.read_csv(ASSET_EXCLUDED_CSV).to_csv(_snapshot_path("asset_excluded.prev.csv"), index=False)
+        except Exception:
+            pass
 
-    print("[ok] snapshots updated.")
+        print("[ok] snapshots updated.")
+
+
+# ----------------------------
+# Audit/logging entrypoint wrapper
+# ----------------------------
+def _tier1_audit_is_dry_run(args: argparse.Namespace) -> bool:
+    return bool(getattr(args, "dry_run", False) or getattr(args, "no_write", False))
+
+
+def main_with_audit() -> None:
+    args = parse_args()
+    cfg = load_runtime_config(getattr(args, "env", None))
+    is_dry_run = _tier1_audit_is_dry_run(args)
+
+    with capture_script_run(
+        cfg=cfg,
+        script_name="run_universe_update.py",
+        input_args=vars(args),
+        dry_run=is_dry_run,
+    ) as run_id:
+        try:
+            _main_impl()
+
+            event = build_audit_event(
+                cfg=cfg,
+                run_id=run_id,
+                event_type="modify",
+                entity_type="universe",
+                entity_id=None,
+                as_of=str(getattr(args, "as_of", None) or getattr(args, "dt", None) or getattr(args, "run_dt", None) or ""),
+                source_script="run_universe_update.py",
+                source_mode="universe_update",
+                status=("dry_run" if is_dry_run else "success"),
+                input_args=vars(args),
+                metadata={
+                    "tier": "tier_1",
+                    "payload_policy": "large_dataset_metadata_only",
+                    "note": "Tier 1 audit event is entrypoint-level. Detailed output keys/row counts are available in the script log stdout and script-specific metadata where emitted by the script.",
+                },
+            )
+            write_audit_event(cfg=cfg, event=event, dry_run=is_dry_run)
+        except Exception as exc:
+            event = build_audit_event(
+                cfg=cfg,
+                run_id=run_id,
+                event_type="modify",
+                entity_type="universe",
+                entity_id=None,
+                as_of=str(getattr(args, "as_of", None) or getattr(args, "dt", None) or getattr(args, "run_dt", None) or ""),
+                source_script="run_universe_update.py",
+                source_mode="universe_update",
+                status="failed",
+                input_args=vars(args),
+                metadata={
+                    "tier": "tier_1",
+                    "payload_policy": "large_dataset_metadata_only",
+                },
+                error=f"{type(exc).__name__}: {exc}",
+            )
+            write_audit_event(cfg=cfg, event=event, dry_run=is_dry_run)
+            raise
+
+
+def main() -> None:
+    main_with_audit()
 
 
 if __name__ == "__main__":

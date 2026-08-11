@@ -1,0 +1,493 @@
+===== alpha-edge-algo =====
+src/alpha_edge/backtest/config.py:8:    bucket: str = "alpha-edge-algo"
+src/alpha_edge/backtest/config.py:12:    returns_wide_cache_path: str = "s3://alpha-edge-algo/market/cache/v1/returns_wide_min5y.parquet"
+src/alpha_edge/cli/commands/ingest_cmd.py:9:    bucket: str = typer.Option("alpha-edge-algo", help="S3 bucket."),
+src/alpha_edge/cli/commands/pipeline_cmd.py:24:    bucket: str = "alpha-edge-algo",
+src/alpha_edge/cli/commands/pipeline_cmd.py:89:    bucket: str = typer.Option("alpha-edge-algo", help="S3 bucket."),
+src/alpha_edge/cli/commands/returns_cache_cmd.py:9:    bucket: str = typer.Option("alpha-edge-algo", help="S3 bucket."),
+src/alpha_edge/cli/commands/universe_cmd.py:32:    bucket: str = typer.Option("alpha-edge-algo", help="S3 bucket."),
+src/alpha_edge/config/config.py:9:    bucket: str = os.getenv("S3_BUCKET", "alpha-edge-algo")
+src/alpha_edge/core/runtime.py:11:DEFAULT_BUCKET = "alpha-edge-algo"
+src/alpha_edge/jobs/run_daily_report.py:70:DEFAULT_BUCKET = "alpha-edge-algo"
+src/alpha_edge/jobs/run_daily_report.py:224:    s3_bucket: str = "alpha-edge-algo",
+src/alpha_edge/jobs/run_portfolio_search.py:32:ENGINE_BUCKET = "alpha-edge-algo"
+src/alpha_edge/jobs/run_quarantine_analysis.py:29:DEFAULT_ENGINE_BUCKET = "alpha-edge-algo"
+src/alpha_edge/jobs/run_reports_backfill.py:22:DEFAULT_BUCKET = "alpha-edge-algo"
+src/alpha_edge/jobs/run_score_weights_tuning.py:25:ENGINE_BUCKET = "alpha-edge-algo"
+src/alpha_edge/jobs/run_score_weights_tuning.py:29:RETURNS_WIDE_CACHE_PATH = "s3://alpha-edge-algo/market/cache/v1/returns_wide_min5y.parquet"
+src/alpha_edge/jobs/run_universe_update.py:19:DEFAULT_BUCKET = "alpha-edge-algo"
+src/alpha_edge/jobs/run_update_score_caps.py:16:DEFAULT_ENGINE_BUCKET = "alpha-edge-algo"
+src/alpha_edge/jobs/run_warehouse_backfill.py:16:DEFAULT_BUCKET = "alpha-edge-algo"
+src/alpha_edge/maintenance/cleanup_partitions.py:12:DEFAULT_BUCKET = "alpha-edge-algo"
+src/alpha_edge/maintenance/dedupe_ohlcv_partitions_keep_one.py:12:BUCKET = "alpha-edge-algo"
+src/alpha_edge/maintenance/migrate_local_history_to_s3.py:17:S3_BUCKET = "alpha-edge-algo"
+src/alpha_edge/maintenance/reset_ticker_history.py:13:DEFAULT_BUCKET = "alpha-edge-algo"
+src/alpha_edge/market/build_corporate_actions.py:16:DEFAULT_BUCKET = "alpha-edge-algo"
+src/alpha_edge/market/build_returns_wide_cache.py:21:    bucket: str = "alpha-edge-algo"
+src/alpha_edge/market/compute_market_regime.py:24:ENGINE_BUCKET = "alpha-edge-algo"
+src/alpha_edge/market/compute_market_regime.py:28:OHLCV_USD_ROOT = "s3://alpha-edge-algo/market/ohlcv_usd/v1"
+src/alpha_edge/market/download_market_data_from_s3.py:14:    ap.add_argument("--bucket", default="alpha-edge-algo")
+src/alpha_edge/market/ingest_market_data.py:758:    bucket: str = "alpha-edge-algo",
+src/alpha_edge/operations/apply_portfolio_choice.py:16:DEFAULT_BUCKET = "alpha-edge-algo"
+src/alpha_edge/operations/audit_crypto_trade_quantities.py:15:DEFAULT_BUCKET = "alpha-edge-algo"
+src/alpha_edge/operations/backfill_trades_asset_id.py:16:DEFAULT_BUCKET = "alpha-edge-algo"
+src/alpha_edge/operations/build_trade_repair_plan.py:16:DEFAULT_BUCKET = "alpha-edge-algo"
+
+===== engine/v1 =====
+src/alpha_edge/cli/commands/market_regime_cmd.py:12:    Compute market regime (HMM) from proxy basket and write engine/v1/regimes/market_hmm/...
+src/alpha_edge/core/data_loader.py:156:    table_prefix example: "engine/v1/daily_reports"
+src/alpha_edge/core/runtime.py:46:            engine_root="engine/v1",
+src/alpha_edge/core/runtime.py:48:            warehouse_root="engine/v1/warehouse",
+src/alpha_edge/core/runtime.py:56:        engine_root=f"{env_norm}/engine/v1",
+src/alpha_edge/core/runtime.py:58:        warehouse_root=f"{env_norm}/engine/v1/warehouse",
+src/alpha_edge/jobs/run_daily_report.py:72:DEFAULT_ENGINE_ROOT_PREFIX = "engine/v1"
+src/alpha_edge/jobs/run_portfolio_search.py:34:ENGINE_ROOT_PREFIX = "engine/v1"
+src/alpha_edge/jobs/run_portfolio_search.py:156:      - leverage from engine/v1/regimes/market_hmm/latest.json (or overridden)
+src/alpha_edge/jobs/run_portfolio_search.py:183:        raise RuntimeError("Missing S3 latest positions. Expected engine/v1/inputs/positions/latest.json")
+src/alpha_edge/jobs/run_portfolio_search.py:190:        raise RuntimeError("Missing S3 latest score_config. Expected engine/v1/configs/score_config/latest.json")
+src/alpha_edge/jobs/run_quarantine_analysis.py:31:DEFAULT_ENGINE_ROOT_PREFIX = "engine/v1"
+src/alpha_edge/jobs/run_reports_backfill.py:24:DEFAULT_ENGINE_ROOT = "engine/v1"
+src/alpha_edge/jobs/run_score_weights_tuning.py:27:ENGINE_ROOT_PREFIX = "engine/v1"
+src/alpha_edge/jobs/run_score_weights_tuning.py:46:        raise RuntimeError("Missing S3 latest positions. Expected engine/v1/inputs/positions/latest.json")
+src/alpha_edge/jobs/run_score_weights_tuning.py:200:    print("\n[S3] Saved tuned score_config to engine/v1/configs/score_config/latest.json")
+src/alpha_edge/jobs/run_universe_update.py:21:DEFAULT_ENGINE_ROOT = "engine/v1"
+src/alpha_edge/jobs/run_update_score_caps.py:18:DEFAULT_ENGINE_ROOT_PREFIX = "engine/v1"
+src/alpha_edge/jobs/run_warehouse_backfill.py:18:DEFAULT_ENGINE_ROOT = "engine/v1"
+src/alpha_edge/maintenance/migrate_local_history_to_s3.py:19:S3_ENGINE_ROOT = "engine/v1"                   # destination prefix in S3
+src/alpha_edge/maintenance/migrate_local_history_to_s3.py:38:# If True: after upload, create engine/v1/<table>/latest.json (and/or latest.csv/latest.parquet)
+src/alpha_edge/maintenance/migrate_local_history_to_s3.py:101:    Writes engine/v1/<table>/latest.<ext> for common extensions if present in newest dt folder.
+src/alpha_edge/market/compute_market_regime.py:26:ENGINE_ROOT_PREFIX = "engine/v1"
+src/alpha_edge/market/compute_market_regime.py:270:    # Write to engine/v1/regimes/market_hmm/...
+src/alpha_edge/market/compute_market_regime.py:282:    print("[OK] wrote market regime -> engine/v1/regimes/market_hmm (latest.json updated)")
+src/alpha_edge/operations/apply_portfolio_choice.py:18:DEFAULT_ENGINE_ROOT = "engine/v1"
+src/alpha_edge/operations/audit_crypto_trade_quantities.py:17:DEFAULT_ENGINE_ROOT = "engine/v1"
+src/alpha_edge/operations/backfill_trades_asset_id.py:18:DEFAULT_ENGINE_ROOT = "engine/v1"
+src/alpha_edge/operations/build_trade_repair_plan.py:18:DEFAULT_ENGINE_ROOT = "engine/v1"
+
+===== market/ =====
+src/alpha_edge/backtest/config.py:12:    returns_wide_cache_path: str = "s3://alpha-edge-algo/market/cache/v1/returns_wide_min5y.parquet"
+src/alpha_edge/core/market_store.py:395:        # market/reference/v1/corporate_actions
+src/alpha_edge/core/market_store.py:407:        market/reference/v1/corporate_actions/asset_id=<asset_id>/part-00000.parquet
+src/alpha_edge/jobs/run_daily_report.py:225:    s3_root_prefix: str = "market/ohlcv_usd/v1",
+src/alpha_edge/jobs/run_portfolio_search.py:525:                        "returns_cache": "market/cache/v1/returns_wide_min5y.parquet",
+src/alpha_edge/jobs/run_portfolio_search.py:526:                        "latest_prices_snapshot": "market/snapshots/v1/latest_prices.parquet",
+src/alpha_edge/jobs/run_quarantine_analysis.py:61:    return f"s3://{bucket}/market/cache/v1/returns_wide_min5y.parquet"
+src/alpha_edge/jobs/run_score_weights_tuning.py:29:RETURNS_WIDE_CACHE_PATH = "s3://alpha-edge-algo/market/cache/v1/returns_wide_min5y.parquet"
+src/alpha_edge/jobs/run_score_weights_tuning.py:176:                "returns_cache": "market/cache/v1/returns_wide_min5y.parquet",
+src/alpha_edge/maintenance/cleanup_partitions.py:144:    ohlcv_uri = f"s3://{bucket}/market/ohlcv_usd/v1"
+src/alpha_edge/maintenance/cleanup_partitions.py:145:    returns_uri = f"s3://{bucket}/market/returns_usd/v1"
+src/alpha_edge/maintenance/dedupe_ohlcv_partitions_keep_one.py:13:ROOT_PREFIX = "market/ohlcv_usd/v1/"   # must end with "/"
+src/alpha_edge/maintenance/dedupe_ohlcv_partitions_keep_one.py:32:PART_RE = re.compile(r"^market/ohlcv_usd/v1/ticker=([^/]+)/year=(\d{4})/.*\.parquet$")
+src/alpha_edge/market/build_returns_wide_cache.py:22:    cache_prefix: str = "market/cache/v1"   # S3 KEY prefix (no s3://)
+src/alpha_edge/market/build_returns_wide_cache.py:130:    root = store.returns_prefix  # e.g. market/returns_usd/v1
+src/alpha_edge/market/compute_market_regime.py:28:OHLCV_USD_ROOT = "s3://alpha-edge-algo/market/ohlcv_usd/v1"
+src/alpha_edge/operations/rebuild_ledger.py:36:OHLCV_USD_ROOT = "market/ohlcv_usd/v1"
+src/alpha_edge/operations/rebuild_ledger.py:1683:        latest_prices_key = "market/snapshots/v1/latest_prices.parquet"
+
+===== runtime constants =====
+src/alpha_edge/core/runtime.py:11:DEFAULT_BUCKET = "alpha-edge-algo"
+src/alpha_edge/core/runtime.py:12:DEFAULT_REGION = "eu-west-1"
+src/alpha_edge/core/runtime.py:38:    bucket = os.getenv("ALPHA_EDGE_BUCKET", DEFAULT_BUCKET).strip()
+src/alpha_edge/core/runtime.py:39:    region = os.getenv("ALPHA_EDGE_REGION", DEFAULT_REGION).strip()
+src/alpha_edge/jobs/run_daily_report.py:70:DEFAULT_BUCKET = "alpha-edge-algo"
+src/alpha_edge/jobs/run_daily_report.py:71:DEFAULT_REGION = "eu-west-1"
+src/alpha_edge/jobs/run_daily_report.py:72:DEFAULT_ENGINE_ROOT_PREFIX = "engine/v1"
+src/alpha_edge/jobs/run_daily_report.py:73:DEFAULT_MARKET_ROOT = "market"
+src/alpha_edge/jobs/run_portfolio_search.py:32:ENGINE_BUCKET = "alpha-edge-algo"
+src/alpha_edge/jobs/run_portfolio_search.py:33:ENGINE_REGION = "eu-west-1"
+src/alpha_edge/jobs/run_portfolio_search.py:34:ENGINE_ROOT_PREFIX = "engine/v1"
+src/alpha_edge/jobs/run_portfolio_search.py:172:    s3 = s3_init(ENGINE_REGION)
+src/alpha_edge/jobs/run_portfolio_search.py:173:    market = MarketStore(bucket=ENGINE_BUCKET)
+src/alpha_edge/jobs/run_portfolio_search.py:180:        s3, bucket=ENGINE_BUCKET, root_prefix=ENGINE_ROOT_PREFIX, table="inputs/positions"
+src/alpha_edge/jobs/run_portfolio_search.py:187:        s3, bucket=ENGINE_BUCKET, root_prefix=ENGINE_ROOT_PREFIX, table="configs/score_config"
+src/alpha_edge/jobs/run_portfolio_search.py:232:                s3, bucket=ENGINE_BUCKET, root_prefix=ENGINE_ROOT_PREFIX, table="regimes/market_hmm"
+src/alpha_edge/jobs/run_portfolio_search.py:315:    cache_cfg = CacheConfig(bucket=ENGINE_BUCKET, min_years=float(cache_min_years))
+src/alpha_edge/jobs/run_portfolio_search.py:318:    returns_path = f"s3://{ENGINE_BUCKET}/{cache_cfg.cache_prefix}/returns_wide_min{int(cache_cfg.min_years)}y.parquet"
+src/alpha_edge/jobs/run_portfolio_search.py:491:    last_score = s3_load_latest_report_score(s3, bucket=ENGINE_BUCKET, root_prefix=ENGINE_ROOT_PREFIX)
+src/alpha_edge/jobs/run_portfolio_search.py:496:            bucket=ENGINE_BUCKET,
+src/alpha_edge/jobs/run_portfolio_search.py:497:            root_prefix=ENGINE_ROOT_PREFIX,
+src/alpha_edge/jobs/run_portfolio_search.py:524:                        "bucket": ENGINE_BUCKET,
+src/alpha_edge/jobs/run_portfolio_search.py:549:            bucket=ENGINE_BUCKET,
+src/alpha_edge/jobs/run_portfolio_search.py:550:            root_prefix=ENGINE_ROOT_PREFIX,
+src/alpha_edge/jobs/run_portfolio_search.py:566:            bucket=ENGINE_BUCKET,
+src/alpha_edge/jobs/run_portfolio_search.py:567:            root_prefix=ENGINE_ROOT_PREFIX,
+src/alpha_edge/jobs/run_quarantine_analysis.py:29:DEFAULT_ENGINE_BUCKET = "alpha-edge-algo"
+src/alpha_edge/jobs/run_quarantine_analysis.py:30:DEFAULT_ENGINE_REGION = "eu-west-1"
+src/alpha_edge/jobs/run_quarantine_analysis.py:31:DEFAULT_ENGINE_ROOT_PREFIX = "engine/v1"
+src/alpha_edge/jobs/run_quarantine_analysis.py:45:    return str(getattr(cfg, "bucket", DEFAULT_ENGINE_BUCKET))
+src/alpha_edge/jobs/run_quarantine_analysis.py:49:    return str(getattr(cfg, "region", DEFAULT_ENGINE_REGION))
+src/alpha_edge/jobs/run_quarantine_analysis.py:53:    return str(getattr(cfg, "engine_root", DEFAULT_ENGINE_ROOT_PREFIX)).strip("/")
+src/alpha_edge/jobs/run_quarantine_analysis.py:427:    bucket: str = DEFAULT_ENGINE_BUCKET,
+src/alpha_edge/jobs/run_quarantine_analysis.py:428:    region: str = DEFAULT_ENGINE_REGION,
+src/alpha_edge/jobs/run_quarantine_analysis.py:429:    engine_root: str = DEFAULT_ENGINE_ROOT_PREFIX,
+src/alpha_edge/jobs/run_reports_backfill.py:22:DEFAULT_BUCKET = "alpha-edge-algo"
+src/alpha_edge/jobs/run_reports_backfill.py:23:DEFAULT_REGION = "eu-west-1"
+src/alpha_edge/jobs/run_reports_backfill.py:24:DEFAULT_ENGINE_ROOT = "engine/v1"
+src/alpha_edge/jobs/run_reports_backfill.py:31:    return str(getattr(cfg, "bucket", DEFAULT_BUCKET))
+src/alpha_edge/jobs/run_reports_backfill.py:35:    return str(getattr(cfg, "region", DEFAULT_REGION))
+src/alpha_edge/jobs/run_reports_backfill.py:39:    return str(getattr(cfg, "engine_root", DEFAULT_ENGINE_ROOT)).strip("/")
+src/alpha_edge/jobs/run_score_weights_tuning.py:25:ENGINE_BUCKET = "alpha-edge-algo"
+src/alpha_edge/jobs/run_score_weights_tuning.py:26:ENGINE_REGION = "eu-west-1"
+src/alpha_edge/jobs/run_score_weights_tuning.py:27:ENGINE_ROOT_PREFIX = "engine/v1"
+src/alpha_edge/jobs/run_score_weights_tuning.py:29:RETURNS_WIDE_CACHE_PATH = "s3://alpha-edge-algo/market/cache/v1/returns_wide_min5y.parquet"
+src/alpha_edge/jobs/run_score_weights_tuning.py:36:    s3 = s3_init(ENGINE_REGION)
+src/alpha_edge/jobs/run_score_weights_tuning.py:43:        s3, bucket=ENGINE_BUCKET, root_prefix=ENGINE_ROOT_PREFIX, table="inputs/positions"
+src/alpha_edge/jobs/run_score_weights_tuning.py:53:        s3, bucket=ENGINE_BUCKET, root_prefix=ENGINE_ROOT_PREFIX, table="regimes/hmm"
+src/alpha_edge/jobs/run_score_weights_tuning.py:79:    returns_wide = pd.read_parquet(RETURNS_WIDE_CACHE_PATH, engine="pyarrow").sort_index()
+src/alpha_edge/jobs/run_score_weights_tuning.py:150:        bucket=ENGINE_BUCKET,
+src/alpha_edge/jobs/run_score_weights_tuning.py:151:        root_prefix=ENGINE_ROOT_PREFIX,
+src/alpha_edge/jobs/run_score_weights_tuning.py:162:        bucket=ENGINE_BUCKET,
+src/alpha_edge/jobs/run_score_weights_tuning.py:163:        root_prefix=ENGINE_ROOT_PREFIX,
+src/alpha_edge/jobs/run_universe_update.py:19:DEFAULT_BUCKET = "alpha-edge-algo"
+src/alpha_edge/jobs/run_universe_update.py:20:DEFAULT_REGION = "eu-west-1"
+src/alpha_edge/jobs/run_universe_update.py:21:DEFAULT_ENGINE_ROOT = "engine/v1"
+src/alpha_edge/jobs/run_universe_update.py:47:    return str(getattr(cfg, "bucket", DEFAULT_BUCKET))
+src/alpha_edge/jobs/run_universe_update.py:51:    return str(getattr(cfg, "region", DEFAULT_REGION))
+src/alpha_edge/jobs/run_universe_update.py:55:    return str(getattr(cfg, "engine_root", DEFAULT_ENGINE_ROOT)).strip("/")
+src/alpha_edge/jobs/run_update_score_caps.py:16:DEFAULT_ENGINE_BUCKET = "alpha-edge-algo"
+src/alpha_edge/jobs/run_update_score_caps.py:17:DEFAULT_ENGINE_REGION = "eu-west-1"
+src/alpha_edge/jobs/run_update_score_caps.py:18:DEFAULT_ENGINE_ROOT_PREFIX = "engine/v1"
+src/alpha_edge/jobs/run_update_score_caps.py:36:    return str(getattr(cfg, "bucket", DEFAULT_ENGINE_BUCKET))
+src/alpha_edge/jobs/run_update_score_caps.py:40:    return str(getattr(cfg, "region", DEFAULT_ENGINE_REGION))
+src/alpha_edge/jobs/run_update_score_caps.py:44:    return str(getattr(cfg, "engine_root", DEFAULT_ENGINE_ROOT_PREFIX)).strip("/")
+src/alpha_edge/jobs/run_warehouse_backfill.py:16:DEFAULT_BUCKET = "alpha-edge-algo"
+src/alpha_edge/jobs/run_warehouse_backfill.py:17:DEFAULT_REGION = "eu-west-1"
+src/alpha_edge/jobs/run_warehouse_backfill.py:18:DEFAULT_ENGINE_ROOT = "engine/v1"
+src/alpha_edge/jobs/run_warehouse_backfill.py:34:    return str(getattr(cfg, "bucket", DEFAULT_BUCKET))
+src/alpha_edge/jobs/run_warehouse_backfill.py:38:    return str(getattr(cfg, "region", DEFAULT_REGION))
+src/alpha_edge/jobs/run_warehouse_backfill.py:42:    return str(getattr(cfg, "engine_root", DEFAULT_ENGINE_ROOT)).strip("/")
+src/alpha_edge/maintenance/cleanup_partitions.py:12:DEFAULT_BUCKET = "alpha-edge-algo"
+src/alpha_edge/maintenance/cleanup_partitions.py:13:DEFAULT_REGION = "eu-west-1"
+src/alpha_edge/maintenance/cleanup_partitions.py:20:    return str(getattr(cfg, "bucket", DEFAULT_BUCKET))
+src/alpha_edge/maintenance/cleanup_partitions.py:24:    return str(getattr(cfg, "region", DEFAULT_REGION))
+src/alpha_edge/maintenance/dedupe_ohlcv_partitions_keep_one.py:12:BUCKET = "alpha-edge-algo"
+src/alpha_edge/maintenance/dedupe_ohlcv_partitions_keep_one.py:14:REGION = "eu-west-1"
+src/alpha_edge/maintenance/migrate_local_history_to_s3.py:17:S3_BUCKET = "alpha-edge-algo"
+src/alpha_edge/maintenance/migrate_local_history_to_s3.py:18:S3_REGION = "eu-west-1"
+src/alpha_edge/maintenance/migrate_local_history_to_s3.py:19:S3_ENGINE_ROOT = "engine/v1"                   # destination prefix in S3
+src/alpha_edge/maintenance/migrate_local_history_to_s3.py:92:    return f"{S3_ENGINE_ROOT}/{table}"
+src/alpha_edge/maintenance/migrate_local_history_to_s3.py:165:    print(f"S3 dest:    s3://{S3_BUCKET}/{S3_ENGINE_ROOT}/")
+src/alpha_edge/maintenance/migrate_local_history_to_s3.py:217:    print(f"  s3://{S3_BUCKET}/{S3_ENGINE_ROOT}/inputs/positions/latest.json")
+src/alpha_edge/maintenance/migrate_local_history_to_s3.py:218:    print(f"  s3://{S3_BUCKET}/{S3_ENGINE_ROOT}/configs/score_config/latest.json")
+src/alpha_edge/maintenance/reset_ticker_history.py:13:DEFAULT_BUCKET = "alpha-edge-algo"
+src/alpha_edge/maintenance/reset_ticker_history.py:14:DEFAULT_REGION = "eu-west-1"
+src/alpha_edge/maintenance/reset_ticker_history.py:21:    return str(getattr(cfg, "bucket", DEFAULT_BUCKET))
+src/alpha_edge/maintenance/reset_ticker_history.py:25:    return str(getattr(cfg, "region", DEFAULT_REGION))
+src/alpha_edge/market/build_corporate_actions.py:16:DEFAULT_BUCKET = "alpha-edge-algo"
+src/alpha_edge/market/build_corporate_actions.py:17:DEFAULT_REGION = "eu-west-1"
+src/alpha_edge/market/build_corporate_actions.py:24:    return str(getattr(cfg, "bucket", DEFAULT_BUCKET))
+src/alpha_edge/market/build_corporate_actions.py:28:    return str(getattr(cfg, "region", DEFAULT_REGION))
+src/alpha_edge/market/compute_market_regime.py:24:ENGINE_BUCKET = "alpha-edge-algo"
+src/alpha_edge/market/compute_market_regime.py:25:ENGINE_REGION = "eu-west-1"
+src/alpha_edge/market/compute_market_regime.py:26:ENGINE_ROOT_PREFIX = "engine/v1"
+src/alpha_edge/market/compute_market_regime.py:28:OHLCV_USD_ROOT = "s3://alpha-edge-algo/market/ohlcv_usd/v1"
+src/alpha_edge/market/compute_market_regime.py:60:    dataset = ds.dataset(OHLCV_USD_ROOT, format="parquet", partitioning="hive")
+src/alpha_edge/market/compute_market_regime.py:142:    s3 = s3_init(ENGINE_REGION)
+src/alpha_edge/market/compute_market_regime.py:143:    market = MarketStore(bucket=ENGINE_BUCKET)
+src/alpha_edge/market/compute_market_regime.py:273:        bucket=ENGINE_BUCKET,
+src/alpha_edge/market/compute_market_regime.py:274:        root_prefix=ENGINE_ROOT_PREFIX,
+src/alpha_edge/operations/apply_portfolio_choice.py:16:DEFAULT_BUCKET = "alpha-edge-algo"
+src/alpha_edge/operations/apply_portfolio_choice.py:17:DEFAULT_REGION = "eu-west-1"
+src/alpha_edge/operations/apply_portfolio_choice.py:18:DEFAULT_ENGINE_ROOT = "engine/v1"
+src/alpha_edge/operations/apply_portfolio_choice.py:34:    return str(getattr(cfg, "bucket", DEFAULT_BUCKET))
+src/alpha_edge/operations/apply_portfolio_choice.py:38:    return str(getattr(cfg, "region", DEFAULT_REGION))
+src/alpha_edge/operations/apply_portfolio_choice.py:42:    return str(getattr(cfg, "engine_root", DEFAULT_ENGINE_ROOT)).strip("/")
+src/alpha_edge/operations/audit_crypto_trade_quantities.py:15:DEFAULT_BUCKET = "alpha-edge-algo"
+src/alpha_edge/operations/audit_crypto_trade_quantities.py:16:DEFAULT_REGION = "eu-west-1"
+src/alpha_edge/operations/audit_crypto_trade_quantities.py:17:DEFAULT_ENGINE_ROOT = "engine/v1"
+src/alpha_edge/operations/audit_crypto_trade_quantities.py:27:    return str(getattr(cfg, "bucket", DEFAULT_BUCKET))
+src/alpha_edge/operations/audit_crypto_trade_quantities.py:31:    return str(getattr(cfg, "region", DEFAULT_REGION))
+src/alpha_edge/operations/audit_crypto_trade_quantities.py:35:    return str(getattr(cfg, "engine_root", DEFAULT_ENGINE_ROOT)).strip("/")
+src/alpha_edge/operations/backfill_trades_asset_id.py:16:DEFAULT_BUCKET = "alpha-edge-algo"
+src/alpha_edge/operations/backfill_trades_asset_id.py:17:DEFAULT_REGION = "eu-west-1"
+src/alpha_edge/operations/backfill_trades_asset_id.py:18:DEFAULT_ENGINE_ROOT = "engine/v1"
+src/alpha_edge/operations/backfill_trades_asset_id.py:39:    return str(getattr(cfg, "bucket", DEFAULT_BUCKET))
+src/alpha_edge/operations/backfill_trades_asset_id.py:43:    return str(getattr(cfg, "region", DEFAULT_REGION))
+src/alpha_edge/operations/backfill_trades_asset_id.py:47:    return str(getattr(cfg, "engine_root", DEFAULT_ENGINE_ROOT)).strip("/")
+src/alpha_edge/operations/build_trade_repair_plan.py:16:DEFAULT_BUCKET = "alpha-edge-algo"
+src/alpha_edge/operations/build_trade_repair_plan.py:17:DEFAULT_REGION = "eu-west-1"
+src/alpha_edge/operations/build_trade_repair_plan.py:18:DEFAULT_ENGINE_ROOT = "engine/v1"
+src/alpha_edge/operations/build_trade_repair_plan.py:39:    return str(getattr(cfg, "bucket", DEFAULT_BUCKET))
+src/alpha_edge/operations/build_trade_repair_plan.py:43:    return str(getattr(cfg, "region", DEFAULT_REGION))
+src/alpha_edge/operations/build_trade_repair_plan.py:47:    return str(getattr(cfg, "engine_root", DEFAULT_ENGINE_ROOT)).strip("/")
+src/alpha_edge/operations/rebuild_ledger.py:36:OHLCV_USD_ROOT = "market/ohlcv_usd/v1"
+src/alpha_edge/operations/rebuild_ledger.py:1289:    return f"{OHLCV_USD_ROOT}/asset_id={asset_id}/year={year}/"
+src/alpha_edge/operations/rebuild_ledger.py:1680:        prices_source_ref = f"s3://{cfg.bucket}/{OHLCV_USD_ROOT}/asset_id=<.>/year=<.>/"
+
+===== direct boto3/fsspec S3 clients =====
+src/alpha_edge/core/data_loader.py:107:    return boto3.client("s3", region_name=region)
+src/alpha_edge/jobs/run_daily_report.py:247:    s3 = boto3.client("s3", region_name=s3_region)
+src/alpha_edge/jobs/run_warehouse_backfill.py:61:    return boto3.client("s3", region_name=region)
+src/alpha_edge/maintenance/cleanup_partitions.py:51:    s3 = boto3.client("s3", region_name=region)
+src/alpha_edge/maintenance/cleanup_partitions.py:84:    s3 = boto3.client("s3", region_name=region)
+src/alpha_edge/maintenance/dedupe_ohlcv_partitions_keep_one.py:36:    s3 = boto3.client("s3", region_name=REGION)
+src/alpha_edge/maintenance/dedupe_ohlcv_partitions_keep_one.py:64:    s3 = boto3.client("s3", region_name=REGION)
+src/alpha_edge/maintenance/migrate_local_history_to_s3.py:159:    s3 = boto3.client("s3", region_name=S3_REGION)
+src/alpha_edge/maintenance/reset_ticker_history.py:42:    s3 = boto3.client("s3", region_name=region)
+src/alpha_edge/maintenance/reset_ticker_history.py:153:        with fsspec.open(state_path, "r") as f:
+src/alpha_edge/maintenance/reset_ticker_history.py:163:        with fsspec.open(state_path, "w") as f:
+src/alpha_edge/operations/apply_portfolio_choice.py:53:    return boto3.client("s3", region_name=region)
+src/alpha_edge/operations/audit_crypto_trade_quantities.py:46:    return boto3.client("s3", region_name=region)
+src/alpha_edge/operations/backfill_trades_asset_id.py:58:    return boto3.client("s3", region_name=region)
+src/alpha_edge/operations/build_trade_repair_plan.py:58:    return boto3.client("s3", region_name=region)
+src/alpha_edge/operations/edit_trades_asset_id.py:21:    return boto3.client("s3", region_name=cfg.region)
+src/alpha_edge/operations/rebuild_ledger.py:138:    return boto3.client("s3", region_name=cfg.region)
+src/alpha_edge/operations/record_cashflow.py:20:    return boto3.client("s3", region_name=cfg.region)
+src/alpha_edge/operations/record_dividend.py:25:    return boto3.client("s3", region_name=cfg.region)
+src/alpha_edge/operations/record_trade.py:30:    return boto3.client("s3", region_name=cfg.region)
+src/alpha_edge/operations/repair_all_trade_chains.py:49:    return boto3.client("s3", region_name=cfg.region)
+src/alpha_edge/operations/repair_asset_history.py:23:    return boto3.client("s3", region_name=cfg.region)
+src/alpha_edge/operations/trace_open_position.py:116:    return boto3.client("s3", region_name=cfg.region)
+src/alpha_edge/scripts/smoke_test_env.py:21:    return boto3.client("s3", region_name=region)
+src/alpha_edge/warehouse/build_report_stats.py:20:    return boto3.client("s3", region_name=cfg.region)
+src/alpha_edge/warehouse/build_warehouse.py:33:    return boto3.client("s3", region_name=cfg.region)
+
+===== runtime usage =====
+src/alpha_edge/core/runtime.py:6:from alpha_edge.core.schemas import RuntimeConfig
+src/alpha_edge/core/runtime.py:24:def load_runtime_config(env: str | None = None) -> RuntimeConfig:
+src/alpha_edge/core/runtime.py:42:        return RuntimeConfig(
+src/alpha_edge/core/runtime.py:52:    return RuntimeConfig(
+src/alpha_edge/core/runtime.py:63:def require_prod_confirmation(cfg: RuntimeConfig, confirm: bool) -> None:
+src/alpha_edge/core/runtime.py:68:def runtime_engine_key(cfg: RuntimeConfig, *parts: str) -> str:
+src/alpha_edge/core/runtime.py:72:def runtime_market_key(cfg: RuntimeConfig, *parts: str) -> str:
+src/alpha_edge/core/runtime.py:76:def runtime_warehouse_key(cfg: RuntimeConfig, table: str, *parts: str) -> str:
+src/alpha_edge/core/runtime.py:87:def runtime_dt_key(cfg: RuntimeConfig, table: str, dt_str: str, filename: str) -> str:
+src/alpha_edge/core/runtime.py:88:    return runtime_engine_key(cfg, table, f"dt={dt_str}", filename)
+src/alpha_edge/core/runtime.py:91:def print_runtime_config(cfg: RuntimeConfig) -> None:
+src/alpha_edge/core/schemas.py:288:class RuntimeConfig:
+src/alpha_edge/jobs/run_daily_report.py:68:from alpha_edge.core.runtime import load_runtime_config, require_prod_confirmation
+src/alpha_edge/jobs/run_daily_report.py:742:    cfg = load_runtime_config(env)
+src/alpha_edge/jobs/run_daily_report.py:745:        require_prod_confirmation(cfg, bool(confirm_prod_write))
+src/alpha_edge/jobs/run_quarantine_analysis.py:22:from alpha_edge.core.runtime import RuntimeConfig, load_runtime_config, require_prod_confirmation
+src/alpha_edge/jobs/run_quarantine_analysis.py:44:def cfg_bucket(cfg: RuntimeConfig) -> str:
+src/alpha_edge/jobs/run_quarantine_analysis.py:48:def cfg_region(cfg: RuntimeConfig) -> str:
+src/alpha_edge/jobs/run_quarantine_analysis.py:52:def cfg_engine_root(cfg: RuntimeConfig) -> str:
+src/alpha_edge/jobs/run_quarantine_analysis.py:56:def cfg_env(cfg: RuntimeConfig) -> str:
+src/alpha_edge/jobs/run_quarantine_analysis.py:1021:    cfg = load_runtime_config(args.env)
+src/alpha_edge/jobs/run_quarantine_analysis.py:1029:        require_prod_confirmation(cfg, bool(args.confirm_prod_write))
+src/alpha_edge/jobs/run_reports_backfill.py:18:from alpha_edge.core.runtime import RuntimeConfig, load_runtime_config, require_prod_confirmation
+src/alpha_edge/jobs/run_reports_backfill.py:30:def cfg_bucket(cfg: RuntimeConfig) -> str:
+src/alpha_edge/jobs/run_reports_backfill.py:34:def cfg_region(cfg: RuntimeConfig) -> str:
+src/alpha_edge/jobs/run_reports_backfill.py:38:def cfg_engine_root(cfg: RuntimeConfig) -> str:
+src/alpha_edge/jobs/run_reports_backfill.py:42:def cfg_env(cfg: RuntimeConfig) -> str:
+src/alpha_edge/jobs/run_reports_backfill.py:201:    cfg = load_runtime_config(args.env)
+src/alpha_edge/jobs/run_reports_backfill.py:209:        require_prod_confirmation(cfg, bool(args.confirm_prod_write))
+src/alpha_edge/jobs/run_universe_update.py:15:from alpha_edge.core.runtime import RuntimeConfig, load_runtime_config, require_prod_confirmation
+src/alpha_edge/jobs/run_universe_update.py:46:def cfg_bucket(cfg: RuntimeConfig) -> str:
+src/alpha_edge/jobs/run_universe_update.py:50:def cfg_region(cfg: RuntimeConfig) -> str:
+src/alpha_edge/jobs/run_universe_update.py:54:def cfg_engine_root(cfg: RuntimeConfig) -> str:
+src/alpha_edge/jobs/run_universe_update.py:58:def cfg_env(cfg: RuntimeConfig) -> str:
+src/alpha_edge/jobs/run_universe_update.py:768:    cfg = load_runtime_config(args.env)
+src/alpha_edge/jobs/run_universe_update.py:775:        require_prod_confirmation(cfg, bool(args.confirm_prod_write))
+src/alpha_edge/jobs/run_update_score_caps.py:12:from alpha_edge.core.runtime import RuntimeConfig, load_runtime_config, require_prod_confirmation
+src/alpha_edge/jobs/run_update_score_caps.py:35:def cfg_bucket(cfg: RuntimeConfig) -> str:
+src/alpha_edge/jobs/run_update_score_caps.py:39:def cfg_region(cfg: RuntimeConfig) -> str:
+src/alpha_edge/jobs/run_update_score_caps.py:43:def cfg_engine_root(cfg: RuntimeConfig) -> str:
+src/alpha_edge/jobs/run_update_score_caps.py:47:def cfg_env(cfg: RuntimeConfig) -> str:
+src/alpha_edge/jobs/run_update_score_caps.py:181:    cfg = load_runtime_config(args.env)
+src/alpha_edge/jobs/run_update_score_caps.py:188:        require_prod_confirmation(cfg, bool(args.confirm_prod_write))
+src/alpha_edge/jobs/run_warehouse_backfill.py:13:from alpha_edge.core.runtime import RuntimeConfig, load_runtime_config, require_prod_confirmation
+src/alpha_edge/jobs/run_warehouse_backfill.py:33:def cfg_bucket(cfg: RuntimeConfig) -> str:
+src/alpha_edge/jobs/run_warehouse_backfill.py:37:def cfg_region(cfg: RuntimeConfig) -> str:
+src/alpha_edge/jobs/run_warehouse_backfill.py:41:def cfg_engine_root(cfg: RuntimeConfig) -> str:
+src/alpha_edge/jobs/run_warehouse_backfill.py:45:def cfg_env(cfg: RuntimeConfig) -> str:
+src/alpha_edge/jobs/run_warehouse_backfill.py:323:    cfg = load_runtime_config(args.env)
+src/alpha_edge/jobs/run_warehouse_backfill.py:332:        require_prod_confirmation(cfg, bool(args.confirm_prod_write))
+src/alpha_edge/maintenance/cleanup_partitions.py:9:from alpha_edge.core.runtime import RuntimeConfig, load_runtime_config, require_prod_confirmation
+src/alpha_edge/maintenance/cleanup_partitions.py:19:def cfg_bucket(cfg: RuntimeConfig) -> str:
+src/alpha_edge/maintenance/cleanup_partitions.py:23:def cfg_region(cfg: RuntimeConfig) -> str:
+src/alpha_edge/maintenance/cleanup_partitions.py:27:def cfg_env(cfg: RuntimeConfig) -> str:
+src/alpha_edge/maintenance/cleanup_partitions.py:132:    cfg = load_runtime_config(args.env)
+src/alpha_edge/maintenance/cleanup_partitions.py:139:        require_prod_confirmation(cfg, bool(args.confirm_prod_write))
+src/alpha_edge/maintenance/reset_ticker_history.py:10:from alpha_edge.core.runtime import RuntimeConfig, load_runtime_config, require_prod_confirmation
+src/alpha_edge/maintenance/reset_ticker_history.py:20:def cfg_bucket(cfg: RuntimeConfig) -> str:
+src/alpha_edge/maintenance/reset_ticker_history.py:24:def cfg_region(cfg: RuntimeConfig) -> str:
+src/alpha_edge/maintenance/reset_ticker_history.py:28:def cfg_env(cfg: RuntimeConfig) -> str:
+src/alpha_edge/maintenance/reset_ticker_history.py:100:    cfg = load_runtime_config(args.env)
+src/alpha_edge/maintenance/reset_ticker_history.py:107:        require_prod_confirmation(cfg, bool(args.confirm_prod_write))
+src/alpha_edge/market/build_corporate_actions.py:12:from alpha_edge.core.runtime import RuntimeConfig, load_runtime_config, require_prod_confirmation
+src/alpha_edge/market/build_corporate_actions.py:23:def cfg_bucket(cfg: RuntimeConfig) -> str:
+src/alpha_edge/market/build_corporate_actions.py:27:def cfg_region(cfg: RuntimeConfig) -> str:
+src/alpha_edge/market/build_corporate_actions.py:31:def cfg_env(cfg: RuntimeConfig) -> str:
+src/alpha_edge/market/build_corporate_actions.py:260:    cfg = load_runtime_config(args.env)
+src/alpha_edge/market/build_corporate_actions.py:266:        require_prod_confirmation(cfg, bool(args.confirm_prod_write))
+src/alpha_edge/operations/apply_portfolio_choice.py:13:from alpha_edge.core.runtime import RuntimeConfig, load_runtime_config, require_prod_confirmation
+src/alpha_edge/operations/apply_portfolio_choice.py:33:def cfg_bucket(cfg: RuntimeConfig) -> str:
+src/alpha_edge/operations/apply_portfolio_choice.py:37:def cfg_region(cfg: RuntimeConfig) -> str:
+src/alpha_edge/operations/apply_portfolio_choice.py:41:def cfg_engine_root(cfg: RuntimeConfig) -> str:
+src/alpha_edge/operations/apply_portfolio_choice.py:45:def cfg_env(cfg: RuntimeConfig) -> str:
+src/alpha_edge/operations/apply_portfolio_choice.py:70:def engine_key(cfg: RuntimeConfig, *parts: str) -> str:
+src/alpha_edge/operations/apply_portfolio_choice.py:74:def dt_key(cfg: RuntimeConfig, table: str, dt_str: str, filename: str) -> str:
+src/alpha_edge/operations/apply_portfolio_choice.py:78:def _candidate_latest_key(cfg: RuntimeConfig, candidate_id: str) -> str:
+src/alpha_edge/operations/apply_portfolio_choice.py:96:def _targets_ref_to_key(cfg: RuntimeConfig, targets_ref: dict[str, Any]) -> str:
+src/alpha_edge/operations/apply_portfolio_choice.py:133:def _load_choice_state(s3, *, cfg: RuntimeConfig) -> dict[str, Any]:
+src/alpha_edge/operations/apply_portfolio_choice.py:150:    cfg: RuntimeConfig,
+src/alpha_edge/operations/apply_portfolio_choice.py:168:    cfg: RuntimeConfig,
+src/alpha_edge/operations/apply_portfolio_choice.py:225:    cfg: RuntimeConfig,
+src/alpha_edge/operations/apply_portfolio_choice.py:402:    cfg = load_runtime_config(args.env)
+src/alpha_edge/operations/apply_portfolio_choice.py:406:            require_prod_confirmation(cfg, bool(args.confirm_prod_write))
+src/alpha_edge/operations/audit_crypto_trade_quantities.py:12:from alpha_edge.core.runtime import RuntimeConfig, load_runtime_config
+src/alpha_edge/operations/audit_crypto_trade_quantities.py:26:def cfg_bucket(cfg: RuntimeConfig) -> str:
+src/alpha_edge/operations/audit_crypto_trade_quantities.py:30:def cfg_region(cfg: RuntimeConfig) -> str:
+src/alpha_edge/operations/audit_crypto_trade_quantities.py:34:def cfg_engine_root(cfg: RuntimeConfig) -> str:
+src/alpha_edge/operations/audit_crypto_trade_quantities.py:38:def cfg_env(cfg: RuntimeConfig) -> str:
+src/alpha_edge/operations/audit_crypto_trade_quantities.py:49:def engine_key(cfg: RuntimeConfig, *parts: str) -> str:
+src/alpha_edge/operations/audit_crypto_trade_quantities.py:144:    cfg: RuntimeConfig,
+src/alpha_edge/operations/audit_crypto_trade_quantities.py:504:    cfg = load_runtime_config(args.env)
+src/alpha_edge/operations/backfill_trades_asset_id.py:13:from alpha_edge.core.runtime import RuntimeConfig, load_runtime_config, require_prod_confirmation
+src/alpha_edge/operations/backfill_trades_asset_id.py:38:def cfg_bucket(cfg: RuntimeConfig) -> str:
+src/alpha_edge/operations/backfill_trades_asset_id.py:42:def cfg_region(cfg: RuntimeConfig) -> str:
+src/alpha_edge/operations/backfill_trades_asset_id.py:46:def cfg_engine_root(cfg: RuntimeConfig) -> str:
+src/alpha_edge/operations/backfill_trades_asset_id.py:50:def cfg_env(cfg: RuntimeConfig) -> str:
+src/alpha_edge/operations/backfill_trades_asset_id.py:61:def engine_key(cfg: RuntimeConfig, *parts: str) -> str:
+src/alpha_edge/operations/backfill_trades_asset_id.py:65:def dt_key(cfg: RuntimeConfig, table: str, dt_str: str, filename: str) -> str:
+src/alpha_edge/operations/backfill_trades_asset_id.py:265:    cfg: RuntimeConfig,
+src/alpha_edge/operations/backfill_trades_asset_id.py:290:    cfg: RuntimeConfig,
+src/alpha_edge/operations/backfill_trades_asset_id.py:401:    cfg: RuntimeConfig,
+src/alpha_edge/operations/backfill_trades_asset_id.py:716:    cfg = load_runtime_config(args.env)
+src/alpha_edge/operations/backfill_trades_asset_id.py:719:        require_prod_confirmation(cfg, bool(args.confirm_prod_write))
+src/alpha_edge/operations/build_trade_repair_plan.py:13:from alpha_edge.core.runtime import RuntimeConfig, load_runtime_config, require_prod_confirmation
+src/alpha_edge/operations/build_trade_repair_plan.py:38:def cfg_bucket(cfg: RuntimeConfig) -> str:
+src/alpha_edge/operations/build_trade_repair_plan.py:42:def cfg_region(cfg: RuntimeConfig) -> str:
+src/alpha_edge/operations/build_trade_repair_plan.py:46:def cfg_engine_root(cfg: RuntimeConfig) -> str:
+src/alpha_edge/operations/build_trade_repair_plan.py:50:def cfg_env(cfg: RuntimeConfig) -> str:
+src/alpha_edge/operations/build_trade_repair_plan.py:61:def engine_key(cfg: RuntimeConfig, *parts: str) -> str:
+src/alpha_edge/operations/build_trade_repair_plan.py:65:def dt_key(cfg: RuntimeConfig, table: str, dt_str: str, filename: str) -> str:
+src/alpha_edge/operations/build_trade_repair_plan.py:265:    cfg: RuntimeConfig,
+src/alpha_edge/operations/build_trade_repair_plan.py:290:    cfg: RuntimeConfig,
+src/alpha_edge/operations/build_trade_repair_plan.py:401:    cfg: RuntimeConfig,
+src/alpha_edge/operations/build_trade_repair_plan.py:716:    cfg = load_runtime_config(args.env)
+src/alpha_edge/operations/build_trade_repair_plan.py:719:        require_prod_confirmation(cfg, bool(args.confirm_prod_write))
+src/alpha_edge/operations/bulk_import_trades.py:13:from alpha_edge.core.runtime import RuntimeConfig, load_runtime_config, require_prod_confirmation
+src/alpha_edge/operations/bulk_import_trades.py:71:    cfg: RuntimeConfig,
+src/alpha_edge/operations/bulk_import_trades.py:320:    cfg = load_runtime_config(args.env)
+src/alpha_edge/operations/bulk_import_trades.py:323:        require_prod_confirmation(cfg, bool(args.confirm_prod_write))
+src/alpha_edge/operations/edit_trades_asset_id.py:10:from alpha_edge.core.runtime import RuntimeConfig, load_runtime_config, require_prod_confirmation
+src/alpha_edge/operations/edit_trades_asset_id.py:20:def s3_client(cfg: RuntimeConfig):
+src/alpha_edge/operations/edit_trades_asset_id.py:24:def engine_key(cfg: RuntimeConfig, *parts: str) -> str:
+src/alpha_edge/operations/edit_trades_asset_id.py:28:def audit_prefix(cfg: RuntimeConfig) -> str:
+src/alpha_edge/operations/edit_trades_asset_id.py:116:def list_trade_keys_for_dt(s3, *, cfg: RuntimeConfig, dt: str) -> list[str]:
+src/alpha_edge/operations/edit_trades_asset_id.py:123:def list_trade_keys_all(s3, *, cfg: RuntimeConfig) -> list[str]:
+src/alpha_edge/operations/edit_trades_asset_id.py:160:    cfg: RuntimeConfig,
+src/alpha_edge/operations/edit_trades_asset_id.py:215:    cfg: RuntimeConfig,
+src/alpha_edge/operations/edit_trades_asset_id.py:305:    cfg = load_runtime_config(args.env)
+src/alpha_edge/operations/edit_trades_asset_id.py:308:        require_prod_confirmation(cfg, bool(args.confirm_prod_write))
+src/alpha_edge/operations/rebuild_ledger.py:16:from alpha_edge.core.runtime import load_runtime_config, require_prod_confirmation
+src/alpha_edge/operations/rebuild_ledger.py:18:    RuntimeConfig,
+src/alpha_edge/operations/rebuild_ledger.py:137:def s3_client(cfg: RuntimeConfig):
+src/alpha_edge/operations/rebuild_ledger.py:141:def engine_key(cfg: RuntimeConfig, *parts: str) -> str:
+src/alpha_edge/operations/rebuild_ledger.py:145:def dt_key(cfg: RuntimeConfig, table: str, dt_str: str, filename: str) -> str:
+src/alpha_edge/operations/rebuild_ledger.py:150:    cfg: RuntimeConfig,
+src/alpha_edge/operations/rebuild_ledger.py:300:    cfg: RuntimeConfig,
+src/alpha_edge/operations/rebuild_ledger.py:339:    cfg: RuntimeConfig,
+src/alpha_edge/operations/rebuild_ledger.py:378:    cfg: RuntimeConfig,
+src/alpha_edge/operations/rebuild_ledger.py:414:def _load_split_events_from_store(*, cfg: RuntimeConfig) -> list[SplitEvent]:
+src/alpha_edge/operations/rebuild_ledger.py:592:    cfg: RuntimeConfig,
+src/alpha_edge/operations/rebuild_ledger.py:612:    cfg: RuntimeConfig,
+src/alpha_edge/operations/rebuild_ledger.py:638:    cfg: RuntimeConfig,
+src/alpha_edge/operations/rebuild_ledger.py:1316:    cfg: RuntimeConfig,
+src/alpha_edge/operations/rebuild_ledger.py:1365:    cfg: RuntimeConfig,
+src/alpha_edge/operations/rebuild_ledger.py:1535:    cfg = load_runtime_config(args.env)
+src/alpha_edge/operations/rebuild_ledger.py:1538:        require_prod_confirmation(cfg, bool(args.confirm_prod_write))
+src/alpha_edge/operations/record_cashflow.py:12:from alpha_edge.core.runtime import load_runtime_config, require_prod_confirmation
+src/alpha_edge/operations/record_cashflow.py:13:from alpha_edge.core.schemas import Cashflow, RuntimeConfig
+src/alpha_edge/operations/record_cashflow.py:19:def s3_client(cfg: RuntimeConfig):
+src/alpha_edge/operations/record_cashflow.py:23:def engine_key(cfg: RuntimeConfig, *parts: str) -> str:
+src/alpha_edge/operations/record_cashflow.py:27:def dt_key(cfg: RuntimeConfig, table: str, dt_str: str, filename: str) -> str:
+src/alpha_edge/operations/record_cashflow.py:64:    cfg: RuntimeConfig,
+src/alpha_edge/operations/record_cashflow.py:160:    cfg = load_runtime_config(args.env)
+src/alpha_edge/operations/record_cashflow.py:163:        require_prod_confirmation(cfg, bool(args.confirm_prod_write))
+src/alpha_edge/operations/record_dividend.py:14:from alpha_edge.core.runtime import load_runtime_config, require_prod_confirmation
+src/alpha_edge/operations/record_dividend.py:15:from alpha_edge.core.schemas import Dividend, RuntimeConfig
+src/alpha_edge/operations/record_dividend.py:24:def s3_client(cfg: RuntimeConfig):
+src/alpha_edge/operations/record_dividend.py:28:def engine_key(cfg: RuntimeConfig, *parts: str) -> str:
+src/alpha_edge/operations/record_dividend.py:32:def dt_key(cfg: RuntimeConfig, table: str, dt_str: str, filename: str) -> str:
+src/alpha_edge/operations/record_dividend.py:36:def dividends_index_key(cfg: RuntimeConfig) -> str:
+src/alpha_edge/operations/record_dividend.py:40:def default_universe_key(cfg: RuntimeConfig) -> str:
+src/alpha_edge/operations/record_dividend.py:114:def _load_dividends_index(s3, *, cfg: RuntimeConfig) -> dict:
+src/alpha_edge/operations/record_dividend.py:119:def _save_dividends_index(s3, *, cfg: RuntimeConfig, idx: dict) -> None:
+src/alpha_edge/operations/record_dividend.py:126:    cfg: RuntimeConfig,
+src/alpha_edge/operations/record_dividend.py:136:def _rebuild_dividends_index(s3, *, cfg: RuntimeConfig) -> Tuple[int, int]:
+src/alpha_edge/operations/record_dividend.py:224:    cfg: RuntimeConfig,
+src/alpha_edge/operations/record_dividend.py:243:    cfg: RuntimeConfig,
+src/alpha_edge/operations/record_dividend.py:310:    cfg: RuntimeConfig,
+src/alpha_edge/operations/record_dividend.py:477:    cfg: RuntimeConfig,
+src/alpha_edge/operations/record_dividend.py:603:    cfg: RuntimeConfig,
+src/alpha_edge/operations/record_dividend.py:704:    cfg = load_runtime_config(args.env)
+src/alpha_edge/operations/record_dividend.py:707:        require_prod_confirmation(cfg, bool(args.confirm_prod_write))
+src/alpha_edge/operations/record_trade.py:14:from alpha_edge.core.schemas import RuntimeConfig, Trade
+src/alpha_edge/operations/record_trade.py:16:    load_runtime_config,
+src/alpha_edge/operations/record_trade.py:17:    require_prod_confirmation,
+src/alpha_edge/operations/record_trade.py:18:    runtime_dt_key,
+src/alpha_edge/operations/record_trade.py:19:    runtime_engine_key,
+src/alpha_edge/operations/record_trade.py:29:def s3_client(cfg: RuntimeConfig):
+src/alpha_edge/operations/record_trade.py:81:def trades_index_key(cfg: RuntimeConfig) -> str:
+src/alpha_edge/operations/record_trade.py:82:    return runtime_engine_key(cfg, TRADES_TABLE, "index.json")
+src/alpha_edge/operations/record_trade.py:85:def trades_audit_prefix(cfg: RuntimeConfig) -> str:
+src/alpha_edge/operations/record_trade.py:86:    return runtime_engine_key(cfg, "trades_audit")
+src/alpha_edge/operations/record_trade.py:89:def default_universe_key(cfg: RuntimeConfig) -> str:
+src/alpha_edge/operations/record_trade.py:90:    return runtime_engine_key(cfg, "universe", "universe.csv")
+src/alpha_edge/operations/record_trade.py:156:    cfg: RuntimeConfig,
+src/alpha_edge/operations/record_trade.py:175:    cfg: RuntimeConfig,
+src/alpha_edge/operations/record_trade.py:237:def _load_trades_index(s3, *, cfg: RuntimeConfig) -> dict:
+src/alpha_edge/operations/record_trade.py:242:def _save_trades_index(s3, *, cfg: RuntimeConfig, idx: dict) -> None:
+src/alpha_edge/operations/record_trade.py:249:    cfg: RuntimeConfig,
+src/alpha_edge/operations/record_trade.py:259:def _audit_backup_key(cfg: RuntimeConfig, src_key: str) -> str:
+src/alpha_edge/operations/record_trade.py:267:    cfg: RuntimeConfig,
+src/alpha_edge/operations/record_trade.py:269:    prefix = runtime_engine_key(cfg, TRADES_TABLE) + "/"
+src/alpha_edge/operations/record_trade.py:325:    cfg: RuntimeConfig,
+src/alpha_edge/operations/record_trade.py:355:    cfg: RuntimeConfig,
+src/alpha_edge/operations/record_trade.py:448:    trade_key = runtime_dt_key(cfg, TRADES_TABLE, as_of_norm, f"trade_{trade.trade_id}.json")
+src/alpha_edge/operations/record_trade.py:449:    latest_key = runtime_engine_key(cfg, TRADES_TABLE, "latest.json")
+src/alpha_edge/operations/record_trade.py:512:    cfg: RuntimeConfig,
+src/alpha_edge/operations/record_trade.py:527:        old_key = runtime_dt_key(cfg, TRADES_TABLE, old_dt, f"trade_{trade_id}.json")
+src/alpha_edge/operations/record_trade.py:579:    dst_key = runtime_dt_key(cfg, TRADES_TABLE, dst_dt, f"trade_{trade_id}.json")
+src/alpha_edge/operations/record_trade.py:609:    latest_key = runtime_engine_key(cfg, TRADES_TABLE, "latest.json")
+src/alpha_edge/operations/record_trade.py:676:    cfg = load_runtime_config(args.env)
+src/alpha_edge/operations/record_trade.py:679:        require_prod_confirmation(cfg, bool(args.confirm_prod_write))
+src/alpha_edge/operations/repair_all_trade_chains.py:13:from alpha_edge.core.runtime import load_runtime_config, require_prod_confirmation
+src/alpha_edge/operations/repair_all_trade_chains.py:14:from alpha_edge.core.schemas import RuntimeConfig, TradeRow, RepairRow
+src/alpha_edge/operations/repair_all_trade_chains.py:48:def s3_client(cfg: RuntimeConfig):
+src/alpha_edge/operations/repair_all_trade_chains.py:52:def engine_key(cfg: RuntimeConfig, *parts: str) -> str:
+src/alpha_edge/operations/repair_all_trade_chains.py:264:def _load_all_trades(s3, *, cfg: RuntimeConfig) -> List[dict]:
+src/alpha_edge/operations/repair_all_trade_chains.py:324:    cfg: RuntimeConfig,
+src/alpha_edge/operations/repair_all_trade_chains.py:785:    cfg: RuntimeConfig,
+src/alpha_edge/operations/repair_all_trade_chains.py:921:    cfg = load_runtime_config(args.env)
+src/alpha_edge/operations/repair_all_trade_chains.py:924:        require_prod_confirmation(cfg, bool(args.confirm_prod_write))
+src/alpha_edge/operations/repair_asset_history.py:12:from alpha_edge.core.runtime import load_runtime_config, require_prod_confirmation
+src/alpha_edge/operations/repair_asset_history.py:13:from alpha_edge.core.schemas import RuntimeConfig
+src/alpha_edge/operations/repair_asset_history.py:22:def s3_client(cfg: RuntimeConfig):
+src/alpha_edge/operations/repair_asset_history.py:26:def engine_key(cfg: RuntimeConfig, *parts: str) -> str:
+src/alpha_edge/operations/repair_asset_history.py:84:    cfg: RuntimeConfig,
+src/alpha_edge/operations/repair_asset_history.py:109:    cfg: RuntimeConfig,
+src/alpha_edge/operations/repair_asset_history.py:207:    cfg = load_runtime_config(args.env)
+src/alpha_edge/operations/repair_asset_history.py:210:        require_prod_confirmation(cfg, bool(args.confirm_prod_write))
+src/alpha_edge/operations/trace_open_position.py:12:from alpha_edge.core.runtime import load_runtime_config
+src/alpha_edge/operations/trace_open_position.py:13:from alpha_edge.core.schemas import RuntimeConfig, TradeRow, OpenQtyLot, OpenValueLot
+src/alpha_edge/operations/trace_open_position.py:115:def s3_client(cfg: RuntimeConfig):
+src/alpha_edge/operations/trace_open_position.py:119:def engine_key(cfg: RuntimeConfig, *parts: str) -> str:
+src/alpha_edge/operations/trace_open_position.py:157:    cfg: RuntimeConfig,
+src/alpha_edge/operations/trace_open_position.py:595:    cfg = load_runtime_config(args.env)
+src/alpha_edge/scripts/smoke_test_env.py:11:    load_runtime_config,
+src/alpha_edge/scripts/smoke_test_env.py:13:    require_prod_confirmation,
+src/alpha_edge/scripts/smoke_test_env.py:14:    runtime_engine_key,
+src/alpha_edge/scripts/smoke_test_env.py:53:    cfg = load_runtime_config(args.env)
+src/alpha_edge/scripts/smoke_test_env.py:63:    print(f"engine test path:    s3://{cfg.bucket}/{runtime_engine_key(cfg, '_smoke_tests')}/")
+src/alpha_edge/scripts/smoke_test_env.py:71:    require_prod_confirmation(cfg, bool(args.confirm_prod_write))
+src/alpha_edge/scripts/smoke_test_env.py:74:    key = runtime_engine_key(cfg, "_smoke_tests", f"smoke_{test_id}.json")
+src/alpha_edge/warehouse/build_report_stats.py:7:from alpha_edge.core.runtime import load_runtime_config, require_prod_confirmation
+src/alpha_edge/warehouse/build_report_stats.py:8:from alpha_edge.core.schemas import RuntimeConfig
+src/alpha_edge/warehouse/build_report_stats.py:19:def s3_client(cfg: RuntimeConfig):
+src/alpha_edge/warehouse/build_report_stats.py:57:    cfg = load_runtime_config(args.env)
+src/alpha_edge/warehouse/build_report_stats.py:60:        require_prod_confirmation(cfg, bool(args.confirm_prod_write))
+src/alpha_edge/warehouse/build_warehouse.py:13:from alpha_edge.core.runtime import load_runtime_config, require_prod_confirmation
+src/alpha_edge/warehouse/build_warehouse.py:14:from alpha_edge.core.schemas import RuntimeConfig
+src/alpha_edge/warehouse/build_warehouse.py:32:def s3_client(cfg: RuntimeConfig):
+src/alpha_edge/warehouse/build_warehouse.py:110:def lake_key(cfg: RuntimeConfig, *parts: str) -> str:
+src/alpha_edge/warehouse/build_warehouse.py:114:def wh_key(cfg: RuntimeConfig, table: str, *parts: str) -> str:
+src/alpha_edge/warehouse/build_warehouse.py:174:    cfg: RuntimeConfig,
+src/alpha_edge/warehouse/build_warehouse.py:234:    cfg: RuntimeConfig,
+src/alpha_edge/warehouse/build_warehouse.py:315:    cfg: RuntimeConfig,
+src/alpha_edge/warehouse/build_warehouse.py:358:    cfg: RuntimeConfig,
+src/alpha_edge/warehouse/build_warehouse.py:449:    cfg = load_runtime_config(args.env)
+src/alpha_edge/warehouse/build_warehouse.py:452:        require_prod_confirmation(cfg, bool(args.confirm_prod_write))

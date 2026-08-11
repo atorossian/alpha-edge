@@ -76,6 +76,7 @@ C0B9932038C30944,SCU,equity,Not tradable in Quantfury app,
 F2E1CE2B2DDB50A5,VXX5,derivative,Not tradable in Quantfury app,Contract expired
 17F18C3C8120D23A,GCZ5,derivative,Not tradable in Quantfury app,Contract expired
 F403308AD6FD4DAB,VXV5,derivative,Not tradable in Quantfury app,Contract expired
+2AE5045C314E007B,VXH6,derivative,Not tradable in Quantfury app,Contract expired
 81F9D08F32545FA3,GCM5,derivative,Not tradable in Quantfury app,Contract expired
 03A89F3B7FD13E97,VXJ5,derivative,Not tradable in Quantfury app,Contract expired
 44CD433EEA77286F,VXG5,derivative,Not tradable in Quantfury app,Contract expired
@@ -86,3 +87,20 @@ C6CA89F5FDD12C13,NQU4,derivative,Not tradable in Quantfury app,Contract expired
 D7F3A8AB81617429,VXQ4,derivative,Not tradable in Quantfury app,Contract expired
 1148A45E33D21895,CYBR,equity,Not tradable in Quantfury app,
 522A630114B60DDD,VTLE,equity,Not tradable in Quantfury app,
+EA9121854319B7FB,CADE,equity,Asset not publicly traded anymore,Acquired by Huntington Bancshares (HBAN)
+6CDA13F2176E1915,SEE,equity,Asset not publicly traded anymore,Acquired by Clayton Dubilier & Rice
+86677DEB86671DB8,DAY,equity,Asset not publicly traded anymore,Acquired by Thoma Bravo
+A9C66F10D3876205,CMA,equity,Asset not publicly traded anymore,Acquired by Fifth Third Bancorp (FITB)
+FD1894D6B580B793,HI,equity,Asset not publicly traded anymore,Acquired by Lone Star Funds (FITB)
+B3D2C64C75EAB0B9,EXAS,equity,Asset not publicly traded anymore,Acquired by Abbott (ABT)
+AEFD393AD583A80C,CFLT,equity,Asset not publicly traded anymore,Acquired by International Business Machines Corp. (IBM)
+40A0A5F5C4AA0486,TGNA,equity,Asset not publicly traded anymore,
+A24432A5F780C8C5,HOLX,equity,Asset not publicly traded anymore,
+CB5D0774FBCAB76C,CIVI,equity,Asset not publicly traded anymore,Acquired by SM Energy Corp. (SM)
+A186CCEE0DF77590,JDEP,equity,Not tradable in Quantfury app,
+9DE8C64315AA5418,AL,equity,Not tradable in Quantfury app,
+651B44BE2701CE9E,FOLD,equity,Asset not publicly traded anymore,Acquired by BioMarin Pharmaceutical Inc. (BMRN)
+323E7B86F5D3BD0A,CUK,equity,Not tradable in Quantfury app,Carnival Corporation and Carnival plc unified into a single entity known as Carnival Corporation Ltd. (CCL)
+7E38780E505F3185,UDMY,equity,Asset not publicly traded anymore,Acquired by Coursera (COUR)
+CB1B85E9AE675269,MCW,equity,Asset not publicly traded anymore,Acquired by private equity firm Leonard Green & Partners
+7397504ABE533B84,CTRA,equity,Asset not publicly traded anymore,Acquired by Devon Energy (DVN)

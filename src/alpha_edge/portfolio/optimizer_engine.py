@@ -5,7 +5,14 @@ from typing import Dict, Sequence
 import numpy as np
 import pandas as pd
 
-from alpha_edge.core.schemas import EvalMetrics, Goals3, ScoreConfig, StabilityEnergyConfig, StabilityReport
+from alpha_edge.core.schemas import (
+    EvalMetrics, 
+    Goals3, 
+    PortfolioEvaluationResult, 
+    ScoreConfig, 
+    StabilityEnergyConfig, 
+    StabilityReport
+)
 from alpha_edge.portfolio.stability_energy import compute_stability_report
 from alpha_edge.market.mc_engine import simulate_leveraged_paths_vectorized
 from alpha_edge.market.factor_engine import fit_pca_model, sample_portfolio_returns_paths_pca
@@ -114,6 +121,12 @@ def score_breakdown(p_hit_main: float, ruin: float, penalties: dict, cfg: ScoreC
         "hf_ratio": -cfg.lambda_hf_ratio * float(penalties.get("hf_ratio", 0.0)),
         "freq_overlap": -cfg.lambda_freq_overlap * float(penalties.get("freq_overlap", 0.0)),
         "spec_entropy": -cfg.lambda_spec_entropy * float(penalties.get("spec_entropy", 0.0)),
+        "stability_energy": -getattr(cfg, "lambda_stability_energy", 0.0) * float(penalties.get("stability_energy", 0.0)),
+        "path_mdd_mean": -getattr(cfg, "lambda_path_mdd_mean", 0.0) * float(penalties.get("path_mdd_mean", 0.0)),
+        "cdar_95": -getattr(cfg, "lambda_cdar_95", 0.0) * float(penalties.get("cdar_95", 0.0)),
+        "p_dd_breach": -getattr(cfg, "lambda_p_dd_breach", 0.0) * float(penalties.get("p_dd_breach", 0.0)),
+        "underwater": -getattr(cfg, "lambda_underwater", 0.0) * float(penalties.get("underwater", 0.0)),
+        "ttr": -getattr(cfg, "lambda_ttr", 0.0) * float(penalties.get("ttr", 0.0)),
     }
     terms["score"] = float(sum(terms.values()))
     return terms
@@ -128,6 +141,62 @@ def _frequency_overlap_penalty(w: np.ndarray, V: np.ndarray) -> float:
     return float(val) if np.isfinite(val) else 0.0
 
 
+def _stability_cfg_from_score_config(cfg: ScoreConfig | None) -> StabilityEnergyConfig:
+    if cfg is None:
+        cfg = ScoreConfig()
+    return StabilityEnergyConfig(
+        alpha_cdar=float(getattr(cfg, "stability_alpha_cdar", 0.95)),
+        breach_dd=float(getattr(cfg, "stability_breach_dd", 0.25)),
+        # These lambdas are for the composite energy only; the score-level
+        # weights remain in ScoreConfig.lambda_* below.
+        lambda_mdd=1.0,
+        lambda_cdar=1.2,
+        lambda_ttr=0.7,
+        lambda_breach=1.5,
+        lambda_underwater=0.5,
+    )
+
+
+def _none_stability_report() -> dict[str, float | None]:
+    return {
+        "stability_energy": None,
+        "path_mdd_mean": None,
+        "cdar_95": None,
+        "p_dd_breach": None,
+        "underwater_mean": None,
+        "ttr_mean_days": None,
+    }
+
+
+def _stability_report_to_metrics(rep: StabilityReport | None, *, days: int) -> dict[str, float | None]:
+    if rep is None:
+        return _none_stability_report()
+    return {
+        "stability_energy": float(rep.energy),
+        "path_mdd_mean": float(rep.mdd_mean),
+        "cdar_95": float(rep.cdar_alpha),
+        "p_dd_breach": float(rep.p_breach),
+        "underwater_mean": float(rep.underwater_mean),
+        "ttr_mean_days": float(rep.ttr_mean_norm) * float(days),
+    }
+
+
+def _compute_stability_from_mc(
+    mc: dict,
+    *,
+    cfg: ScoreConfig,
+    days: int,
+) -> StabilityReport | None:
+    paths = mc.get("equity_paths")
+    if paths is None:
+        return None
+    return compute_stability_report(
+        paths,
+        n_days=int(days),
+        cfg=_stability_cfg_from_score_config(cfg),
+    )
+
+
 def compute_penalties(
     w: np.ndarray,
     stats: dict,
@@ -136,6 +205,8 @@ def compute_penalties(
     goals: list[float],
     cfg: ScoreConfig | None = None,
     spec_df_full: pd.DataFrame | None = None,
+    stability_report: StabilityReport | None = None,
+    days: int = 252,
 ) -> dict:
     if cfg is None:
         cfg = ScoreConfig()
@@ -191,6 +262,39 @@ def compute_penalties(
     except Exception:
         pass
 
+    # Path-stability penalties from leveraged MC equity paths.
+    # All components are lower-is-better. Penalties measure excess over caps.
+    pen["stability_energy"] = 0.0
+    pen["path_mdd_mean"] = 0.0
+    pen["cdar_95"] = 0.0
+    pen["p_dd_breach"] = 0.0
+    pen["underwater"] = 0.0
+    pen["ttr"] = 0.0
+
+    if stability_report is not None:
+        pen["stability_energy"] = max(
+            0.0,
+            float(stability_report.energy) - float(getattr(cfg, "stability_energy_cap", 0.80)),
+        )
+        pen["path_mdd_mean"] = max(
+            0.0,
+            float(stability_report.mdd_mean) - float(getattr(cfg, "path_mdd_mean_cap", 0.30)),
+        )
+        pen["cdar_95"] = max(
+            0.0,
+            float(stability_report.cdar_alpha) - float(getattr(cfg, "cdar_95_cap", 0.45)),
+        )
+        pen["p_dd_breach"] = max(
+            0.0,
+            float(stability_report.p_breach) - float(getattr(cfg, "p_dd_breach_cap", 0.25)),
+        )
+        pen["underwater"] = max(
+            0.0,
+            float(stability_report.underwater_mean) - float(getattr(cfg, "underwater_mean_cap", 0.55)),
+        )
+        ttr_cap_norm = float(getattr(cfg, "ttr_cap_days", 126)) / float(max(1, days))
+        pen["ttr"] = max(0.0, float(stability_report.ttr_mean_norm) - ttr_cap_norm)
+
     return pen
 
 
@@ -209,6 +313,12 @@ def score_candidate(p_hit_main: float, ruin: float, penalties: dict, cfg: ScoreC
         - cfg.lambda_hf_ratio * penalties.get("hf_ratio", 0.0)
         - cfg.lambda_freq_overlap * penalties.get("freq_overlap", 0.0)
         - cfg.lambda_spec_entropy * penalties.get("spec_entropy", 0.0)
+        - getattr(cfg, "lambda_stability_energy", 0.0) * penalties.get("stability_energy", 0.0)
+        - getattr(cfg, "lambda_path_mdd_mean", 0.0) * penalties.get("path_mdd_mean", 0.0)
+        - getattr(cfg, "lambda_cdar_95", 0.0) * penalties.get("cdar_95", 0.0)
+        - getattr(cfg, "lambda_p_dd_breach", 0.0) * penalties.get("p_dd_breach", 0.0)
+        - getattr(cfg, "lambda_underwater", 0.0) * penalties.get("underwater", 0.0)
+        - getattr(cfg, "lambda_ttr", 0.0) * penalties.get("ttr", 0.0)
     )
 
 
@@ -253,7 +363,7 @@ def evaluate_portfolio_from_arrays(
     w_vec = np.array([float(weights.get(t, 0.0)) for t in tickers], dtype=np.float64)
     w_vec = np.where(np.isfinite(w_vec), w_vec, 0.0)
 
-    if weight_mode == "gross_signed":
+    if weight_mode in {"gross_signed", "long_short"}:
         gross = float(np.sum(np.abs(w_vec)))
         if not np.isfinite(gross) or gross <= 0:
             raise ValueError("Gross weight exposure <= 0")
@@ -313,8 +423,11 @@ def evaluate_portfolio_from_arrays(
         n_paths=int(n_paths),
         seed=mc_seed,
         block_size=block_size,
-        return_paths=False,
+        return_paths=True,
     )
+
+    stability_report = _compute_stability_from_mc(mc, cfg=score_config, days=int(days))
+    stability_metrics = _stability_report_to_metrics(stability_report, days=int(days))
 
     ruin = float(mc["ruin_prob"])
     p_main = float(mc["p_hit"].get(float(main_goal), 0.0))
@@ -334,6 +447,8 @@ def evaluate_portfolio_from_arrays(
         goals=[float(goals[0]), float(goals[1]), float(goals[2])],
         cfg=score_config,
         spec_df_full=None,  # we use spec_rows below for speed
+        stability_report=stability_report,
+        days=int(days),
     )
 
     # override spectral penalties with spec_rows fast path if provided
@@ -362,7 +477,7 @@ def evaluate_portfolio_from_arrays(
 
     score = score_candidate(p_main, ruin, penalties, score_config)
     bd = score_breakdown(p_main, ruin, penalties, score_config)
-    print("[score breakdown]", bd)
+    # print("[score breakdown]", bd)
 
     g1, g2, g3 = float(goals[0]), float(goals[1]), float(goals[2])
 
@@ -396,6 +511,13 @@ def evaluate_portfolio_from_arrays(
         ending_equity_p95=float(mc["end_p95"]),
 
         score=float(score),
+
+        stability_energy=stability_metrics["stability_energy"],
+        path_mdd_mean=stability_metrics["path_mdd_mean"],
+        cdar_95=stability_metrics["cdar_95"],
+        p_dd_breach=stability_metrics["p_dd_breach"],
+        underwater_mean=stability_metrics["underwater_mean"],
+        ttr_mean_days=stability_metrics["ttr_mean_days"],
     )
 
 
@@ -417,6 +539,7 @@ def compute_stability_for_candidate(
     pca_k: int = 5,
     block_size: int | tuple[int, int] | None = (8, 12),
     stability_cfg: StabilityEnergyConfig | None = None,
+    weight_mode: str = "gross_signed",
 ) -> StabilityReport:
     if stability_cfg is None:
         stability_cfg = StabilityEnergyConfig()
@@ -449,13 +572,14 @@ def compute_stability_for_candidate(
     elif path_source == "pca":
         pca_model = fit_pca_model(rets_assets, k=int(pca_k))
 
-        R_port_paths = sample_portfolio_returns_paths_pca(
+        R_port_paths = R_port_paths = sample_portfolio_returns_paths_pca(
             model=pca_model,
             weights=weights,
             n_paths=n_paths,
             n_days=days,
             seed=mc_seed,
             block_size=block_size,
+            weight_mode=weight_mode,
         )
 
         mc = simulate_leveraged_paths_vectorized(
@@ -498,6 +622,7 @@ def evaluate_portfolio_candidate(
     pca_k: int = 5,
     block_size: int | tuple[int, int] | None = (8, 12),
     spec_df_full: pd.DataFrame | None = None,
+    weight_mode: str = "long_only",
 ) -> EvalMetrics:
     return evaluate_portfolio(
         returns=returns,
@@ -515,6 +640,7 @@ def evaluate_portfolio_candidate(
         path_source=path_source,
         pca_k=pca_k,
         spec_df_full=spec_df_full,
+        weight_mode=weight_mode,
     )
 
 
@@ -552,7 +678,7 @@ def evaluate_portfolio(
     w_vec = np.array([float(weights[t]) for t in tickers], dtype=np.float64)
     w_vec = np.where(np.isfinite(w_vec), w_vec, 0.0)
 
-    if weight_mode == "gross_signed":
+    if weight_mode in {"gross_signed", "long_short"}:
         gross = float(np.sum(np.abs(w_vec)))
         if not np.isfinite(gross) or gross <= 0:
             raise ValueError("Gross weight exposure <= 0 (check positions/prices)")
@@ -619,19 +745,20 @@ def evaluate_portfolio(
             n_paths=int(n_paths),
             seed=mc_seed,
             block_size=block_size,
-            return_paths=False,
+            return_paths=True,
         )
 
     elif path_source == "pca":
         pca_model = fit_pca_model(rets_assets, k=int(pca_k))
 
-        R_port_paths = sample_portfolio_returns_paths_pca(
+        R_port_paths = R_port_paths = sample_portfolio_returns_paths_pca(
             model=pca_model,
             weights=weights,
             n_paths=n_paths,
             n_days=days,
             seed=mc_seed,
             block_size=block_size,
+            weight_mode=weight_mode,
         )
 
         mc = simulate_leveraged_paths_vectorized(
@@ -644,11 +771,14 @@ def evaluate_portfolio(
             n_paths=int(n_paths),
             seed=mc_seed,
             block_size=None,
-            return_paths=False,
+            return_paths=True,
         )
 
     else:
         raise ValueError(f"Unknown path_source={path_source!r} (use 'bootstrap' or 'pca')")
+
+    stability_report = _compute_stability_from_mc(mc, cfg=score_config, days=int(days))
+    stability_metrics = _stability_report_to_metrics(stability_report, days=int(days))
 
     ruin = float(mc["ruin_prob"])
     p_main = float(mc["p_hit"].get(main_goal, 0.0))
@@ -663,16 +793,18 @@ def evaluate_portfolio(
         goals=list(goals),
         cfg=score_config,
         spec_df_full=spec_df_full,
+        stability_report=stability_report,
+        days=int(days),
     )
 
     score = score_candidate(p_main, ruin, penalties, score_config)
 
     bd = score_breakdown(p_main, ruin, penalties, score_config)
-    print("[score breakdown]", bd)
+    # print("[score breakdown]", bd)
 
     g1, g2, g3 = goals
 
-    return EvalMetrics(
+    metrics = EvalMetrics(
         weights=dict(weights),
         goals=goals,
         main_goal=main_goal,
@@ -703,4 +835,198 @@ def evaluate_portfolio(
         ending_equity_p95=float(mc["end_p95"]),
 
         score=float(score),
+
+        stability_energy=stability_metrics["stability_energy"],
+        path_mdd_mean=stability_metrics["path_mdd_mean"],
+        cdar_95=stability_metrics["cdar_95"],
+        p_dd_breach=stability_metrics["p_dd_breach"],
+        underwater_mean=stability_metrics["underwater_mean"],
+        ttr_mean_days=stability_metrics["ttr_mean_days"],
     )
+
+    return metrics
+
+def evaluate_portfolio_with_paths(
+    returns: pd.DataFrame,
+    weights: Dict[str, float],
+    equity0: float,
+    notional: float,
+    goals: list[float] | Goals3,
+    main_goal: float,
+    lw_cov: pd.DataFrame | None = None,
+    days: int = 252,
+    n_paths: int = 20000,
+    score_config: ScoreConfig | None = None,
+    mc_seed: int | None = None,
+    block_size: int | tuple[int, int] | None = (8, 12),
+    path_source: str = "bootstrap",
+    pca_k: int = 5,
+    spec_df_full: pd.DataFrame | None = None,
+    weight_mode: str = "long_only",
+) -> PortfolioEvaluationResult:
+    """
+    Diagnostic version of evaluate_portfolio.
+
+    It returns:
+      - lightweight EvalMetrics
+      - raw simulated equity paths used to compute the metrics
+
+    This should only be used for selected/final portfolios or small diagnostic
+    subsets. Do not use it inside large GA loops.
+    """
+    metrics = evaluate_portfolio(
+        returns=returns,
+        weights=weights,
+        equity0=equity0,
+        notional=notional,
+        goals=goals,
+        main_goal=main_goal,
+        lw_cov=lw_cov,
+        days=days,
+        n_paths=n_paths,
+        score_config=score_config,
+        mc_seed=mc_seed,
+        block_size=block_size,
+        path_source=path_source,
+        pca_k=pca_k,
+        spec_df_full=spec_df_full,
+        weight_mode=weight_mode,
+    )
+
+    # Reproduce the same path generation once for diagnostics.
+    #
+    # This intentionally does a second MC run. It avoids invasive refactoring
+    # of evaluate_portfolio() and keeps the standard EvalMetrics path unchanged.
+    # The caller should pass a deterministic mc_seed.
+    goals_t = tuple(float(g) for g in goals)
+    if len(goals_t) != 3:
+        raise ValueError("For now, exactly 3 goals are required.")
+
+    tickers = [t for t in weights.keys() if t in returns.columns]
+    if not tickers:
+        raise ValueError("No overlap between weights and returns columns")
+
+    w_vec = np.array([float(weights[t]) for t in tickers], dtype=np.float64)
+    w_vec = np.where(np.isfinite(w_vec), w_vec, 0.0)
+
+    if weight_mode in {"gross_signed", "long_short"}:
+        gross = float(np.sum(np.abs(w_vec)))
+        if not np.isfinite(gross) or gross <= 0:
+            raise ValueError("Gross weight exposure <= 0 (check positions/prices)")
+        w_vec = w_vec / gross
+    else:
+        s = float(np.sum(w_vec))
+        if not np.isfinite(s) or s <= 0:
+            raise ValueError("Weights must sum to a positive number")
+        w_vec = w_vec / s
+
+    rets_assets = returns[tickers].dropna(how="any")
+    port_rets = (rets_assets.to_numpy(dtype=np.float64) @ w_vec).astype(np.float64, copy=False)
+    port_rets = port_rets[np.isfinite(port_rets)]
+
+    if port_rets.size < 50:
+        raise ValueError("Not enough data for this portfolio candidate")
+
+    if path_source == "bootstrap":
+        mc = simulate_leveraged_paths_vectorized(
+            port_rets=port_rets.astype(np.float64, copy=False),
+            notional=float(notional),
+            equity0=float(equity0),
+            goals=list(goals_t),
+            n_days=int(days),
+            n_paths=int(n_paths),
+            seed=mc_seed,
+            block_size=block_size,
+            return_paths=True,
+        )
+
+    elif path_source == "pca":
+        pca_model = fit_pca_model(rets_assets, k=int(pca_k))
+
+        r_port_paths = sample_portfolio_returns_paths_pca(
+            model=pca_model,
+            weights=weights,
+            n_paths=n_paths,
+            n_days=days,
+            seed=mc_seed,
+            block_size=block_size,
+            weight_mode=weight_mode,
+        )
+
+        mc = simulate_leveraged_paths_vectorized(
+            port_rets=None,
+            precomputed_r=r_port_paths,
+            notional=float(notional),
+            equity0=float(equity0),
+            goals=list(goals_t),
+            n_days=int(days),
+            n_paths=int(n_paths),
+            seed=mc_seed,
+            block_size=None,
+            return_paths=True,
+        )
+
+    else:
+        raise ValueError(f"Unknown path_source={path_source!r} (use 'bootstrap' or 'pca')")
+
+    return PortfolioEvaluationResult(
+        metrics=metrics,
+        equity_paths=mc.get("equity_paths"),
+        metadata={
+            "path_source": path_source,
+            "n_paths": int(n_paths),
+            "days": int(days),
+            "mc_seed": mc_seed,
+            "weight_mode": weight_mode,
+            "diagnostic_only": True,
+        },
+    ).validate()
+
+
+def evaluate_portfolio_candidate_with_paths(
+    returns: pd.DataFrame,
+    weights: Dict[str, float],
+    equity0: float,
+    notional: float,
+    goals: list[float],
+    main_goal: float,
+    lw_cov: pd.DataFrame | None = None,
+    days: int = 252,
+    n_paths: int = 20000,
+    score_config: ScoreConfig | None = None,
+    mc_seed: int | None = None,
+    path_source: str = "bootstrap",
+    pca_k: int = 5,
+    block_size: int | tuple[int, int] | None = (8, 12),
+    spec_df_full: pd.DataFrame | None = None,
+    weight_mode: str = "long_only",
+) -> PortfolioEvaluationResult:
+    """
+    Evaluate a portfolio candidate and return both EvalMetrics and raw simulated
+    equity paths.
+
+    This function is intended for diagnostics only.
+
+    Do not use this in the GA loop, because storing paths for many candidates
+    is memory-heavy. Use it for the final selected executable portfolio or a
+    small diagnostic subset.
+    """
+    result = evaluate_portfolio_with_paths(
+        returns=returns,
+        weights=weights,
+        equity0=equity0,
+        notional=notional,
+        goals=goals,
+        main_goal=main_goal,
+        lw_cov=lw_cov,
+        days=days,
+        n_paths=n_paths,
+        score_config=score_config,
+        mc_seed=mc_seed,
+        block_size=block_size,
+        path_source=path_source,
+        pca_k=pca_k,
+        spec_df_full=spec_df_full,
+        weight_mode=weight_mode,
+    )
+    return result.validate()

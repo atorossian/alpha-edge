@@ -63,24 +63,37 @@ def sample_portfolio_returns_paths_pca(
     seed: int | None = None,
     # optional: (min,max) for stationary-like blocks on factor returns/residuals
     block_size: int | tuple[int, int] | None = None,
+    weight_mode: str = "long_only",
 ) -> np.ndarray:
     """
     Generate portfolio return paths using:
       r_asset_t = mu + f_t @ L.T + eps_t
       r_port_t  = w' r_asset_t
 
+    Supports:
+      - long_only: normalize by sum(weights)
+      - gross_signed / long_short: normalize by sum(abs(weights))
+
     Returns: R_port_paths shape (n_paths, n_days)
     """
     rng = np.random.default_rng(seed)
 
     tickers = model.tickers
-    N = len(tickers)
 
     # align weights to model tickers
     w = np.array([float(weights.get(t, 0.0)) for t in tickers], dtype=np.float64)
-    if w.sum() <= 0:
-        raise ValueError("Weights sum to 0 after aligning to PCA tickers")
-    w = w / w.sum()
+    w = np.where(np.isfinite(w), w, 0.0)
+
+    if weight_mode in {"gross_signed", "long_short"}:
+        denom = float(np.sum(np.abs(w)))
+        if not np.isfinite(denom) or denom <= 0:
+            raise ValueError("Gross weight exposure <= 0 after aligning to PCA tickers")
+        w = w / denom
+    else:
+        denom = float(np.sum(w))
+        if not np.isfinite(denom) or denom <= 0:
+            raise ValueError("Weights sum <= 0 after aligning to PCA tickers")
+        w = w / denom
 
     F = model.factor_returns   # (T, K)
     E = model.resid            # (T, N)
@@ -88,7 +101,6 @@ def sample_portfolio_returns_paths_pca(
     L = model.loadings         # (N, K)
 
     T_hist = F.shape[0]
-    K = F.shape[1]
 
     # --- sample indices for time steps (iid or simple blocks) ---
     if block_size is None:
@@ -111,17 +123,18 @@ def sample_portfolio_returns_paths_pca(
                 idx[:, t] = cur
         else:
             B = int(block_size)
+            if B < 1:
+                raise ValueError("block_size must be >= 1")
             n_blocks = (n_days + B - 1) // B
             starts = rng.integers(0, max(1, T_hist - B), size=(n_paths, n_blocks))
             offsets = np.arange(B, dtype=np.int64)[None, None, :]
             idx = (starts[:, :, None] + offsets).reshape(n_paths, n_blocks * B)[:, :n_days]
 
-    # sample factor returns and residuals using same idx (keeps coherence)
+    # sample factor returns and residuals using same idx
     F_s = F[idx]  # (P, D, K)
     E_s = E[idx]  # (P, D, N)
 
     # reconstruct asset returns (P, D, N)
-    # mu broadcast: (1,1,N)
     R_assets = mu[None, None, :] + (F_s @ L.T) + E_s
 
     # collapse to portfolio returns (P, D)

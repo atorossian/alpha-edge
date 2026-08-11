@@ -1,0 +1,635 @@
+src/alpha_edge/cli/commands/pipeline_cmd.py:101:    cache_force: bool = typer.Option(False, "--cache-force", help="Force rebuild returns cache."),
+src/alpha_edge/cli/commands/pipeline_cmd.py:132:        *_flag("--force", cache_force),
+src/alpha_edge/cli/commands/pipeline_cmd.py:291:                "--force",
+Binary file src/alpha_edge/cli/commands/__pycache__/pipeline_cmd.cpython-310.pyc matches
+Binary file src/alpha_edge/cli/commands/__pycache__/pipeline_cmd.cpython-312.pyc matches
+src/alpha_edge/core/data_loader.py:112:    s3.put_object(
+src/alpha_edge/core/data_loader.py:122:    df.to_parquet(buf, index=index)
+src/alpha_edge/core/data_loader.py:124:    s3.put_object(
+src/alpha_edge/core/data_loader.py:181:def s3_write_json_event(
+src/alpha_edge/core/data_loader.py:209:def s3_write_parquet_partition(
+src/alpha_edge/core/market_store.py:49:        self._client().put_object(Bucket=self.bucket, Key=key, Body=data, ContentType=content_type)
+src/alpha_edge/core/market_store.py:197:            out.to_parquet(bio, index=False)
+src/alpha_edge/core/market_store.py:214:        df.to_parquet(bio, index=False)
+src/alpha_edge/core/market_store.py:303:        df.to_parquet(bio, index=False)
+src/alpha_edge/core/market_store.py:310:        df.to_parquet(bio, index=False)
+src/alpha_edge/core/market_store.py:363:        triage_report.to_parquet(bio, index=False)
+src/alpha_edge/core/market_store.py:426:            out.to_parquet(bio, index=False)
+src/alpha_edge/core/schemas.py:366:    repair_action: str
+src/alpha_edge/core/schemas.py:367:    repair_reason: str
+Binary file src/alpha_edge/core/__pycache__/data_loader.cpython-310.pyc matches
+Binary file src/alpha_edge/core/__pycache__/data_loader.cpython-312.pyc matches
+Binary file src/alpha_edge/core/__pycache__/market_store.cpython-310.pyc matches
+Binary file src/alpha_edge/core/__pycache__/market_store.cpython-312.pyc matches
+Binary file src/alpha_edge/core/__pycache__/schemas.cpython-310.pyc matches
+src/alpha_edge/jobs/run_daily_report.py:55:    s3_write_json_event,
+src/alpha_edge/jobs/run_daily_report.py:56:    s3_write_parquet_partition,
+src/alpha_edge/jobs/run_daily_report.py:1228:            s3_write_parquet_partition(
+src/alpha_edge/jobs/run_daily_report.py:1239:            s3_write_json_event(
+src/alpha_edge/jobs/run_daily_report.py:1416:        s3_write_json_event(
+src/alpha_edge/jobs/run_daily_report.py:1519:            s3_write_parquet_partition(
+src/alpha_edge/jobs/run_daily_report.py:1529:            s3_write_json_event(
+src/alpha_edge/jobs/run_daily_report.py:1550:                s3_write_parquet_partition(
+src/alpha_edge/jobs/run_daily_report.py:1580:        s3_write_json_event(
+src/alpha_edge/jobs/run_daily_report.py:1601:        s3_write_json_event(
+src/alpha_edge/jobs/run_daily_report.py:1644:        s3_write_parquet_partition(
+src/alpha_edge/jobs/run_daily_report.py:1654:        s3_write_json_event(
+src/alpha_edge/jobs/run_daily_report.py:1665:        s3_write_json_event(
+src/alpha_edge/jobs/run_daily_report.py:1676:        s3_write_json_event(
+src/alpha_edge/jobs/run_daily_report.py:1687:        s3_write_json_event(
+src/alpha_edge/jobs/run_daily_report.py:1698:        s3_write_json_event(
+src/alpha_edge/jobs/run_portfolio_search.py:19:    s3_write_json_event,
+src/alpha_edge/jobs/run_portfolio_search.py:20:    s3_write_parquet_partition,
+src/alpha_edge/jobs/run_portfolio_search.py:715:        s3_write_json_event(
+src/alpha_edge/jobs/run_portfolio_search.py:783:        s3_write_parquet_partition(
+src/alpha_edge/jobs/run_portfolio_search.py:799:        s3_write_parquet_partition(
+src/alpha_edge/jobs/run_quarantine_analysis.py:18:    s3_write_json_event,
+src/alpha_edge/jobs/run_quarantine_analysis.py:108:    s3.put_object(
+src/alpha_edge/jobs/run_quarantine_analysis.py:117:    s3.put_object(
+src/alpha_edge/jobs/run_quarantine_analysis.py:511:            s3_write_json_event(
+src/alpha_edge/jobs/run_quarantine_analysis.py:574:            s3_write_json_event(
+src/alpha_edge/jobs/run_quarantine_analysis.py:733:                s3_write_json_event(
+src/alpha_edge/jobs/run_quarantine_analysis.py:931:            s3_write_json_event(
+src/alpha_edge/jobs/run_quarantine_analysis.py:975:        s3_write_json_event(
+src/alpha_edge/jobs/run_reports_backfill.py:1:# run_reports_backfill.py
+src/alpha_edge/jobs/run_reports_backfill.py:289:                f"as_of={dt_str}, backtest_run_id='backfill', equity_override={eq:.2f})"
+src/alpha_edge/jobs/run_reports_backfill.py:298:                backtest_run_id="backfill",
+src/alpha_edge/jobs/run_score_weights_tuning.py:19:    s3_write_json_event,
+src/alpha_edge/jobs/run_score_weights_tuning.py:360:        s3_write_json_event(
+src/alpha_edge/jobs/run_score_weights_tuning.py:371:        s3_write_json_event(
+src/alpha_edge/jobs/run_universe_update.py:219:def backfill_from_scr(universe: pd.DataFrame, col: str) -> pd.DataFrame:
+src/alpha_edge/jobs/run_universe_update.py:861:                universe = backfill_from_scr(universe, col)
+src/alpha_edge/jobs/run_update_score_caps.py:11:from alpha_edge.core.data_loader import s3_init, s3_load_latest_json, s3_write_json_event
+src/alpha_edge/jobs/run_update_score_caps.py:239:    s3_write_json_event(
+src/alpha_edge/jobs/run_warehouse_backfill.py:220:    force_ledger: bool,
+src/alpha_edge/jobs/run_warehouse_backfill.py:221:    force_warehouse: bool,
+src/alpha_edge/jobs/run_warehouse_backfill.py:229:    need_ledger = (not ledger_exists) or force_ledger
+src/alpha_edge/jobs/run_warehouse_backfill.py:236:    need_wh_trades = (not s3_key_exists(s3, bucket=bucket, key=wh_trades_key)) or force_warehouse
+src/alpha_edge/jobs/run_warehouse_backfill.py:237:    need_wh_positions = (not s3_key_exists(s3, bucket=bucket, key=wh_positions_key)) or force_warehouse
+src/alpha_edge/jobs/run_warehouse_backfill.py:238:    need_wh_pnl = (not s3_key_exists(s3, bucket=bucket, key=wh_pnl_key)) or force_warehouse
+src/alpha_edge/jobs/run_warehouse_backfill.py:239:    need_wh_report = (not s3_key_exists(s3, bucket=bucket, key=wh_report_key)) or force_warehouse
+src/alpha_edge/jobs/run_warehouse_backfill.py:282:    ap.add_argument("--force-ledger", action="store_true", help="Rebuild ledger even if it exists for dt.")
+src/alpha_edge/jobs/run_warehouse_backfill.py:283:    ap.add_argument("--force-warehouse", action="store_true", help="Rewrite warehouse partitions even if they exist.")
+src/alpha_edge/jobs/run_warehouse_backfill.py:428:            force_ledger=bool(args.force_ledger),
+src/alpha_edge/jobs/run_warehouse_backfill.py:429:            force_warehouse=bool(args.force_warehouse),
+Binary file src/alpha_edge/jobs/__pycache__/run_daily_report.cpython-310.pyc matches
+Binary file src/alpha_edge/jobs/__pycache__/run_daily_report.cpython-312.pyc matches
+Binary file src/alpha_edge/jobs/__pycache__/run_portfolio_search.cpython-310.pyc matches
+Binary file src/alpha_edge/jobs/__pycache__/run_portfolio_search.cpython-312.pyc matches
+Binary file src/alpha_edge/jobs/__pycache__/run_quarantine_analysis.cpython-310.pyc matches
+Binary file src/alpha_edge/jobs/__pycache__/run_quarantine_analysis.cpython-312.pyc matches
+Binary file src/alpha_edge/jobs/__pycache__/run_score_weights_tuning.cpython-310.pyc matches
+Binary file src/alpha_edge/jobs/__pycache__/run_universe_update.cpython-310.pyc matches
+Binary file src/alpha_edge/jobs/__pycache__/run_universe_update.cpython-312.pyc matches
+Binary file src/alpha_edge/jobs/__pycache__/run_warehouse_backfill.cpython-310.pyc matches
+src/alpha_edge/maintenance/cleanup_partitions.py:89:        resp = s3.delete_objects(
+src/alpha_edge/maintenance/dedupe_ohlcv_partitions_keep_one.py:65:    # S3 delete_objects supports up to 1000 keys per request
+src/alpha_edge/maintenance/dedupe_ohlcv_partitions_keep_one.py:70:        s3.delete_objects(Bucket=bucket, Delete={"Objects": [{"Key": k} for k in chunk]})
+src/alpha_edge/maintenance/migrate_local_history_to_s3.py:82:    s3.put_object(
+src/alpha_edge/maintenance/migrate_local_history_to_s3.py:99:def _write_latest_from_dt(s3, *, table: str, dt_str: str, dt_folder: Path) -> None:
+src/alpha_edge/maintenance/migrate_local_history_to_s3.py:209:            _write_latest_from_dt(s3, table=table, dt_str=latest_dt, dt_folder=latest_folder)
+src/alpha_edge/maintenance/reset_ticker_history.py:63:                s3.delete_objects(
+src/alpha_edge/market/asset_data_migration.py:21:    "data/universe/ingest_force_refresh.csv", index=False
+src/alpha_edge/market/asset_data_migration.py:24:print("Wrote force refresh list:", len(changed))
+src/alpha_edge/market/build_returns_wide_cache.py:37:    force: bool = False
+src/alpha_edge/market/build_returns_wide_cache.py:160:    if not cfg.force:
+src/alpha_edge/market/build_returns_wide_cache.py:323:    wide.to_parquet(bio, index=True)
+src/alpha_edge/market/build_returns_wide_cache.py:391:    ap.add_argument("--force", action="store_true")
+src/alpha_edge/market/build_returns_wide_cache.py:426:        force=bool(args.force),
+src/alpha_edge/market/build_returns_wide_cache.py:449:    print(f"force:                {cfg.force}")
+src/alpha_edge/market/compute_market_regime.py:13:from alpha_edge.core.data_loader import s3_init, s3_write_json_event
+src/alpha_edge/market/compute_market_regime.py:443:        s3_write_json_event(
+src/alpha_edge/market/download_market_data_from_s3.py:34:    ohlcv.to_parquet(ohlcv_path, index=False)
+src/alpha_edge/market/download_market_data_from_s3.py:35:    rets.to_parquet(rets_path, index=False)
+src/alpha_edge/market/download_market_data_from_s3.py:43:        wide.to_parquet(wide_path)
+src/alpha_edge/market/ingest_market_data.py:53:#   It does NOT yet add corporate actions or split-aware repair.
+src/alpha_edge/market/ingest_market_data.py:191:        df.to_parquet(tmp, engine="pyarrow", index=False)
+src/alpha_edge/market/ingest_market_data.py:230:        out.to_parquet(tmp, engine="pyarrow", index=False)
+src/alpha_edge/market/ingest_market_data.py:805:    force_refresh_csv: str | Path | None = paths.universe_dir() / "ingest_force_refresh.csv",
+src/alpha_edge/market/ingest_market_data.py:896:    force_refresh: set[str] = set()
+src/alpha_edge/market/ingest_market_data.py:897:    if force_refresh_csv:
+src/alpha_edge/market/ingest_market_data.py:899:            fr = pd.read_csv(force_refresh_csv)
+src/alpha_edge/market/ingest_market_data.py:903:                force_refresh = set(fr[col].astype(str).str.strip().tolist())
+src/alpha_edge/market/ingest_market_data.py:909:                force_refresh = set(
+src/alpha_edge/market/ingest_market_data.py:913:            force_refresh = set()
+src/alpha_edge/market/ingest_market_data.py:962:    def _flush_failures_live(force: bool = False) -> None:
+src/alpha_edge/market/ingest_market_data.py:968:        if (not force) and (done % int(flush_failures_every) != 0) and (
+src/alpha_edge/market/ingest_market_data.py:1044:        is_force = asset_id in force_refresh
+src/alpha_edge/market/ingest_market_data.py:1045:        if is_force:
+src/alpha_edge/market/ingest_market_data.py:1224:            if (not is_force) and (asset_id in prev_adjusted_px_map) and (not px.empty):
+src/alpha_edge/market/ingest_market_data.py:1380:                _flush_failures_live(force=False)
+src/alpha_edge/market/ingest_market_data.py:1470:    _flush_failures_live(force=True)
+src/alpha_edge/market/ingest_market_data.py:1540:    ap.add_argument("--force-refresh-csv", default=str(paths.universe_dir() / "ingest_force_refresh.csv"))
+src/alpha_edge/market/ingest_market_data.py:1568:        force_refresh_csv=args.force_refresh_csv,
+Binary file src/alpha_edge/market/__pycache__/build_returns_wide_cache.cpython-310.pyc matches
+Binary file src/alpha_edge/market/__pycache__/build_returns_wide_cache.cpython-312.pyc matches
+Binary file src/alpha_edge/market/__pycache__/compute_market_regime.cpython-310.pyc matches
+Binary file src/alpha_edge/market/__pycache__/compute_market_regime.cpython-312.pyc matches
+Binary file src/alpha_edge/market/__pycache__/ingest_market_data.cpython-310.pyc matches
+Binary file src/alpha_edge/market/__pycache__/ingest_market_data.cpython-312.pyc matches
+src/alpha_edge/operations/apply_portfolio_choice.py:57:    s3.put_object(
+src/alpha_edge/operations/backfill_trades_asset_id.py:209:def _normalize_repaired_quantity(*, raw_qty: float, policy: str) -> tuple[float, bool, str]:
+src/alpha_edge/operations/backfill_trades_asset_id.py:254:    repair_action: str
+src/alpha_edge/operations/backfill_trades_asset_id.py:255:    repair_reason: str
+src/alpha_edge/operations/backfill_trades_asset_id.py:390:        repair_action="MANUAL_REVIEW",
+src/alpha_edge/operations/backfill_trades_asset_id.py:391:        repair_reason=reason,
+src/alpha_edge/operations/backfill_trades_asset_id.py:397:# Core repair-plan / execution logic
+src/alpha_edge/operations/backfill_trades_asset_id.py:399:def build_repair_plan(
+src/alpha_edge/operations/backfill_trades_asset_id.py:419:        print("[OK] Empty audit file. No repair plan generated.")
+src/alpha_edge/operations/backfill_trades_asset_id.py:510:        repair_reason_parts: List[str] = []
+src/alpha_edge/operations/backfill_trades_asset_id.py:515:            normalized_qty, auto_ok, qty_detail = _normalize_repaired_quantity(
+src/alpha_edge/operations/backfill_trades_asset_id.py:551:                repair_reason_parts.append("quantity := value / price")
+src/alpha_edge/operations/backfill_trades_asset_id.py:557:                repair_reason_parts.append("value := quantity * price")
+src/alpha_edge/operations/backfill_trades_asset_id.py:589:            # Intentionally disabled: reported_pnl should come from broker/import logic, not this quantity repair.
+src/alpha_edge/operations/backfill_trades_asset_id.py:629:            repair_action="AUTO_PATCH" if changed else "NO_CHANGE",
+src/alpha_edge/operations/backfill_trades_asset_id.py:630:            repair_reason="; ".join(repair_reason_parts) if repair_reason_parts else "no effective patch required",
+src/alpha_edge/operations/backfill_trades_asset_id.py:655:                row.repair_action = "EXEC_FAILED"
+src/alpha_edge/operations/backfill_trades_asset_id.py:656:                row.repair_reason = f"{row.repair_reason}; execution failed rc={e.returncode}"
+src/alpha_edge/operations/backfill_trades_asset_id.py:691:        description="Build deterministic repair plan for broken trade quantities and optionally execute edits."
+src/alpha_edge/operations/backfill_trades_asset_id.py:695:    ap.add_argument("--out-auto-csv", default="./data/trade_repair_plan_auto.csv")
+src/alpha_edge/operations/backfill_trades_asset_id.py:696:    ap.add_argument("--out-manual-csv", default="./data/trade_repair_plan_manual.csv")
+src/alpha_edge/operations/backfill_trades_asset_id.py:723:    build_repair_plan(
+src/alpha_edge/operations/build_trade_repair_plan.py:209:def _normalize_repaired_quantity(*, raw_qty: float, policy: str) -> tuple[float, bool, str]:
+src/alpha_edge/operations/build_trade_repair_plan.py:254:    repair_action: str
+src/alpha_edge/operations/build_trade_repair_plan.py:255:    repair_reason: str
+src/alpha_edge/operations/build_trade_repair_plan.py:390:        repair_action="MANUAL_REVIEW",
+src/alpha_edge/operations/build_trade_repair_plan.py:391:        repair_reason=reason,
+src/alpha_edge/operations/build_trade_repair_plan.py:397:# Core repair-plan / execution logic
+src/alpha_edge/operations/build_trade_repair_plan.py:399:def build_repair_plan(
+src/alpha_edge/operations/build_trade_repair_plan.py:419:        print("[OK] Empty audit file. No repair plan generated.")
+src/alpha_edge/operations/build_trade_repair_plan.py:510:        repair_reason_parts: List[str] = []
+src/alpha_edge/operations/build_trade_repair_plan.py:515:            normalized_qty, auto_ok, qty_detail = _normalize_repaired_quantity(
+src/alpha_edge/operations/build_trade_repair_plan.py:551:                repair_reason_parts.append("quantity := value / price")
+src/alpha_edge/operations/build_trade_repair_plan.py:557:                repair_reason_parts.append("value := quantity * price")
+src/alpha_edge/operations/build_trade_repair_plan.py:589:            # Intentionally disabled: reported_pnl should come from broker/import logic, not this quantity repair.
+src/alpha_edge/operations/build_trade_repair_plan.py:629:            repair_action="AUTO_PATCH" if changed else "NO_CHANGE",
+src/alpha_edge/operations/build_trade_repair_plan.py:630:            repair_reason="; ".join(repair_reason_parts) if repair_reason_parts else "no effective patch required",
+src/alpha_edge/operations/build_trade_repair_plan.py:655:                row.repair_action = "EXEC_FAILED"
+src/alpha_edge/operations/build_trade_repair_plan.py:656:                row.repair_reason = f"{row.repair_reason}; execution failed rc={e.returncode}"
+src/alpha_edge/operations/build_trade_repair_plan.py:691:        description="Build deterministic repair plan for broken trade quantities and optionally execute edits."
+src/alpha_edge/operations/build_trade_repair_plan.py:695:    ap.add_argument("--out-auto-csv", default="./data/trade_repair_plan_auto.csv")
+src/alpha_edge/operations/build_trade_repair_plan.py:696:    ap.add_argument("--out-manual-csv", default="./data/trade_repair_plan_manual.csv")
+src/alpha_edge/operations/build_trade_repair_plan.py:723:    build_repair_plan(
+src/alpha_edge/operations/edit_trades_asset_id.py:61:    s3.put_object(
+src/alpha_edge/operations/edit_trades_asset_id.py:69:def s3_copy_object(s3, *, bucket: str, src_key: str, dst_key: str) -> None:
+src/alpha_edge/operations/edit_trades_asset_id.py:70:    s3.copy_object(
+src/alpha_edge/operations/edit_trades_asset_id.py:260:                s3_copy_object(s3, bucket=cfg.bucket, src_key=key, dst_key=backup_key)
+src/alpha_edge/operations/rebuild_ledger.py:175:    s3.put_object(
+src/alpha_edge/operations/rebuild_ledger.py:728:            "Re-record trades with record_trade.py after asset_id support, or backfill asset_id."
+src/alpha_edge/operations/record_cashflow.py:32:    s3.put_object(
+src/alpha_edge/operations/record_dividend.py:45:    s3.put_object(
+src/alpha_edge/operations/record_dividend.py:76:    s3.copy_object(
+src/alpha_edge/operations/record_dividend.py:84:    s3.delete_object(Bucket=bucket, Key=key)
+src/alpha_edge/operations/record_trade.py:34:    s3.put_object(
+src/alpha_edge/operations/record_trade.py:56:    s3.copy_object(
+src/alpha_edge/operations/record_trade.py:66:    s3.delete_object(Bucket=bucket, Key=key)
+src/alpha_edge/operations/repair_all_trade_chains.py:235:def _normalize_repaired_quantity(
+src/alpha_edge/operations/repair_all_trade_chains.py:411:        repair_action="MANUAL_REVIEW",
+src/alpha_edge/operations/repair_all_trade_chains.py:412:        repair_reason=reason,
+src/alpha_edge/operations/repair_all_trade_chains.py:419:# Generic chain-aware repair
+src/alpha_edge/operations/repair_all_trade_chains.py:492:                norm_qty, ok, qty_detail = _normalize_repaired_quantity(
+src/alpha_edge/operations/repair_all_trade_chains.py:530:            norm_qty, ok, qty_detail = _normalize_repaired_quantity(raw_qty=raw_qty, policy=quantity_policy)
+src/alpha_edge/operations/repair_all_trade_chains.py:583:            norm_qty, ok, qty_detail = _normalize_repaired_quantity(raw_qty=raw_qty, policy=quantity_policy)
+src/alpha_edge/operations/repair_all_trade_chains.py:625:                norm_qty, ok, qty_detail = _normalize_repaired_quantity(raw_qty=raw_qty, policy=quantity_policy)
+src/alpha_edge/operations/repair_all_trade_chains.py:660:            norm_qty, ok, qty_detail = _normalize_repaired_quantity(raw_qty=raw_qty, policy=quantity_policy)
+src/alpha_edge/operations/repair_all_trade_chains.py:713:            norm_qty, ok, qty_detail = _normalize_repaired_quantity(raw_qty=raw_qty, policy=quantity_policy)
+src/alpha_edge/operations/repair_all_trade_chains.py:735:                _manual_row(t, "Unsupported chain semantic in automatic repair", quantity_policy=quantity_policy)
+src/alpha_edge/operations/repair_all_trade_chains.py:770:                repair_action="AUTO_PATCH" if changed else "NO_CHANGE",
+src/alpha_edge/operations/repair_all_trade_chains.py:771:                repair_reason="; ".join(reason_parts) if reason_parts else "no effective patch required",
+src/alpha_edge/operations/repair_all_trade_chains.py:783:def repair_all_trade_chains(
+src/alpha_edge/operations/repair_all_trade_chains.py:830:            if row.repair_action != "NO_CHANGE":
+src/alpha_edge/operations/repair_all_trade_chains.py:850:                        row.repair_action = "EXEC_FAILED"
+src/alpha_edge/operations/repair_all_trade_chains.py:851:                        row.repair_reason = f"{row.repair_reason}; execution failed rc={e.returncode}"
+src/alpha_edge/operations/repair_all_trade_chains.py:890:    ap = argparse.ArgumentParser(description="Chain-aware quantity repair for all trade types.")
+src/alpha_edge/operations/repair_all_trade_chains.py:895:    ap.add_argument("--out-auto-csv", default="./data/repair_all_trade_chains_auto.csv")
+src/alpha_edge/operations/repair_all_trade_chains.py:896:    ap.add_argument("--out-manual-csv", default="./data/repair_all_trade_chains_manual.csv")
+src/alpha_edge/operations/repair_all_trade_chains.py:934:    repair_all_trade_chains(
+src/alpha_edge/operations/repair_asset_history.py:181:        help="Pass --write-checkpoints to rebuild_ledger during repair.",
+src/alpha_edge/operations/repair_asset_history.py:223:        repair_start = parse_date(args.start)
+src/alpha_edge/operations/repair_asset_history.py:225:        repair_start = discover_first_trade_for_asset(
+src/alpha_edge/operations/repair_asset_history.py:232:    repair_end = parse_date(args.end) if args.end else dt.date.today()
+src/alpha_edge/operations/repair_asset_history.py:243:    print(f"repair_range:       {fmt_date(repair_start)} -> {fmt_date(repair_end)}")
+src/alpha_edge/operations/repair_asset_history.py:252:    for d in daterange(repair_start, repair_end):
+src/alpha_edge/operations/repair_asset_history.py:336:    print("repair completed.")
+Binary file src/alpha_edge/operations/__pycache__/rebuild_ledger.cpython-310.pyc matches
+Binary file src/alpha_edge/operations/__pycache__/repair_asset_history.cpython-310.pyc matches
+src/alpha_edge/portfolio/execution_engine.py:39:    Nearest-step quantization (can overshoot per-ticker), but we still enforce gross <= notional.
+src/alpha_edge/portfolio/execution_engine.py:177:    # --- enforce gross cap (rare overshoot due to crypto rounding) ---
+src/alpha_edge/portfolio/portfolio_health.py:137:    # Always enforce excess-return sanity (available via fallback)
+src/alpha_edge/portfolio/portfolio_health.py:141:    # If we have CAPM alpha / IR, enforce them too
+src/alpha_edge/portfolio/portfolio_search.py:72:    Enforce:
+src/alpha_edge/portfolio/rebalance_engine.py:112:      - Enforces a minimum cool-down in days
+src/alpha_edge/portfolio/reinvest_engine.py:351:    # enforce improvement
+Binary file src/alpha_edge/portfolio/__pycache__/execution_engine.cpython-310.pyc matches
+Binary file src/alpha_edge/portfolio/__pycache__/execution_engine.cpython-312.pyc matches
+Binary file src/alpha_edge/portfolio/__pycache__/portfolio_search.cpython-310.pyc matches
+Binary file src/alpha_edge/portfolio/__pycache__/portfolio_search.cpython-312.pyc matches
+Binary file src/alpha_edge/portfolio/__pycache__/rebalance_engine.cpython-310.pyc matches
+Binary file src/alpha_edge/portfolio/__pycache__/rebalance_engine.cpython-312.pyc matches
+src/alpha_edge/scripts/dev_seed_fixture.py:52:    s3.put_object(
+src/alpha_edge/scripts/dev_seed_fixture.py:468:    if not args.write_s3_fixture:
+src/alpha_edge/scripts/smoke_test_env.py:25:    s3.put_object(
+src/alpha_edge/scripts/smoke_test_env.py:39:    s3.delete_object(Bucket=bucket, Key=key)
+Binary file src/alpha_edge/scripts/__pycache__/smoke_test_env.cpython-310.pyc matches
+src/alpha_edge/warehouse/build_report_stats.py:48:    ap.add_argument("--force", action="store_true")
+src/alpha_edge/warehouse/build_report_stats.py:83:    print(f"force:      {bool(args.force)}")
+src/alpha_edge/warehouse/build_report_stats.py:87:    if (not args.force) and s3_key_exists(s3, bucket=cfg.bucket, key=out_key):
+src/alpha_edge/warehouse/build_warehouse.py:21:    enforce_schema,
+src/alpha_edge/warehouse/build_warehouse.py:66:    s3.put_object(
+src/alpha_edge/warehouse/build_warehouse.py:167:    res = enforce_schema(out, DIM_ASSETS_SCHEMA)
+src/alpha_edge/warehouse/build_warehouse.py:227:    res = enforce_schema(df, FCT_TRADES_SCHEMA)
+src/alpha_edge/warehouse/build_warehouse.py:308:    res = enforce_schema(df, FCT_POSITIONS_DAILY_SCHEMA)
+src/alpha_edge/warehouse/build_warehouse.py:351:    res = enforce_schema(df, FCT_ACCOUNT_PNL_DAILY_SCHEMA)
+src/alpha_edge/warehouse/build_warehouse.py:411:    res = enforce_schema(df, FCT_DAILY_REPORT_STATS_SCHEMA)
+src/alpha_edge/warehouse/schemas.py:130:class EnforceResult:
+src/alpha_edge/warehouse/schemas.py:136:def enforce_schema(df: pd.DataFrame, schema: pa.Schema) -> EnforceResult:
+src/alpha_edge/warehouse/schemas.py:178:    return EnforceResult(table=table, missing_cols_added=missing, extra_cols_dropped=extra)
+Binary file src/alpha_edge/warehouse/__pycache__/build_warehouse.cpython-310.pyc matches
+Binary file src/alpha_edge/warehouse/__pycache__/schemas.cpython-310.pyc matches
+./audit_env_paths/all_hits.txt:15:src/alpha_edge/jobs/run_reports_backfill.py:22:DEFAULT_BUCKET = "alpha-edge-algo"
+./audit_env_paths/all_hits.txt:20:src/alpha_edge/jobs/run_warehouse_backfill.py:16:DEFAULT_BUCKET = "alpha-edge-algo"
+./audit_env_paths/all_hits.txt:33:src/alpha_edge/operations/backfill_trades_asset_id.py:16:DEFAULT_BUCKET = "alpha-edge-algo"
+./audit_env_paths/all_hits.txt:34:src/alpha_edge/operations/build_trade_repair_plan.py:16:DEFAULT_BUCKET = "alpha-edge-algo"
+./audit_env_paths/all_hits.txt:49:src/alpha_edge/jobs/run_reports_backfill.py:24:DEFAULT_ENGINE_ROOT = "engine/v1"
+./audit_env_paths/all_hits.txt:55:src/alpha_edge/jobs/run_warehouse_backfill.py:18:DEFAULT_ENGINE_ROOT = "engine/v1"
+./audit_env_paths/all_hits.txt:64:src/alpha_edge/operations/backfill_trades_asset_id.py:18:DEFAULT_ENGINE_ROOT = "engine/v1"
+./audit_env_paths/all_hits.txt:65:src/alpha_edge/operations/build_trade_repair_plan.py:18:DEFAULT_ENGINE_ROOT = "engine/v1"
+./audit_env_paths/all_hits.txt:123:src/alpha_edge/jobs/run_reports_backfill.py:22:DEFAULT_BUCKET = "alpha-edge-algo"
+./audit_env_paths/all_hits.txt:124:src/alpha_edge/jobs/run_reports_backfill.py:23:DEFAULT_REGION = "eu-west-1"
+./audit_env_paths/all_hits.txt:125:src/alpha_edge/jobs/run_reports_backfill.py:24:DEFAULT_ENGINE_ROOT = "engine/v1"
+./audit_env_paths/all_hits.txt:126:src/alpha_edge/jobs/run_reports_backfill.py:31:    return str(getattr(cfg, "bucket", DEFAULT_BUCKET))
+./audit_env_paths/all_hits.txt:127:src/alpha_edge/jobs/run_reports_backfill.py:35:    return str(getattr(cfg, "region", DEFAULT_REGION))
+./audit_env_paths/all_hits.txt:128:src/alpha_edge/jobs/run_reports_backfill.py:39:    return str(getattr(cfg, "engine_root", DEFAULT_ENGINE_ROOT)).strip("/")
+./audit_env_paths/all_hits.txt:153:src/alpha_edge/jobs/run_warehouse_backfill.py:16:DEFAULT_BUCKET = "alpha-edge-algo"
+./audit_env_paths/all_hits.txt:154:src/alpha_edge/jobs/run_warehouse_backfill.py:17:DEFAULT_REGION = "eu-west-1"
+./audit_env_paths/all_hits.txt:155:src/alpha_edge/jobs/run_warehouse_backfill.py:18:DEFAULT_ENGINE_ROOT = "engine/v1"
+./audit_env_paths/all_hits.txt:156:src/alpha_edge/jobs/run_warehouse_backfill.py:34:    return str(getattr(cfg, "bucket", DEFAULT_BUCKET))
+./audit_env_paths/all_hits.txt:157:src/alpha_edge/jobs/run_warehouse_backfill.py:38:    return str(getattr(cfg, "region", DEFAULT_REGION))
+./audit_env_paths/all_hits.txt:158:src/alpha_edge/jobs/run_warehouse_backfill.py:42:    return str(getattr(cfg, "engine_root", DEFAULT_ENGINE_ROOT)).strip("/")
+./audit_env_paths/all_hits.txt:201:src/alpha_edge/operations/backfill_trades_asset_id.py:16:DEFAULT_BUCKET = "alpha-edge-algo"
+./audit_env_paths/all_hits.txt:202:src/alpha_edge/operations/backfill_trades_asset_id.py:17:DEFAULT_REGION = "eu-west-1"
+./audit_env_paths/all_hits.txt:203:src/alpha_edge/operations/backfill_trades_asset_id.py:18:DEFAULT_ENGINE_ROOT = "engine/v1"
+./audit_env_paths/all_hits.txt:204:src/alpha_edge/operations/backfill_trades_asset_id.py:39:    return str(getattr(cfg, "bucket", DEFAULT_BUCKET))
+./audit_env_paths/all_hits.txt:205:src/alpha_edge/operations/backfill_trades_asset_id.py:43:    return str(getattr(cfg, "region", DEFAULT_REGION))
+./audit_env_paths/all_hits.txt:206:src/alpha_edge/operations/backfill_trades_asset_id.py:47:    return str(getattr(cfg, "engine_root", DEFAULT_ENGINE_ROOT)).strip("/")
+./audit_env_paths/all_hits.txt:207:src/alpha_edge/operations/build_trade_repair_plan.py:16:DEFAULT_BUCKET = "alpha-edge-algo"
+./audit_env_paths/all_hits.txt:208:src/alpha_edge/operations/build_trade_repair_plan.py:17:DEFAULT_REGION = "eu-west-1"
+./audit_env_paths/all_hits.txt:209:src/alpha_edge/operations/build_trade_repair_plan.py:18:DEFAULT_ENGINE_ROOT = "engine/v1"
+./audit_env_paths/all_hits.txt:210:src/alpha_edge/operations/build_trade_repair_plan.py:39:    return str(getattr(cfg, "bucket", DEFAULT_BUCKET))
+./audit_env_paths/all_hits.txt:211:src/alpha_edge/operations/build_trade_repair_plan.py:43:    return str(getattr(cfg, "region", DEFAULT_REGION))
+./audit_env_paths/all_hits.txt:212:src/alpha_edge/operations/build_trade_repair_plan.py:47:    return str(getattr(cfg, "engine_root", DEFAULT_ENGINE_ROOT)).strip("/")
+./audit_env_paths/all_hits.txt:220:src/alpha_edge/jobs/run_warehouse_backfill.py:61:    return boto3.client("s3", region_name=region)
+./audit_env_paths/all_hits.txt:231:src/alpha_edge/operations/backfill_trades_asset_id.py:58:    return boto3.client("s3", region_name=region)
+./audit_env_paths/all_hits.txt:232:src/alpha_edge/operations/build_trade_repair_plan.py:58:    return boto3.client("s3", region_name=region)
+./audit_env_paths/all_hits.txt:238:src/alpha_edge/operations/repair_all_trade_chains.py:49:    return boto3.client("s3", region_name=cfg.region)
+./audit_env_paths/all_hits.txt:239:src/alpha_edge/operations/repair_asset_history.py:23:    return boto3.client("s3", region_name=cfg.region)
+./audit_env_paths/all_hits.txt:268:src/alpha_edge/jobs/run_reports_backfill.py:18:from alpha_edge.core.runtime import RuntimeConfig, load_runtime_config, require_prod_confirmation
+./audit_env_paths/all_hits.txt:269:src/alpha_edge/jobs/run_reports_backfill.py:30:def cfg_bucket(cfg: RuntimeConfig) -> str:
+./audit_env_paths/all_hits.txt:270:src/alpha_edge/jobs/run_reports_backfill.py:34:def cfg_region(cfg: RuntimeConfig) -> str:
+./audit_env_paths/all_hits.txt:271:src/alpha_edge/jobs/run_reports_backfill.py:38:def cfg_engine_root(cfg: RuntimeConfig) -> str:
+./audit_env_paths/all_hits.txt:272:src/alpha_edge/jobs/run_reports_backfill.py:42:def cfg_env(cfg: RuntimeConfig) -> str:
+./audit_env_paths/all_hits.txt:273:src/alpha_edge/jobs/run_reports_backfill.py:201:    cfg = load_runtime_config(args.env)
+./audit_env_paths/all_hits.txt:274:src/alpha_edge/jobs/run_reports_backfill.py:209:        require_prod_confirmation(cfg, bool(args.confirm_prod_write))
+./audit_env_paths/all_hits.txt:289:src/alpha_edge/jobs/run_warehouse_backfill.py:13:from alpha_edge.core.runtime import RuntimeConfig, load_runtime_config, require_prod_confirmation
+./audit_env_paths/all_hits.txt:290:src/alpha_edge/jobs/run_warehouse_backfill.py:33:def cfg_bucket(cfg: RuntimeConfig) -> str:
+./audit_env_paths/all_hits.txt:291:src/alpha_edge/jobs/run_warehouse_backfill.py:37:def cfg_region(cfg: RuntimeConfig) -> str:
+./audit_env_paths/all_hits.txt:292:src/alpha_edge/jobs/run_warehouse_backfill.py:41:def cfg_engine_root(cfg: RuntimeConfig) -> str:
+./audit_env_paths/all_hits.txt:293:src/alpha_edge/jobs/run_warehouse_backfill.py:45:def cfg_env(cfg: RuntimeConfig) -> str:
+./audit_env_paths/all_hits.txt:294:src/alpha_edge/jobs/run_warehouse_backfill.py:323:    cfg = load_runtime_config(args.env)
+./audit_env_paths/all_hits.txt:295:src/alpha_edge/jobs/run_warehouse_backfill.py:332:        require_prod_confirmation(cfg, bool(args.confirm_prod_write))
+./audit_env_paths/all_hits.txt:337:src/alpha_edge/operations/backfill_trades_asset_id.py:13:from alpha_edge.core.runtime import RuntimeConfig, load_runtime_config, require_prod_confirmation
+./audit_env_paths/all_hits.txt:338:src/alpha_edge/operations/backfill_trades_asset_id.py:38:def cfg_bucket(cfg: RuntimeConfig) -> str:
+./audit_env_paths/all_hits.txt:339:src/alpha_edge/operations/backfill_trades_asset_id.py:42:def cfg_region(cfg: RuntimeConfig) -> str:
+./audit_env_paths/all_hits.txt:340:src/alpha_edge/operations/backfill_trades_asset_id.py:46:def cfg_engine_root(cfg: RuntimeConfig) -> str:
+./audit_env_paths/all_hits.txt:341:src/alpha_edge/operations/backfill_trades_asset_id.py:50:def cfg_env(cfg: RuntimeConfig) -> str:
+./audit_env_paths/all_hits.txt:342:src/alpha_edge/operations/backfill_trades_asset_id.py:61:def engine_key(cfg: RuntimeConfig, *parts: str) -> str:
+./audit_env_paths/all_hits.txt:343:src/alpha_edge/operations/backfill_trades_asset_id.py:65:def dt_key(cfg: RuntimeConfig, table: str, dt_str: str, filename: str) -> str:
+./audit_env_paths/all_hits.txt:344:src/alpha_edge/operations/backfill_trades_asset_id.py:265:    cfg: RuntimeConfig,
+./audit_env_paths/all_hits.txt:345:src/alpha_edge/operations/backfill_trades_asset_id.py:290:    cfg: RuntimeConfig,
+./audit_env_paths/all_hits.txt:346:src/alpha_edge/operations/backfill_trades_asset_id.py:401:    cfg: RuntimeConfig,
+./audit_env_paths/all_hits.txt:347:src/alpha_edge/operations/backfill_trades_asset_id.py:716:    cfg = load_runtime_config(args.env)
+./audit_env_paths/all_hits.txt:348:src/alpha_edge/operations/backfill_trades_asset_id.py:719:        require_prod_confirmation(cfg, bool(args.confirm_prod_write))
+./audit_env_paths/all_hits.txt:349:src/alpha_edge/operations/build_trade_repair_plan.py:13:from alpha_edge.core.runtime import RuntimeConfig, load_runtime_config, require_prod_confirmation
+./audit_env_paths/all_hits.txt:350:src/alpha_edge/operations/build_trade_repair_plan.py:38:def cfg_bucket(cfg: RuntimeConfig) -> str:
+./audit_env_paths/all_hits.txt:351:src/alpha_edge/operations/build_trade_repair_plan.py:42:def cfg_region(cfg: RuntimeConfig) -> str:
+./audit_env_paths/all_hits.txt:352:src/alpha_edge/operations/build_trade_repair_plan.py:46:def cfg_engine_root(cfg: RuntimeConfig) -> str:
+./audit_env_paths/all_hits.txt:353:src/alpha_edge/operations/build_trade_repair_plan.py:50:def cfg_env(cfg: RuntimeConfig) -> str:
+./audit_env_paths/all_hits.txt:354:src/alpha_edge/operations/build_trade_repair_plan.py:61:def engine_key(cfg: RuntimeConfig, *parts: str) -> str:
+./audit_env_paths/all_hits.txt:355:src/alpha_edge/operations/build_trade_repair_plan.py:65:def dt_key(cfg: RuntimeConfig, table: str, dt_str: str, filename: str) -> str:
+./audit_env_paths/all_hits.txt:356:src/alpha_edge/operations/build_trade_repair_plan.py:265:    cfg: RuntimeConfig,
+./audit_env_paths/all_hits.txt:357:src/alpha_edge/operations/build_trade_repair_plan.py:290:    cfg: RuntimeConfig,
+./audit_env_paths/all_hits.txt:358:src/alpha_edge/operations/build_trade_repair_plan.py:401:    cfg: RuntimeConfig,
+./audit_env_paths/all_hits.txt:359:src/alpha_edge/operations/build_trade_repair_plan.py:716:    cfg = load_runtime_config(args.env)
+./audit_env_paths/all_hits.txt:360:src/alpha_edge/operations/build_trade_repair_plan.py:719:        require_prod_confirmation(cfg, bool(args.confirm_prod_write))
+./audit_env_paths/all_hits.txt:448:src/alpha_edge/operations/repair_all_trade_chains.py:13:from alpha_edge.core.runtime import load_runtime_config, require_prod_confirmation
+./audit_env_paths/all_hits.txt:449:src/alpha_edge/operations/repair_all_trade_chains.py:14:from alpha_edge.core.schemas import RuntimeConfig, TradeRow, RepairRow
+./audit_env_paths/all_hits.txt:450:src/alpha_edge/operations/repair_all_trade_chains.py:48:def s3_client(cfg: RuntimeConfig):
+./audit_env_paths/all_hits.txt:451:src/alpha_edge/operations/repair_all_trade_chains.py:52:def engine_key(cfg: RuntimeConfig, *parts: str) -> str:
+./audit_env_paths/all_hits.txt:452:src/alpha_edge/operations/repair_all_trade_chains.py:264:def _load_all_trades(s3, *, cfg: RuntimeConfig) -> List[dict]:
+./audit_env_paths/all_hits.txt:453:src/alpha_edge/operations/repair_all_trade_chains.py:324:    cfg: RuntimeConfig,
+./audit_env_paths/all_hits.txt:454:src/alpha_edge/operations/repair_all_trade_chains.py:785:    cfg: RuntimeConfig,
+./audit_env_paths/all_hits.txt:455:src/alpha_edge/operations/repair_all_trade_chains.py:921:    cfg = load_runtime_config(args.env)
+./audit_env_paths/all_hits.txt:456:src/alpha_edge/operations/repair_all_trade_chains.py:924:        require_prod_confirmation(cfg, bool(args.confirm_prod_write))
+./audit_env_paths/all_hits.txt:457:src/alpha_edge/operations/repair_asset_history.py:12:from alpha_edge.core.runtime import load_runtime_config, require_prod_confirmation
+./audit_env_paths/all_hits.txt:458:src/alpha_edge/operations/repair_asset_history.py:13:from alpha_edge.core.schemas import RuntimeConfig
+./audit_env_paths/all_hits.txt:459:src/alpha_edge/operations/repair_asset_history.py:22:def s3_client(cfg: RuntimeConfig):
+./audit_env_paths/all_hits.txt:460:src/alpha_edge/operations/repair_asset_history.py:26:def engine_key(cfg: RuntimeConfig, *parts: str) -> str:
+./audit_env_paths/all_hits.txt:461:src/alpha_edge/operations/repair_asset_history.py:84:    cfg: RuntimeConfig,
+./audit_env_paths/all_hits.txt:462:src/alpha_edge/operations/repair_asset_history.py:109:    cfg: RuntimeConfig,
+./audit_env_paths/all_hits.txt:463:src/alpha_edge/operations/repair_asset_history.py:207:    cfg = load_runtime_config(args.env)
+./audit_env_paths/all_hits.txt:464:src/alpha_edge/operations/repair_asset_history.py:210:        require_prod_confirmation(cfg, bool(args.confirm_prod_write))
+./audit_env_paths/all_hits_after_dev_smoke.txt:20:src/alpha_edge/jobs/run_reports_backfill.py:22:DEFAULT_BUCKET = "alpha-edge-algo"
+./audit_env_paths/all_hits_after_dev_smoke.txt:24:src/alpha_edge/jobs/run_warehouse_backfill.py:16:DEFAULT_BUCKET = "alpha-edge-algo"
+./audit_env_paths/all_hits_after_dev_smoke.txt:32:Binary file src/alpha_edge/jobs/__pycache__/run_warehouse_backfill.cpython-310.pyc matches
+./audit_env_paths/all_hits_after_dev_smoke.txt:51:src/alpha_edge/operations/backfill_trades_asset_id.py:16:DEFAULT_BUCKET = "alpha-edge-algo"
+./audit_env_paths/all_hits_after_dev_smoke.txt:52:src/alpha_edge/operations/build_trade_repair_plan.py:16:DEFAULT_BUCKET = "alpha-edge-algo"
+./audit_env_paths/all_hits_after_dev_smoke.txt:53:Binary file src/alpha_edge/operations/__pycache__/repair_asset_history.cpython-310.pyc matches
+./audit_env_paths/all_hits_after_dev_smoke.txt:69:src/alpha_edge/jobs/run_reports_backfill.py:24:DEFAULT_ENGINE_ROOT = "engine/v1"
+./audit_env_paths/all_hits_after_dev_smoke.txt:73:src/alpha_edge/jobs/run_warehouse_backfill.py:18:DEFAULT_ENGINE_ROOT = "engine/v1"
+./audit_env_paths/all_hits_after_dev_smoke.txt:81:Binary file src/alpha_edge/jobs/__pycache__/run_warehouse_backfill.cpython-310.pyc matches
+./audit_env_paths/all_hits_after_dev_smoke.txt:90:src/alpha_edge/operations/backfill_trades_asset_id.py:18:DEFAULT_ENGINE_ROOT = "engine/v1"
+./audit_env_paths/all_hits_after_dev_smoke.txt:91:src/alpha_edge/operations/build_trade_repair_plan.py:18:DEFAULT_ENGINE_ROOT = "engine/v1"
+./audit_env_paths/all_hits_after_dev_smoke.txt:92:Binary file src/alpha_edge/operations/__pycache__/repair_asset_history.cpython-310.pyc matches
+./audit_env_paths/all_hits_after_dev_smoke.txt:131:src/alpha_edge/jobs/run_reports_backfill.py:24:DEFAULT_ENGINE_ROOT = "engine/v1"
+./audit_env_paths/all_hits_after_dev_smoke.txt:132:src/alpha_edge/jobs/run_reports_backfill.py:39:    return str(getattr(cfg, "engine_root", DEFAULT_ENGINE_ROOT)).strip("/")
+./audit_env_paths/all_hits_after_dev_smoke.txt:143:src/alpha_edge/jobs/run_warehouse_backfill.py:18:DEFAULT_ENGINE_ROOT = "engine/v1"
+./audit_env_paths/all_hits_after_dev_smoke.txt:144:src/alpha_edge/jobs/run_warehouse_backfill.py:42:    return str(getattr(cfg, "engine_root", DEFAULT_ENGINE_ROOT)).strip("/")
+./audit_env_paths/all_hits_after_dev_smoke.txt:152:Binary file src/alpha_edge/jobs/__pycache__/run_warehouse_backfill.cpython-310.pyc matches
+./audit_env_paths/all_hits_after_dev_smoke.txt:166:src/alpha_edge/operations/backfill_trades_asset_id.py:18:DEFAULT_ENGINE_ROOT = "engine/v1"
+./audit_env_paths/all_hits_after_dev_smoke.txt:167:src/alpha_edge/operations/backfill_trades_asset_id.py:47:    return str(getattr(cfg, "engine_root", DEFAULT_ENGINE_ROOT)).strip("/")
+./audit_env_paths/all_hits_after_dev_smoke.txt:168:src/alpha_edge/operations/build_trade_repair_plan.py:18:DEFAULT_ENGINE_ROOT = "engine/v1"
+./audit_env_paths/all_hits_after_dev_smoke.txt:169:src/alpha_edge/operations/build_trade_repair_plan.py:47:    return str(getattr(cfg, "engine_root", DEFAULT_ENGINE_ROOT)).strip("/")
+./audit_env_paths/all_hits_after_dev_smoke.txt:170:Binary file src/alpha_edge/operations/__pycache__/repair_asset_history.cpython-310.pyc matches
+./audit_env_paths/all_hits_after_dev_smoke_clean.txt:15:src/alpha_edge/jobs/run_reports_backfill.py:22:DEFAULT_BUCKET = "alpha-edge-algo"
+./audit_env_paths/all_hits_after_dev_smoke_clean.txt:19:src/alpha_edge/jobs/run_warehouse_backfill.py:16:DEFAULT_BUCKET = "alpha-edge-algo"
+./audit_env_paths/all_hits_after_dev_smoke_clean.txt:31:src/alpha_edge/operations/backfill_trades_asset_id.py:16:DEFAULT_BUCKET = "alpha-edge-algo"
+./audit_env_paths/all_hits_after_dev_smoke_clean.txt:32:src/alpha_edge/operations/build_trade_repair_plan.py:16:DEFAULT_BUCKET = "alpha-edge-algo"
+./audit_env_paths/all_hits_after_dev_smoke_clean.txt:49:src/alpha_edge/jobs/run_reports_backfill.py:24:DEFAULT_ENGINE_ROOT = "engine/v1"
+./audit_env_paths/all_hits_after_dev_smoke_clean.txt:53:src/alpha_edge/jobs/run_warehouse_backfill.py:18:DEFAULT_ENGINE_ROOT = "engine/v1"
+./audit_env_paths/all_hits_after_dev_smoke_clean.txt:60:src/alpha_edge/operations/backfill_trades_asset_id.py:18:DEFAULT_ENGINE_ROOT = "engine/v1"
+./audit_env_paths/all_hits_after_dev_smoke_clean.txt:61:src/alpha_edge/operations/build_trade_repair_plan.py:18:DEFAULT_ENGINE_ROOT = "engine/v1"
+./audit_env_paths/all_hits_after_dev_smoke_clean.txt:93:src/alpha_edge/jobs/run_reports_backfill.py:24:DEFAULT_ENGINE_ROOT = "engine/v1"
+./audit_env_paths/all_hits_after_dev_smoke_clean.txt:94:src/alpha_edge/jobs/run_reports_backfill.py:39:    return str(getattr(cfg, "engine_root", DEFAULT_ENGINE_ROOT)).strip("/")
+./audit_env_paths/all_hits_after_dev_smoke_clean.txt:105:src/alpha_edge/jobs/run_warehouse_backfill.py:18:DEFAULT_ENGINE_ROOT = "engine/v1"
+./audit_env_paths/all_hits_after_dev_smoke_clean.txt:106:src/alpha_edge/jobs/run_warehouse_backfill.py:42:    return str(getattr(cfg, "engine_root", DEFAULT_ENGINE_ROOT)).strip("/")
+./audit_env_paths/all_hits_after_dev_smoke_clean.txt:118:src/alpha_edge/operations/backfill_trades_asset_id.py:18:DEFAULT_ENGINE_ROOT = "engine/v1"
+./audit_env_paths/all_hits_after_dev_smoke_clean.txt:119:src/alpha_edge/operations/backfill_trades_asset_id.py:47:    return str(getattr(cfg, "engine_root", DEFAULT_ENGINE_ROOT)).strip("/")
+./audit_env_paths/all_hits_after_dev_smoke_clean.txt:120:src/alpha_edge/operations/build_trade_repair_plan.py:18:DEFAULT_ENGINE_ROOT = "engine/v1"
+./audit_env_paths/all_hits_after_dev_smoke_clean.txt:121:src/alpha_edge/operations/build_trade_repair_plan.py:47:    return str(getattr(cfg, "engine_root", DEFAULT_ENGINE_ROOT)).strip("/")
+./docs/dev_pipeline_smoke_test.md:143:            s3.copy_object(
+./docs/dev_pipeline_smoke_test.md:158:For a quick smoke test, copy the relevant market partitions from prod to dev. The brute-force but safe small test is to copy only a few asset/year partitions used by those trades. First list copied dev trades:
+./docs/dev_pipeline_smoke_test.md:219:        s3.copy_object(
+./docs/minimal_dev_pipeline.md:3:Use one known date and one tiny trade set. Do not start with a huge backfill.
+./examples/record_trade_examples.sh:69:poetry run python src/alpha_edge/operations/backfill_trades_asset_id.py \
+./examples/record_trade_examples.sh:76: poetry run python src/alpha_edge/jobs/run_warehouse_backfill.py \
+./examples/record_trade_examples.sh:87:   --force-ledger \
+./examples/record_trade_examples.sh:88:   --force-warehouse
+./poetry.lock:4992:repair = ["scipy (>=1.6.3)"]
+./src/alpha_edge/cli/commands/pipeline_cmd.py:101:    cache_force: bool = typer.Option(False, "--cache-force", help="Force rebuild returns cache."),
+./src/alpha_edge/cli/commands/pipeline_cmd.py:132:        *_flag("--force", cache_force),
+./src/alpha_edge/cli/commands/pipeline_cmd.py:291:                "--force",
+Binary file ./src/alpha_edge/cli/commands/__pycache__/pipeline_cmd.cpython-310.pyc matches
+Binary file ./src/alpha_edge/cli/commands/__pycache__/pipeline_cmd.cpython-312.pyc matches
+./src/alpha_edge/core/data_loader.py:112:    s3.put_object(
+./src/alpha_edge/core/data_loader.py:122:    df.to_parquet(buf, index=index)
+./src/alpha_edge/core/data_loader.py:124:    s3.put_object(
+./src/alpha_edge/core/data_loader.py:181:def s3_write_json_event(
+./src/alpha_edge/core/data_loader.py:209:def s3_write_parquet_partition(
+./src/alpha_edge/core/market_store.py:49:        self._client().put_object(Bucket=self.bucket, Key=key, Body=data, ContentType=content_type)
+./src/alpha_edge/core/market_store.py:197:            out.to_parquet(bio, index=False)
+./src/alpha_edge/core/market_store.py:214:        df.to_parquet(bio, index=False)
+./src/alpha_edge/core/market_store.py:303:        df.to_parquet(bio, index=False)
+./src/alpha_edge/core/market_store.py:310:        df.to_parquet(bio, index=False)
+./src/alpha_edge/core/market_store.py:363:        triage_report.to_parquet(bio, index=False)
+./src/alpha_edge/core/market_store.py:426:            out.to_parquet(bio, index=False)
+./src/alpha_edge/core/schemas.py:366:    repair_action: str
+./src/alpha_edge/core/schemas.py:367:    repair_reason: str
+Binary file ./src/alpha_edge/core/__pycache__/data_loader.cpython-310.pyc matches
+Binary file ./src/alpha_edge/core/__pycache__/data_loader.cpython-312.pyc matches
+Binary file ./src/alpha_edge/core/__pycache__/market_store.cpython-310.pyc matches
+Binary file ./src/alpha_edge/core/__pycache__/market_store.cpython-312.pyc matches
+Binary file ./src/alpha_edge/core/__pycache__/schemas.cpython-310.pyc matches
+./src/alpha_edge/jobs/run_daily_report.py:55:    s3_write_json_event,
+./src/alpha_edge/jobs/run_daily_report.py:56:    s3_write_parquet_partition,
+./src/alpha_edge/jobs/run_daily_report.py:1228:            s3_write_parquet_partition(
+./src/alpha_edge/jobs/run_daily_report.py:1239:            s3_write_json_event(
+./src/alpha_edge/jobs/run_daily_report.py:1416:        s3_write_json_event(
+./src/alpha_edge/jobs/run_daily_report.py:1519:            s3_write_parquet_partition(
+./src/alpha_edge/jobs/run_daily_report.py:1529:            s3_write_json_event(
+./src/alpha_edge/jobs/run_daily_report.py:1550:                s3_write_parquet_partition(
+./src/alpha_edge/jobs/run_daily_report.py:1580:        s3_write_json_event(
+./src/alpha_edge/jobs/run_daily_report.py:1601:        s3_write_json_event(
+./src/alpha_edge/jobs/run_daily_report.py:1644:        s3_write_parquet_partition(
+./src/alpha_edge/jobs/run_daily_report.py:1654:        s3_write_json_event(
+./src/alpha_edge/jobs/run_daily_report.py:1665:        s3_write_json_event(
+./src/alpha_edge/jobs/run_daily_report.py:1676:        s3_write_json_event(
+./src/alpha_edge/jobs/run_daily_report.py:1687:        s3_write_json_event(
+./src/alpha_edge/jobs/run_daily_report.py:1698:        s3_write_json_event(
+./src/alpha_edge/jobs/run_portfolio_search.py:19:    s3_write_json_event,
+./src/alpha_edge/jobs/run_portfolio_search.py:20:    s3_write_parquet_partition,
+./src/alpha_edge/jobs/run_portfolio_search.py:715:        s3_write_json_event(
+./src/alpha_edge/jobs/run_portfolio_search.py:783:        s3_write_parquet_partition(
+./src/alpha_edge/jobs/run_portfolio_search.py:799:        s3_write_parquet_partition(
+./src/alpha_edge/jobs/run_quarantine_analysis.py:18:    s3_write_json_event,
+./src/alpha_edge/jobs/run_quarantine_analysis.py:108:    s3.put_object(
+./src/alpha_edge/jobs/run_quarantine_analysis.py:117:    s3.put_object(
+./src/alpha_edge/jobs/run_quarantine_analysis.py:511:            s3_write_json_event(
+./src/alpha_edge/jobs/run_quarantine_analysis.py:574:            s3_write_json_event(
+./src/alpha_edge/jobs/run_quarantine_analysis.py:733:                s3_write_json_event(
+./src/alpha_edge/jobs/run_quarantine_analysis.py:931:            s3_write_json_event(
+./src/alpha_edge/jobs/run_quarantine_analysis.py:975:        s3_write_json_event(
+./src/alpha_edge/jobs/run_reports_backfill.py:1:# run_reports_backfill.py
+./src/alpha_edge/jobs/run_reports_backfill.py:289:                f"as_of={dt_str}, backtest_run_id='backfill', equity_override={eq:.2f})"
+./src/alpha_edge/jobs/run_reports_backfill.py:298:                backtest_run_id="backfill",
+./src/alpha_edge/jobs/run_score_weights_tuning.py:19:    s3_write_json_event,
+./src/alpha_edge/jobs/run_score_weights_tuning.py:360:        s3_write_json_event(
+./src/alpha_edge/jobs/run_score_weights_tuning.py:371:        s3_write_json_event(
+./src/alpha_edge/jobs/run_universe_update.py:219:def backfill_from_scr(universe: pd.DataFrame, col: str) -> pd.DataFrame:
+./src/alpha_edge/jobs/run_universe_update.py:861:                universe = backfill_from_scr(universe, col)
+./src/alpha_edge/jobs/run_update_score_caps.py:11:from alpha_edge.core.data_loader import s3_init, s3_load_latest_json, s3_write_json_event
+./src/alpha_edge/jobs/run_update_score_caps.py:239:    s3_write_json_event(
+./src/alpha_edge/jobs/run_warehouse_backfill.py:220:    force_ledger: bool,
+./src/alpha_edge/jobs/run_warehouse_backfill.py:221:    force_warehouse: bool,
+./src/alpha_edge/jobs/run_warehouse_backfill.py:229:    need_ledger = (not ledger_exists) or force_ledger
+./src/alpha_edge/jobs/run_warehouse_backfill.py:236:    need_wh_trades = (not s3_key_exists(s3, bucket=bucket, key=wh_trades_key)) or force_warehouse
+./src/alpha_edge/jobs/run_warehouse_backfill.py:237:    need_wh_positions = (not s3_key_exists(s3, bucket=bucket, key=wh_positions_key)) or force_warehouse
+./src/alpha_edge/jobs/run_warehouse_backfill.py:238:    need_wh_pnl = (not s3_key_exists(s3, bucket=bucket, key=wh_pnl_key)) or force_warehouse
+./src/alpha_edge/jobs/run_warehouse_backfill.py:239:    need_wh_report = (not s3_key_exists(s3, bucket=bucket, key=wh_report_key)) or force_warehouse
+./src/alpha_edge/jobs/run_warehouse_backfill.py:282:    ap.add_argument("--force-ledger", action="store_true", help="Rebuild ledger even if it exists for dt.")
+./src/alpha_edge/jobs/run_warehouse_backfill.py:283:    ap.add_argument("--force-warehouse", action="store_true", help="Rewrite warehouse partitions even if they exist.")
+./src/alpha_edge/jobs/run_warehouse_backfill.py:428:            force_ledger=bool(args.force_ledger),
+./src/alpha_edge/jobs/run_warehouse_backfill.py:429:            force_warehouse=bool(args.force_warehouse),
+Binary file ./src/alpha_edge/jobs/__pycache__/run_daily_report.cpython-310.pyc matches
+Binary file ./src/alpha_edge/jobs/__pycache__/run_daily_report.cpython-312.pyc matches
+Binary file ./src/alpha_edge/jobs/__pycache__/run_portfolio_search.cpython-310.pyc matches
+Binary file ./src/alpha_edge/jobs/__pycache__/run_portfolio_search.cpython-312.pyc matches
+Binary file ./src/alpha_edge/jobs/__pycache__/run_quarantine_analysis.cpython-310.pyc matches
+Binary file ./src/alpha_edge/jobs/__pycache__/run_quarantine_analysis.cpython-312.pyc matches
+Binary file ./src/alpha_edge/jobs/__pycache__/run_score_weights_tuning.cpython-310.pyc matches
+Binary file ./src/alpha_edge/jobs/__pycache__/run_universe_update.cpython-310.pyc matches
+Binary file ./src/alpha_edge/jobs/__pycache__/run_universe_update.cpython-312.pyc matches
+Binary file ./src/alpha_edge/jobs/__pycache__/run_warehouse_backfill.cpython-310.pyc matches
+./src/alpha_edge/maintenance/cleanup_partitions.py:89:        resp = s3.delete_objects(
+./src/alpha_edge/maintenance/dedupe_ohlcv_partitions_keep_one.py:65:    # S3 delete_objects supports up to 1000 keys per request
+./src/alpha_edge/maintenance/dedupe_ohlcv_partitions_keep_one.py:70:        s3.delete_objects(Bucket=bucket, Delete={"Objects": [{"Key": k} for k in chunk]})
+./src/alpha_edge/maintenance/migrate_local_history_to_s3.py:82:    s3.put_object(
+./src/alpha_edge/maintenance/migrate_local_history_to_s3.py:99:def _write_latest_from_dt(s3, *, table: str, dt_str: str, dt_folder: Path) -> None:
+./src/alpha_edge/maintenance/migrate_local_history_to_s3.py:209:            _write_latest_from_dt(s3, table=table, dt_str=latest_dt, dt_folder=latest_folder)
+./src/alpha_edge/maintenance/reset_ticker_history.py:63:                s3.delete_objects(
+./src/alpha_edge/market/asset_data_migration.py:21:    "data/universe/ingest_force_refresh.csv", index=False
+./src/alpha_edge/market/asset_data_migration.py:24:print("Wrote force refresh list:", len(changed))
+./src/alpha_edge/market/build_returns_wide_cache.py:37:    force: bool = False
+./src/alpha_edge/market/build_returns_wide_cache.py:160:    if not cfg.force:
+./src/alpha_edge/market/build_returns_wide_cache.py:323:    wide.to_parquet(bio, index=True)
+./src/alpha_edge/market/build_returns_wide_cache.py:391:    ap.add_argument("--force", action="store_true")
+./src/alpha_edge/market/build_returns_wide_cache.py:426:        force=bool(args.force),
+./src/alpha_edge/market/build_returns_wide_cache.py:449:    print(f"force:                {cfg.force}")
+./src/alpha_edge/market/compute_market_regime.py:13:from alpha_edge.core.data_loader import s3_init, s3_write_json_event
+./src/alpha_edge/market/compute_market_regime.py:443:        s3_write_json_event(
+./src/alpha_edge/market/download_market_data_from_s3.py:34:    ohlcv.to_parquet(ohlcv_path, index=False)
+./src/alpha_edge/market/download_market_data_from_s3.py:35:    rets.to_parquet(rets_path, index=False)
+./src/alpha_edge/market/download_market_data_from_s3.py:43:        wide.to_parquet(wide_path)
+./src/alpha_edge/market/ingest_market_data.py:53:#   It does NOT yet add corporate actions or split-aware repair.
+./src/alpha_edge/market/ingest_market_data.py:191:        df.to_parquet(tmp, engine="pyarrow", index=False)
+./src/alpha_edge/market/ingest_market_data.py:230:        out.to_parquet(tmp, engine="pyarrow", index=False)
+./src/alpha_edge/market/ingest_market_data.py:805:    force_refresh_csv: str | Path | None = paths.universe_dir() / "ingest_force_refresh.csv",
+./src/alpha_edge/market/ingest_market_data.py:896:    force_refresh: set[str] = set()
+./src/alpha_edge/market/ingest_market_data.py:897:    if force_refresh_csv:
+./src/alpha_edge/market/ingest_market_data.py:899:            fr = pd.read_csv(force_refresh_csv)
+./src/alpha_edge/market/ingest_market_data.py:903:                force_refresh = set(fr[col].astype(str).str.strip().tolist())
+./src/alpha_edge/market/ingest_market_data.py:909:                force_refresh = set(
+./src/alpha_edge/market/ingest_market_data.py:913:            force_refresh = set()
+./src/alpha_edge/market/ingest_market_data.py:962:    def _flush_failures_live(force: bool = False) -> None:
+./src/alpha_edge/market/ingest_market_data.py:968:        if (not force) and (done % int(flush_failures_every) != 0) and (
+./src/alpha_edge/market/ingest_market_data.py:1044:        is_force = asset_id in force_refresh
+./src/alpha_edge/market/ingest_market_data.py:1045:        if is_force:
+./src/alpha_edge/market/ingest_market_data.py:1224:            if (not is_force) and (asset_id in prev_adjusted_px_map) and (not px.empty):
+./src/alpha_edge/market/ingest_market_data.py:1380:                _flush_failures_live(force=False)
+./src/alpha_edge/market/ingest_market_data.py:1470:    _flush_failures_live(force=True)
+./src/alpha_edge/market/ingest_market_data.py:1540:    ap.add_argument("--force-refresh-csv", default=str(paths.universe_dir() / "ingest_force_refresh.csv"))
+./src/alpha_edge/market/ingest_market_data.py:1568:        force_refresh_csv=args.force_refresh_csv,
+Binary file ./src/alpha_edge/market/__pycache__/build_returns_wide_cache.cpython-310.pyc matches
+Binary file ./src/alpha_edge/market/__pycache__/build_returns_wide_cache.cpython-312.pyc matches
+Binary file ./src/alpha_edge/market/__pycache__/compute_market_regime.cpython-310.pyc matches
+Binary file ./src/alpha_edge/market/__pycache__/compute_market_regime.cpython-312.pyc matches
+Binary file ./src/alpha_edge/market/__pycache__/ingest_market_data.cpython-310.pyc matches
+Binary file ./src/alpha_edge/market/__pycache__/ingest_market_data.cpython-312.pyc matches
+./src/alpha_edge/operations/apply_portfolio_choice.py:57:    s3.put_object(
+./src/alpha_edge/operations/backfill_trades_asset_id.py:209:def _normalize_repaired_quantity(*, raw_qty: float, policy: str) -> tuple[float, bool, str]:
+./src/alpha_edge/operations/backfill_trades_asset_id.py:254:    repair_action: str
+./src/alpha_edge/operations/backfill_trades_asset_id.py:255:    repair_reason: str
+./src/alpha_edge/operations/backfill_trades_asset_id.py:390:        repair_action="MANUAL_REVIEW",
+./src/alpha_edge/operations/backfill_trades_asset_id.py:391:        repair_reason=reason,
+./src/alpha_edge/operations/backfill_trades_asset_id.py:397:# Core repair-plan / execution logic
+./src/alpha_edge/operations/backfill_trades_asset_id.py:399:def build_repair_plan(
+./src/alpha_edge/operations/backfill_trades_asset_id.py:419:        print("[OK] Empty audit file. No repair plan generated.")
+./src/alpha_edge/operations/backfill_trades_asset_id.py:510:        repair_reason_parts: List[str] = []
+./src/alpha_edge/operations/backfill_trades_asset_id.py:515:            normalized_qty, auto_ok, qty_detail = _normalize_repaired_quantity(
+./src/alpha_edge/operations/backfill_trades_asset_id.py:551:                repair_reason_parts.append("quantity := value / price")
+./src/alpha_edge/operations/backfill_trades_asset_id.py:557:                repair_reason_parts.append("value := quantity * price")
+./src/alpha_edge/operations/backfill_trades_asset_id.py:589:            # Intentionally disabled: reported_pnl should come from broker/import logic, not this quantity repair.
+./src/alpha_edge/operations/backfill_trades_asset_id.py:629:            repair_action="AUTO_PATCH" if changed else "NO_CHANGE",
+./src/alpha_edge/operations/backfill_trades_asset_id.py:630:            repair_reason="; ".join(repair_reason_parts) if repair_reason_parts else "no effective patch required",
+./src/alpha_edge/operations/backfill_trades_asset_id.py:655:                row.repair_action = "EXEC_FAILED"
+./src/alpha_edge/operations/backfill_trades_asset_id.py:656:                row.repair_reason = f"{row.repair_reason}; execution failed rc={e.returncode}"
+./src/alpha_edge/operations/backfill_trades_asset_id.py:691:        description="Build deterministic repair plan for broken trade quantities and optionally execute edits."
+./src/alpha_edge/operations/backfill_trades_asset_id.py:695:    ap.add_argument("--out-auto-csv", default="./data/trade_repair_plan_auto.csv")
+./src/alpha_edge/operations/backfill_trades_asset_id.py:696:    ap.add_argument("--out-manual-csv", default="./data/trade_repair_plan_manual.csv")
+./src/alpha_edge/operations/backfill_trades_asset_id.py:723:    build_repair_plan(
+./src/alpha_edge/operations/build_trade_repair_plan.py:209:def _normalize_repaired_quantity(*, raw_qty: float, policy: str) -> tuple[float, bool, str]:
+./src/alpha_edge/operations/build_trade_repair_plan.py:254:    repair_action: str
+./src/alpha_edge/operations/build_trade_repair_plan.py:255:    repair_reason: str
+./src/alpha_edge/operations/build_trade_repair_plan.py:390:        repair_action="MANUAL_REVIEW",
+./src/alpha_edge/operations/build_trade_repair_plan.py:391:        repair_reason=reason,
+./src/alpha_edge/operations/build_trade_repair_plan.py:397:# Core repair-plan / execution logic
+./src/alpha_edge/operations/build_trade_repair_plan.py:399:def build_repair_plan(
+./src/alpha_edge/operations/build_trade_repair_plan.py:419:        print("[OK] Empty audit file. No repair plan generated.")
+./src/alpha_edge/operations/build_trade_repair_plan.py:510:        repair_reason_parts: List[str] = []
+./src/alpha_edge/operations/build_trade_repair_plan.py:515:            normalized_qty, auto_ok, qty_detail = _normalize_repaired_quantity(
+./src/alpha_edge/operations/build_trade_repair_plan.py:551:                repair_reason_parts.append("quantity := value / price")
+./src/alpha_edge/operations/build_trade_repair_plan.py:557:                repair_reason_parts.append("value := quantity * price")
+./src/alpha_edge/operations/build_trade_repair_plan.py:589:            # Intentionally disabled: reported_pnl should come from broker/import logic, not this quantity repair.
+./src/alpha_edge/operations/build_trade_repair_plan.py:629:            repair_action="AUTO_PATCH" if changed else "NO_CHANGE",
+./src/alpha_edge/operations/build_trade_repair_plan.py:630:            repair_reason="; ".join(repair_reason_parts) if repair_reason_parts else "no effective patch required",
+./src/alpha_edge/operations/build_trade_repair_plan.py:655:                row.repair_action = "EXEC_FAILED"
+./src/alpha_edge/operations/build_trade_repair_plan.py:656:                row.repair_reason = f"{row.repair_reason}; execution failed rc={e.returncode}"
+./src/alpha_edge/operations/build_trade_repair_plan.py:691:        description="Build deterministic repair plan for broken trade quantities and optionally execute edits."
+./src/alpha_edge/operations/build_trade_repair_plan.py:695:    ap.add_argument("--out-auto-csv", default="./data/trade_repair_plan_auto.csv")
+./src/alpha_edge/operations/build_trade_repair_plan.py:696:    ap.add_argument("--out-manual-csv", default="./data/trade_repair_plan_manual.csv")
+./src/alpha_edge/operations/build_trade_repair_plan.py:723:    build_repair_plan(
+./src/alpha_edge/operations/edit_trades_asset_id.py:61:    s3.put_object(
+./src/alpha_edge/operations/edit_trades_asset_id.py:69:def s3_copy_object(s3, *, bucket: str, src_key: str, dst_key: str) -> None:
+./src/alpha_edge/operations/edit_trades_asset_id.py:70:    s3.copy_object(
+./src/alpha_edge/operations/edit_trades_asset_id.py:260:                s3_copy_object(s3, bucket=cfg.bucket, src_key=key, dst_key=backup_key)
+./src/alpha_edge/operations/rebuild_ledger.py:175:    s3.put_object(
+./src/alpha_edge/operations/rebuild_ledger.py:728:            "Re-record trades with record_trade.py after asset_id support, or backfill asset_id."
+./src/alpha_edge/operations/record_cashflow.py:32:    s3.put_object(
+./src/alpha_edge/operations/record_dividend.py:45:    s3.put_object(
+./src/alpha_edge/operations/record_dividend.py:76:    s3.copy_object(
+./src/alpha_edge/operations/record_dividend.py:84:    s3.delete_object(Bucket=bucket, Key=key)
+./src/alpha_edge/operations/record_trade.py:34:    s3.put_object(
+./src/alpha_edge/operations/record_trade.py:56:    s3.copy_object(
+./src/alpha_edge/operations/record_trade.py:66:    s3.delete_object(Bucket=bucket, Key=key)
+./src/alpha_edge/operations/repair_all_trade_chains.py:235:def _normalize_repaired_quantity(
+./src/alpha_edge/operations/repair_all_trade_chains.py:411:        repair_action="MANUAL_REVIEW",
+./src/alpha_edge/operations/repair_all_trade_chains.py:412:        repair_reason=reason,
+./src/alpha_edge/operations/repair_all_trade_chains.py:419:# Generic chain-aware repair
+./src/alpha_edge/operations/repair_all_trade_chains.py:492:                norm_qty, ok, qty_detail = _normalize_repaired_quantity(
+./src/alpha_edge/operations/repair_all_trade_chains.py:530:            norm_qty, ok, qty_detail = _normalize_repaired_quantity(raw_qty=raw_qty, policy=quantity_policy)
+./src/alpha_edge/operations/repair_all_trade_chains.py:583:            norm_qty, ok, qty_detail = _normalize_repaired_quantity(raw_qty=raw_qty, policy=quantity_policy)
+./src/alpha_edge/operations/repair_all_trade_chains.py:625:                norm_qty, ok, qty_detail = _normalize_repaired_quantity(raw_qty=raw_qty, policy=quantity_policy)
+./src/alpha_edge/operations/repair_all_trade_chains.py:660:            norm_qty, ok, qty_detail = _normalize_repaired_quantity(raw_qty=raw_qty, policy=quantity_policy)
+./src/alpha_edge/operations/repair_all_trade_chains.py:713:            norm_qty, ok, qty_detail = _normalize_repaired_quantity(raw_qty=raw_qty, policy=quantity_policy)
+./src/alpha_edge/operations/repair_all_trade_chains.py:735:                _manual_row(t, "Unsupported chain semantic in automatic repair", quantity_policy=quantity_policy)
+./src/alpha_edge/operations/repair_all_trade_chains.py:770:                repair_action="AUTO_PATCH" if changed else "NO_CHANGE",
+./src/alpha_edge/operations/repair_all_trade_chains.py:771:                repair_reason="; ".join(reason_parts) if reason_parts else "no effective patch required",
+./src/alpha_edge/operations/repair_all_trade_chains.py:783:def repair_all_trade_chains(
+./src/alpha_edge/operations/repair_all_trade_chains.py:830:            if row.repair_action != "NO_CHANGE":
+./src/alpha_edge/operations/repair_all_trade_chains.py:850:                        row.repair_action = "EXEC_FAILED"
+./src/alpha_edge/operations/repair_all_trade_chains.py:851:                        row.repair_reason = f"{row.repair_reason}; execution failed rc={e.returncode}"
+./src/alpha_edge/operations/repair_all_trade_chains.py:890:    ap = argparse.ArgumentParser(description="Chain-aware quantity repair for all trade types.")
+./src/alpha_edge/operations/repair_all_trade_chains.py:895:    ap.add_argument("--out-auto-csv", default="./data/repair_all_trade_chains_auto.csv")
+./src/alpha_edge/operations/repair_all_trade_chains.py:896:    ap.add_argument("--out-manual-csv", default="./data/repair_all_trade_chains_manual.csv")
+./src/alpha_edge/operations/repair_all_trade_chains.py:934:    repair_all_trade_chains(
+./src/alpha_edge/operations/repair_asset_history.py:181:        help="Pass --write-checkpoints to rebuild_ledger during repair.",
+./src/alpha_edge/operations/repair_asset_history.py:223:        repair_start = parse_date(args.start)
+./src/alpha_edge/operations/repair_asset_history.py:225:        repair_start = discover_first_trade_for_asset(
+./src/alpha_edge/operations/repair_asset_history.py:232:    repair_end = parse_date(args.end) if args.end else dt.date.today()
+./src/alpha_edge/operations/repair_asset_history.py:243:    print(f"repair_range:       {fmt_date(repair_start)} -> {fmt_date(repair_end)}")
+./src/alpha_edge/operations/repair_asset_history.py:252:    for d in daterange(repair_start, repair_end):
+./src/alpha_edge/operations/repair_asset_history.py:336:    print("repair completed.")
+Binary file ./src/alpha_edge/operations/__pycache__/rebuild_ledger.cpython-310.pyc matches
+Binary file ./src/alpha_edge/operations/__pycache__/repair_asset_history.cpython-310.pyc matches
+./src/alpha_edge/portfolio/execution_engine.py:39:    Nearest-step quantization (can overshoot per-ticker), but we still enforce gross <= notional.
+./src/alpha_edge/portfolio/execution_engine.py:177:    # --- enforce gross cap (rare overshoot due to crypto rounding) ---
+./src/alpha_edge/portfolio/portfolio_health.py:137:    # Always enforce excess-return sanity (available via fallback)
+./src/alpha_edge/portfolio/portfolio_health.py:141:    # If we have CAPM alpha / IR, enforce them too
+./src/alpha_edge/portfolio/portfolio_search.py:72:    Enforce:
+./src/alpha_edge/portfolio/rebalance_engine.py:112:      - Enforces a minimum cool-down in days
+./src/alpha_edge/portfolio/reinvest_engine.py:351:    # enforce improvement
+Binary file ./src/alpha_edge/portfolio/__pycache__/execution_engine.cpython-310.pyc matches
+Binary file ./src/alpha_edge/portfolio/__pycache__/execution_engine.cpython-312.pyc matches
+Binary file ./src/alpha_edge/portfolio/__pycache__/portfolio_search.cpython-310.pyc matches
+Binary file ./src/alpha_edge/portfolio/__pycache__/portfolio_search.cpython-312.pyc matches
+Binary file ./src/alpha_edge/portfolio/__pycache__/rebalance_engine.cpython-310.pyc matches
+Binary file ./src/alpha_edge/portfolio/__pycache__/rebalance_engine.cpython-312.pyc matches
+./src/alpha_edge/scripts/dev_seed_fixture.py:52:    s3.put_object(
+./src/alpha_edge/scripts/dev_seed_fixture.py:468:    if not args.write_s3_fixture:
+./src/alpha_edge/scripts/smoke_test_env.py:25:    s3.put_object(
+./src/alpha_edge/scripts/smoke_test_env.py:39:    s3.delete_object(Bucket=bucket, Key=key)
+Binary file ./src/alpha_edge/scripts/__pycache__/smoke_test_env.cpython-310.pyc matches
+./src/alpha_edge/warehouse/build_report_stats.py:48:    ap.add_argument("--force", action="store_true")
+./src/alpha_edge/warehouse/build_report_stats.py:83:    print(f"force:      {bool(args.force)}")
+./src/alpha_edge/warehouse/build_report_stats.py:87:    if (not args.force) and s3_key_exists(s3, bucket=cfg.bucket, key=out_key):
+./src/alpha_edge/warehouse/build_warehouse.py:21:    enforce_schema,
+./src/alpha_edge/warehouse/build_warehouse.py:66:    s3.put_object(
+./src/alpha_edge/warehouse/build_warehouse.py:167:    res = enforce_schema(out, DIM_ASSETS_SCHEMA)
+./src/alpha_edge/warehouse/build_warehouse.py:227:    res = enforce_schema(df, FCT_TRADES_SCHEMA)
+./src/alpha_edge/warehouse/build_warehouse.py:308:    res = enforce_schema(df, FCT_POSITIONS_DAILY_SCHEMA)
+./src/alpha_edge/warehouse/build_warehouse.py:351:    res = enforce_schema(df, FCT_ACCOUNT_PNL_DAILY_SCHEMA)
+./src/alpha_edge/warehouse/build_warehouse.py:411:    res = enforce_schema(df, FCT_DAILY_REPORT_STATS_SCHEMA)
+./src/alpha_edge/warehouse/schemas.py:130:class EnforceResult:
+./src/alpha_edge/warehouse/schemas.py:136:def enforce_schema(df: pd.DataFrame, schema: pa.Schema) -> EnforceResult:
+./src/alpha_edge/warehouse/schemas.py:178:    return EnforceResult(table=table, missing_cols_added=missing, extra_cols_dropped=extra)
+Binary file ./src/alpha_edge/warehouse/__pycache__/build_warehouse.cpython-310.pyc matches
+Binary file ./src/alpha_edge/warehouse/__pycache__/schemas.cpython-310.pyc matches

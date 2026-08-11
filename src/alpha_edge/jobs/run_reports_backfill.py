@@ -2,24 +2,47 @@
 from __future__ import annotations
 
 import argparse
+import math
 import subprocess
-from typing import Optional, List
+import sys
+from dataclasses import dataclass
+from typing import List, Optional, Tuple
 
 import pandas as pd
-import math
-from dataclasses import dataclass
-from typing import Tuple, List
 
 from alpha_edge.core.data_loader import (
     s3_init,
     s3_list_keys,
     s3_load_latest_json_asof,
 )
-from alpha_edge.jobs.run_daily_report import run_daily_cycle_asof  # adjust if your path differs
+from alpha_edge.core.runtime import RuntimeConfig, load_runtime_config, require_prod_confirmation
+from alpha_edge.core.audit import build_audit_event, write_audit_event
+from alpha_edge.core.run_logging import capture_script_run
+from alpha_edge.jobs.run_daily_report import run_daily_cycle_asof
 
-BUCKET = "alpha-edge-algo"
-REGION = "eu-west-1"
-ENGINE_ROOT = "engine/v1"
+
+DEFAULT_BUCKET = "alpha-edge-algo"
+DEFAULT_REGION = "eu-west-1"
+DEFAULT_ENGINE_ROOT = "engine/v1"
+
+
+# ----------------------------
+# Runtime helpers
+# ----------------------------
+def cfg_bucket(cfg: RuntimeConfig) -> str:
+    return str(getattr(cfg, "bucket", DEFAULT_BUCKET))
+
+
+def cfg_region(cfg: RuntimeConfig) -> str:
+    return str(getattr(cfg, "region", DEFAULT_REGION))
+
+
+def cfg_engine_root(cfg: RuntimeConfig) -> str:
+    return str(getattr(cfg, "engine_root", DEFAULT_ENGINE_ROOT)).strip("/")
+
+
+def cfg_env(cfg: RuntimeConfig) -> str:
+    return str(getattr(cfg, "env", "dev"))
 
 
 # ----------------------------
@@ -27,10 +50,6 @@ ENGINE_ROOT = "engine/v1"
 # ----------------------------
 def parse_date(s: str) -> str:
     return pd.Timestamp(s).strftime("%Y-%m-%d")
-
-
-def engine_prefix(*parts: str) -> str:
-    return "/".join([ENGINE_ROOT.strip("/")] + [p.strip("/") for p in parts])
 
 
 def key_exists(s3, *, bucket: str, key: str) -> bool:
@@ -42,80 +61,67 @@ def key_exists(s3, *, bucket: str, key: str) -> bool:
 
 
 def list_trade_dts(s3, *, bucket: str, engine_root: str) -> List[str]:
-    """
-    Reads dt=YYYY-MM-DD from trade files under:
-      <engine_root>/trades/dt=.../trade_*.json
-    """
     prefix = f"{engine_root.strip('/')}/trades/"
     keys = s3_list_keys(s3, bucket=bucket, prefix=prefix)
-    dts = set()
+    dts: set[str] = set()
 
     for k in keys:
         parts = str(k).split("/")
         for p in parts:
-            # cheap parse "dt=YYYY-MM-DD"
             if p.startswith("dt=") and len(p) == len("dt=YYYY-MM-DD"):
                 dts.add(p[len("dt="):])
                 break
 
     return sorted(dts)
 
+
 @dataclass(frozen=True)
 class GoalLadderCfg:
-    # equity multipliers for the 3 goals
     mults: Tuple[float, float, float] = (1.20, 1.40, 1.60)
-
-    # rounding step to make goals "pretty"
-    round_to: float = 50.0  # set to 1.0 to disable
-
-    # hard floors to prevent tiny-goal weirdness
+    round_to: float = 50.0
     min_main_goal_usd: float = 500.0
-    min_goal_gap_usd: float = 100.0  # ensure goal2-goal1 and goal3-goal2 not too small
+    min_goal_gap_usd: float = 100.0
+
 
 def _round_to_step(x: float, step: float) -> float:
     if step is None or step <= 0:
         return float(x)
     return float(step) * round(float(x) / float(step))
 
+
 def build_goals_from_equity(equity: float, cfg: GoalLadderCfg) -> Tuple[List[float], float]:
     e = float(equity)
     if not math.isfinite(e) or e <= 0:
-        # fallback: keep something safe; but ideally equity is always valid
         goals = [7500.0, 10000.0, 12500.0]
         return goals, 10000.0
 
     raw = [e * cfg.mults[0], e * cfg.mults[1], e * cfg.mults[2]]
 
-    # main goal floor
     raw[1] = max(raw[1], float(cfg.min_main_goal_usd))
-
-    # enforce spacing so the ladder isn't degenerate for small equity
     raw[0] = min(raw[0], raw[1] - cfg.min_goal_gap_usd)
     raw[2] = max(raw[2], raw[1] + cfg.min_goal_gap_usd)
 
-    # rounding
     goals = [_round_to_step(x, cfg.round_to) for x in raw]
     goals = sorted([float(g) for g in goals])
 
-    main_goal = float(goals[1])
-    return goals, main_goal
+    return goals, float(goals[1])
+
 
 def maybe_rebuild_ledger_for_dt(
     *,
     dt_str: str,
     start: str,
     prices_mode: str,
+    account_id: str,
+    env: Optional[str],
+    confirm_prod_write: bool,
 ) -> None:
-    """
-    Calls the ledger rebuild via CLI for consistency.
-    IMPORTANT: This assumes there is a module entrypoint:
-      python -m alpha_edge.operations.rebuild_ledger
-    Adjust module path if yours is different.
-    """
     cmd = [
-        "python",
+        sys.executable,
         "-m",
         "alpha_edge.operations.rebuild_ledger",
+        "--account-id",
+        account_id,
         "--start",
         start,
         "--end",
@@ -126,26 +132,16 @@ def maybe_rebuild_ledger_for_dt(
         prices_mode,
     ]
 
+    if env:
+        cmd.extend(["--env", env])
+    if confirm_prod_write:
+        cmd.append("--confirm-prod-write")
+
     print("[ledger] " + " ".join(cmd))
     subprocess.check_call(cmd)
 
 
 def load_equity_asof(s3, *, bucket: str, account_root: str, dt_str: str) -> Optional[float]:
-    """
-    Reads equity from ledger/pnl as-of dt_str.
-
-    Your rebuild_ledger.py writes:
-      {
-        "as_of": "...",
-        "method": "...",
-        "summary": {
-           "equity_usd": ...,
-           ...
-        }
-      }
-
-    So equity is under payload["summary"] (not top-level).
-    """
     payload = s3_load_latest_json_asof(
         s3,
         bucket=bucket,
@@ -157,7 +153,6 @@ def load_equity_asof(s3, *, bucket: str, account_root: str, dt_str: str) -> Opti
     if isinstance(payload, dict) and isinstance(payload.get("summary"), dict):
         summary = payload["summary"]
     else:
-        # fallback for older shapes
         summary = payload if isinstance(payload, dict) else {}
 
     for k in ("equity_usd", "equity", "total_equity_usd", "total_equity"):
@@ -178,20 +173,23 @@ def load_equity_asof(s3, *, bucket: str, account_root: str, dt_str: str) -> Opti
 def parse_args() -> argparse.Namespace:
     ap = argparse.ArgumentParser(description="Backfill daily_reports for historical dates.")
 
-    ap.add_argument("--bucket", default=BUCKET)
-    ap.add_argument("--region", default=REGION)
-    ap.add_argument("--engine-root", default=ENGINE_ROOT)
+    ap.add_argument("--bucket", default=None)
+    ap.add_argument("--region", default=None)
+    ap.add_argument("--engine-root", default=None)
     ap.add_argument("--account-id", default="main")
 
-    ap.add_argument("--start", default="auto", help="YYYY-MM-DD or 'auto' (first trade dt)")
-    ap.add_argument("--end", required=True, help="YYYY-MM-DD (inclusive)")
+    ap.add_argument("--start", default="auto", help="YYYY-MM-DD or 'auto' for first trade dt")
+    ap.add_argument("--end", required=True, help="YYYY-MM-DD inclusive")
 
     ap.add_argument("--ledger-prices-mode", default="asof", choices=["asof", "latest"])
-    ap.add_argument("--rebuild-ledger", action="store_true", help="Rebuild ledger for each dt before reporting.")
+    ap.add_argument("--rebuild-ledger", action="store_true")
 
-    ap.add_argument("--skip-existing", action="store_true", help="Skip dt if daily report already exists.")
+    ap.add_argument("--skip-existing", action="store_true")
     ap.add_argument("--dry-run", action="store_true")
-    ap.add_argument("--stop-on-error", action="store_true", help="Stop immediately on first failure.")
+    ap.add_argument("--stop-on-error", action="store_true")
+
+    ap.add_argument("--env", default=None, choices=["dev", "staging", "prod"])
+    ap.add_argument("--confirm-prod-write", action="store_true")
 
     return ap.parse_args()
 
@@ -199,23 +197,23 @@ def parse_args() -> argparse.Namespace:
 # ----------------------------
 # Main
 # ----------------------------
-def main() -> None:
-    args = parse_args()
+def _main_impl(args: argparse.Namespace) -> None:
 
-    bucket = str(args.bucket)
-    region = str(args.region)
-    engine_root = str(args.engine_root).strip("/")
+    cfg = load_runtime_config(args.env)
+
+    bucket = str(args.bucket or cfg_bucket(cfg))
+    region = str(args.region or cfg_region(cfg))
+    engine_root = str(args.engine_root or cfg_engine_root(cfg)).strip("/")
     account_id = str(args.account_id)
 
-    # NOTE: you currently use root_prefix=engine_root in your run_daily_report backtest mode.
-    # If you later move to per-account roots, change this here.
-    account_root = engine_root
+    if not bool(args.dry_run):
+        require_prod_confirmation(cfg, bool(args.confirm_prod_write))
 
+    account_root = engine_root
     s3 = s3_init(region)
 
     end_dt = parse_date(args.end)
 
-    # Determine start dt
     if str(args.start).lower() == "auto":
         trade_dts = list_trade_dts(s3, bucket=bucket, engine_root=engine_root)
         if not trade_dts:
@@ -224,41 +222,47 @@ def main() -> None:
     else:
         start_dt = parse_date(args.start)
 
-    # Calendar daily range (inclusive)
     rng = pd.date_range(start_dt, end_dt, freq="D")
 
-    print("=== REPORTS BACKFILL ===")
-    print(f"bucket:        {bucket}")
-    print(f"engine_root:   {engine_root}")
-    print(f"account_id:    {account_id}")
-    print(f"range:         {start_dt} -> {end_dt} ({len(rng)} days)")
-    print(f"rebuild_ledger:{bool(args.rebuild_ledger)} prices_mode={args.ledger_prices_mode}")
-    print(f"skip_existing: {bool(args.skip_existing)}")
-    print(f"dry_run:       {bool(args.dry_run)}")
+    print("\n=== REPORTS BACKFILL ===")
+    print(f"env:            {cfg_env(cfg)}")
+    print(f"bucket:         {bucket}")
+    print(f"region:         {region}")
+    print(f"engine_root:    {engine_root}")
+    print(f"account_id:     {account_id}")
+    print(f"range:          {start_dt} -> {end_dt} ({len(rng)} days)")
+    print(f"rebuild_ledger: {bool(args.rebuild_ledger)} prices_mode={args.ledger_prices_mode}")
+    print(f"skip_existing:  {bool(args.skip_existing)}")
+    print(f"dry_run:        {bool(args.dry_run)}")
     print("")
 
     failures = 0
 
-    for dt in rng:
-        dt_str = dt.strftime("%Y-%m-%d")
-
+    for day in rng:
+        dt_str = day.strftime("%Y-%m-%d")
         report_key = f"{engine_root}/daily_reports/dt={dt_str}/report.json"
+
         if args.skip_existing and key_exists(s3, bucket=bucket, key=report_key):
             print(f"[skip] dt={dt_str} report exists -> s3://{bucket}/{report_key}")
             continue
 
         print(f"\n--- dt={dt_str} ---")
 
-        # Optionally rebuild ledger up to this dt
         if args.rebuild_ledger:
             if args.dry_run:
-                print(f"[DRY RUN] would rebuild ledger for dt={dt_str} (start={start_dt}, prices_mode={args.ledger_prices_mode})")
+                print(
+                    f"[DRY RUN] would rebuild ledger for dt={dt_str} "
+                    f"(start={start_dt}, prices_mode={args.ledger_prices_mode})"
+                )
             else:
                 try:
                     maybe_rebuild_ledger_for_dt(
                         dt_str=dt_str,
                         start=start_dt,
                         prices_mode=str(args.ledger_prices_mode),
+                        account_id=account_id,
+                        env=args.env,
+                        confirm_prod_write=bool(args.confirm_prod_write),
                     )
                 except Exception as e:
                     failures += 1
@@ -267,7 +271,6 @@ def main() -> None:
                         raise
                     continue
 
-        # Load equity as-of dt
         eq = load_equity_asof(s3, bucket=bucket, account_root=account_root, dt_str=dt_str)
         if eq is None:
             failures += 1
@@ -275,15 +278,21 @@ def main() -> None:
             if args.stop_on_error:
                 raise RuntimeError(f"Missing equity for dt={dt_str}")
             continue
-        
-        goals, main_goal = build_goals_from_equity(eq, GoalLadderCfg(mults=(1.20, 1.40, 1.60), round_to=50.0))
+
+        goals, main_goal = build_goals_from_equity(
+            eq,
+            GoalLadderCfg(mults=(1.20, 1.40, 1.60), round_to=50.0),
+        )
 
         if args.dry_run:
-            print(f"[DRY RUN] would run_daily_cycle_asof(as_of={dt_str}, backtest_run_id='backfill', equity_override={eq:.2f})")
+            print(
+                f"[DRY RUN] would run_daily_cycle_asof("
+                f"as_of={dt_str}, backtest_run_id='backfill', equity_override={eq:.2f})"
+            )
+            print(f"[DRY RUN] goals={goals} main_goal={main_goal}")
             print(f"[DRY RUN] expected output -> s3://{bucket}/{report_key}")
             continue
 
-        # Build report (backtest mode, no latest pointer updates)
         try:
             run_daily_cycle_asof(
                 as_of=dt_str,
@@ -306,8 +315,9 @@ def main() -> None:
     print("\n=== DONE ===")
     if failures:
         print(f"[WARN] failures={failures}")
-    else:
-        print("[OK] all done")
+        raise SystemExit(2)
+
+    print("[OK] all done")
 
 
 if __name__ == "__main__":

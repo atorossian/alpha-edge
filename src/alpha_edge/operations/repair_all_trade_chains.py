@@ -4,16 +4,16 @@ import argparse
 import json
 import math
 import subprocess
-from dataclasses import dataclass, asdict
-from typing import Any, Dict, List, Optional
+from dataclasses import asdict
+from typing import Any, List, Optional
 
 import boto3
 import pandas as pd
 
+from alpha_edge.core.runtime import load_runtime_config, require_prod_confirmation
+from alpha_edge.core.schemas import RuntimeConfig, TradeRow, RepairRow
 
-BUCKET = "alpha-edge-algo"
-REGION = "eu-west-1"
-ENGINE_ROOT = "engine/v1"
+
 TRADES_TABLE = "trades"
 
 QTY_DECIMALS = 8
@@ -22,55 +22,57 @@ QTY_TOL = 1e-8
 VALUE_TOL = 0.01
 INTEGER_QTY_TOL = 1e-6
 
-# Explicit exceptions for equities that may legitimately be fractional
 FRACTIONAL_EQUITY_TICKERS = {
     "AI.PA",
 }
-FRACTIONAL_EQUITY_ASSET_IDS = {
-    # "EQHxxxxxxxxxxxxxxxxxxx",
-}
+FRACTIONAL_EQUITY_ASSET_IDS = set()
 
 FX_BASES = {
     "EUR", "USD", "GBP", "JPY", "CHF", "AUD", "NZD", "CAD",
     "SEK", "NOK", "DKK", "CNH", "HKD", "SGD", "MXN", "ZAR",
 }
+
 CRYPTO_BASES = {
     "BTC", "ETH", "SOL", "ADA", "XRP", "DOT", "LTC", "BNB",
     "AVAX", "LINK", "MATIC", "ATOM", "NEAR", "UNI", "AAVE",
     "TRX", "ETC", "DOGE", "HBAR", "SUI", "DASH", "BCH", "QTUM",
     "APT", "ARB", "INJ", "MANA", "NEO", "RENDER",
 }
+
 CRYPTO_QUOTES = {"USD", "USDT", "USDC", "EUR"}
 
 
 # ----------------------------
 # S3 helpers
 # ----------------------------
-def s3_client(region: str = REGION):
-    return boto3.client("s3", region_name=region)
+def s3_client(cfg: RuntimeConfig):
+    return boto3.client("s3", region_name=cfg.region)
 
 
-def engine_key(*parts: str) -> str:
-    return "/".join([ENGINE_ROOT.strip("/")] + [p.strip("/") for p in parts])
-
-
-def dt_key(table: str, dt_str: str, filename: str) -> str:
-    return engine_key(table, f"dt={dt_str}", filename)
+def engine_key(cfg: RuntimeConfig, *parts: str) -> str:
+    return "/".join([cfg.engine_root.strip("/")] + [p.strip("/") for p in parts])
 
 
 def s3_list_keys(s3, *, bucket: str, prefix: str) -> list[str]:
     keys: list[str] = []
     token = None
+
     while True:
         kwargs: dict[str, Any] = dict(Bucket=bucket, Prefix=prefix)
+
         if token:
             kwargs["ContinuationToken"] = token
+
         resp = s3.list_objects_v2(**kwargs)
+
         for it in resp.get("Contents", []):
             keys.append(it["Key"])
+
         if not resp.get("IsTruncated"):
             break
+
         token = resp.get("NextContinuationToken")
+
     return keys
 
 
@@ -124,6 +126,7 @@ def _parse_ts(ts_utc: str) -> pd.Timestamp:
 def _normalize_quantity_unit(x: Optional[str], ticker: str) -> Optional[str]:
     if x is None:
         return None
+
     s = str(x).strip().lower()
     if s == "":
         return None
@@ -169,6 +172,7 @@ def _normalize_quantity_unit(x: Optional[str], ticker: str) -> Optional[str]:
         "derivative": "derivative",
         "derivatives": "derivative",
     }
+
     out = unit_map.get(s, s)
 
     t = str(ticker).upper().strip().replace("/", "-")
@@ -183,8 +187,10 @@ def _normalize_quantity_unit(x: Optional[str], ticker: str) -> Optional[str]:
 def _infer_quantity_from_value_price(value: float, price: float) -> float:
     if not _is_finite_positive(value):
         raise ValueError(f"Cannot infer quantity: invalid value={value!r}")
+
     if not _is_finite_positive(price):
         raise ValueError(f"Cannot infer quantity: invalid price={price!r}")
+
     return float(value) / float(price)
 
 
@@ -192,6 +198,7 @@ def _is_crypto_pair(ticker: str) -> bool:
     t = str(ticker).upper().strip().replace("/", "-")
     if "-" not in t:
         return False
+
     base, quote = t.split("-", 1)
     return base in CRYPTO_BASES and quote in CRYPTO_QUOTES
 
@@ -200,16 +207,12 @@ def _is_fx_pair(ticker: str) -> bool:
     t = str(ticker).upper().strip().replace("/", "-")
     if "-" not in t:
         return False
+
     base, quote = t.split("-", 1)
     return base in FX_BASES and quote in FX_BASES
 
 
 def _quantity_policy(*, ticker: str, asset_id: str, quantity_unit: Optional[str]) -> str:
-    """
-    Returns:
-      - 'fractional' for crypto / FX / derivatives / explicit exceptions
-      - 'integer' for normal equities / ETFs
-    """
     t = str(ticker).upper().strip()
     aid = str(asset_id or "").strip()
     unit = str(quantity_unit or "").strip().lower()
@@ -256,65 +259,21 @@ def _side_pri(side: str) -> int:
 
 
 # ----------------------------
-# Data models
-# ----------------------------
-@dataclass
-class TradeRow:
-    trade_id: str
-    as_of: str
-    ts_utc: str
-    asset_id: str
-    ticker: str
-    side: str
-    action_tag: str
-    quantity: Optional[float]
-    price: Optional[float]
-    value: Optional[float]
-    reported_pnl: Optional[float]
-    quantity_unit: Optional[str]
-    s3_key: str
-
-
-@dataclass
-class RepairRow:
-    trade_id: str
-    as_of: str
-    ts_utc: str
-    asset_id: str
-    ticker: str
-    side: str
-    action_tag: str
-    old_quantity: Optional[float]
-    new_quantity: Optional[float]
-    old_price: Optional[float]
-    new_price: Optional[float]
-    old_value: Optional[float]
-    new_value: Optional[float]
-    old_quantity_unit: Optional[str]
-    new_quantity_unit: Optional[str]
-    old_reported_pnl: Optional[float]
-    new_reported_pnl: Optional[float]
-    quantity_policy: Optional[str]
-    repair_action: str
-    repair_reason: str
-    command: str
-    s3_key: str
-
-
-# ----------------------------
 # Trade loading
 # ----------------------------
-def _load_all_trades(s3, *, bucket: str) -> List[dict]:
-    prefix = engine_key(TRADES_TABLE, "dt=")
-    keys = s3_list_keys(s3, bucket=bucket, prefix=prefix)
+def _load_all_trades(s3, *, cfg: RuntimeConfig) -> List[dict]:
+    prefix = engine_key(cfg, TRADES_TABLE, "dt=")
+    keys = s3_list_keys(s3, bucket=cfg.bucket, prefix=prefix)
     keys = [k for k in keys if k.endswith(".json") and "/trade_" in k]
 
     out: List[dict] = []
+
     for k in keys:
-        payload = s3_get_json_optional(s3, bucket=bucket, key=k)
+        payload = s3_get_json_optional(s3, bucket=cfg.bucket, key=k)
         if isinstance(payload, dict):
             payload["_s3_key"] = k
             out.append(payload)
+
     return out
 
 
@@ -326,10 +285,12 @@ def _normalize_trade(t: dict) -> TradeRow:
     ticker = str(t.get("ticker") or "").upper().strip()
     side = str(t.get("side") or "").upper().strip()
     action_tag = str(t.get("action_tag") or "").strip().lower()
+
     quantity = None if t.get("quantity") is None else float(t.get("quantity"))
     price = None if t.get("price") is None else float(t.get("price"))
     value = None if t.get("value") is None else float(t.get("value"))
     reported_pnl = None if t.get("reported_pnl") is None else float(t.get("reported_pnl"))
+
     quantity_unit = _normalize_quantity_unit(t.get("quantity_unit"), ticker=ticker)
     s3_key = str(t.get("_s3_key") or "").strip()
 
@@ -350,22 +311,38 @@ def _normalize_trade(t: dict) -> TradeRow:
         reported_pnl=reported_pnl,
         quantity_unit=quantity_unit,
         s3_key=s3_key,
+        currency=str(t.get("currency") or "USD").upper().strip(),
     )
 
 
 # ----------------------------
 # Command building
 # ----------------------------
-def _build_edit_command_args(row: RepairRow, python_entrypoint: str, dry_run: bool) -> List[str]:
+def _build_edit_command_args(
+    row: RepairRow,
+    *,
+    cfg: RuntimeConfig,
+    python_entrypoint: str,
+    dry_run: bool,
+    confirm_prod_write: bool,
+) -> List[str]:
     parts = [
         "poetry",
         "run",
         "python",
         python_entrypoint,
-        "--mode", "edit",
-        "--trade-id", str(row.trade_id),
-        "--old-as-of", str(row.as_of),
+        "--env",
+        cfg.env,
+        "--mode",
+        "edit",
+        "--trade-id",
+        str(row.trade_id),
+        "--old-as-of",
+        str(row.as_of),
     ]
+
+    if cfg.is_prod and confirm_prod_write:
+        parts.append("--confirm-prod-write")
 
     if row.new_quantity is not None and (
         row.old_quantity is None or abs(float(row.new_quantity) - float(row.old_quantity)) > QTY_TOL
@@ -394,9 +371,10 @@ def _build_edit_command_args(row: RepairRow, python_entrypoint: str, dry_run: bo
 
 def _command_args_to_text(args: List[str]) -> str:
     def q(x: str) -> str:
-        if any(ch in x for ch in [' ', '"', "'"]):
+        if any(ch in x for ch in [" ", '"', "'"]):
             return '"' + x.replace('"', '\\"') + '"'
         return x
+
     return " ".join(q(x) for x in args)
 
 
@@ -441,19 +419,6 @@ def _manual_row(
 # Generic chain-aware repair
 # ----------------------------
 def _process_asset_chain(trades: List[TradeRow]) -> tuple[list[RepairRow], list[RepairRow]]:
-    """
-    Universal quantity-based repair logic.
-
-    LONG:
-      BUY open/add    -> increases long exposure
-      SELL reduce     -> reduces long partially
-      SELL close      -> closes remaining long
-
-    SHORT:
-      SELL open/add   -> increases short exposure
-      BUY reduce      -> reduces short partially
-      BUY close       -> closes remaining short
-    """
     auto_rows: list[RepairRow] = []
     manual_rows: list[RepairRow] = []
 
@@ -494,9 +459,7 @@ def _process_asset_chain(trades: List[TradeRow]) -> tuple[list[RepairRow], list[
             manual_rows.append(_manual_row(t, "Missing/invalid price", quantity_policy=quantity_policy))
             continue
 
-        # ----------------------------
         # LONG OPEN / ADD
-        # ----------------------------
         if t.side == "BUY" and t.action_tag in {"open", "add"}:
             if open_short_qty > QTY_TOL:
                 manual_rows.append(
@@ -508,7 +471,6 @@ def _process_asset_chain(trades: List[TradeRow]) -> tuple[list[RepairRow], list[
                 )
                 continue
 
-            # Integer instruments: trust stored integer quantity first
             if quantity_policy == "integer" and _is_integer_like(old_qty):
                 new_qty = float(round(float(old_qty)))
                 new_val = _round_value(float(new_qty) * float(old_px))
@@ -531,6 +493,7 @@ def _process_asset_chain(trades: List[TradeRow]) -> tuple[list[RepairRow], list[
                     raw_qty=raw_qty,
                     policy=quantity_policy,
                 )
+
                 if not ok:
                     manual_rows.append(
                         _manual_row(
@@ -549,34 +512,23 @@ def _process_asset_chain(trades: List[TradeRow]) -> tuple[list[RepairRow], list[
                 reason_parts.append("BUY open/add => quantity := value / price")
                 reason_parts.append("value := quantity * price")
 
-        # ----------------------------
-        # LONG REDUCE / CLOSE
-        # ----------------------------
+        # LONG CLOSE
         elif t.side == "SELL" and t.action_tag == "close":
             if open_short_qty > QTY_TOL:
                 manual_rows.append(
-                    _manual_row(
-                        t,
-                        "SELL close encountered while short chain is still open",
-                        quantity_policy=quantity_policy,
-                    )
+                    _manual_row(t, "SELL close encountered while short chain is still open", quantity_policy=quantity_policy)
                 )
                 continue
+
             if open_long_qty <= QTY_TOL:
                 manual_rows.append(
-                    _manual_row(
-                        t,
-                        "SELL close with no remaining open long quantity",
-                        quantity_policy=quantity_policy,
-                    )
+                    _manual_row(t, "SELL close with no remaining open long quantity", quantity_policy=quantity_policy)
                 )
                 continue
 
             raw_qty = float(open_long_qty)
-            norm_qty, ok, qty_detail = _normalize_repaired_quantity(
-                raw_qty=raw_qty,
-                policy=quantity_policy,
-            )
+            norm_qty, ok, qty_detail = _normalize_repaired_quantity(raw_qty=raw_qty, policy=quantity_policy)
+
             if not ok:
                 manual_rows.append(
                     _manual_row(
@@ -595,23 +547,17 @@ def _process_asset_chain(trades: List[TradeRow]) -> tuple[list[RepairRow], list[
             reason_parts.append("SELL close => quantity := remaining open long qty")
             reason_parts.append("value := quantity * price")
 
+        # LONG REDUCE
         elif t.side == "SELL" and t.action_tag == "reduce":
             if open_short_qty > QTY_TOL:
                 manual_rows.append(
-                    _manual_row(
-                        t,
-                        "SELL reduce encountered while short chain is still open",
-                        quantity_policy=quantity_policy,
-                    )
+                    _manual_row(t, "SELL reduce encountered while short chain is still open", quantity_policy=quantity_policy)
                 )
                 continue
+
             if open_long_qty <= QTY_TOL:
                 manual_rows.append(
-                    _manual_row(
-                        t,
-                        "SELL reduce with no remaining open long quantity",
-                        quantity_policy=quantity_policy,
-                    )
+                    _manual_row(t, "SELL reduce with no remaining open long quantity", quantity_policy=quantity_policy)
                 )
                 continue
 
@@ -629,19 +575,13 @@ def _process_asset_chain(trades: List[TradeRow]) -> tuple[list[RepairRow], list[
 
             if candidate_qty is None:
                 manual_rows.append(
-                    _manual_row(
-                        t,
-                        "SELL reduce missing both usable quantity and value",
-                        quantity_policy=quantity_policy,
-                    )
+                    _manual_row(t, "SELL reduce missing both usable quantity and value", quantity_policy=quantity_policy)
                 )
                 continue
 
             raw_qty = min(float(candidate_qty), float(open_long_qty))
-            norm_qty, ok, qty_detail = _normalize_repaired_quantity(
-                raw_qty=raw_qty,
-                policy=quantity_policy,
-            )
+            norm_qty, ok, qty_detail = _normalize_repaired_quantity(raw_qty=raw_qty, policy=quantity_policy)
+
             if not ok:
                 manual_rows.append(
                     _manual_row(
@@ -660,21 +600,14 @@ def _process_asset_chain(trades: List[TradeRow]) -> tuple[list[RepairRow], list[
             reason_parts.append("SELL reduce => quantity := min(candidate qty, remaining open long qty)")
             reason_parts.append("value := quantity * price")
 
-        # ----------------------------
         # SHORT OPEN / ADD
-        # ----------------------------
         elif t.side == "SELL" and t.action_tag in {"open", "add"}:
             if open_long_qty > QTY_TOL:
                 manual_rows.append(
-                    _manual_row(
-                        t,
-                        "SELL open/add encountered while long chain is still open",
-                        quantity_policy=quantity_policy,
-                    )
+                    _manual_row(t, "SELL open/add encountered while long chain is still open", quantity_policy=quantity_policy)
                 )
                 continue
 
-            # Integer instruments: trust stored integer quantity first
             if quantity_policy == "integer" and _is_integer_like(old_qty):
                 new_qty = float(round(float(old_qty)))
                 new_val = _round_value(float(new_qty) * float(old_px))
@@ -684,19 +617,13 @@ def _process_asset_chain(trades: List[TradeRow]) -> tuple[list[RepairRow], list[
             else:
                 if not _is_finite_positive(old_val):
                     manual_rows.append(
-                        _manual_row(
-                            t,
-                            "SELL open/add missing/invalid value",
-                            quantity_policy=quantity_policy,
-                        )
+                        _manual_row(t, "SELL open/add missing/invalid value", quantity_policy=quantity_policy)
                     )
                     continue
 
                 raw_qty = _infer_quantity_from_value_price(float(old_val), float(old_px))
-                norm_qty, ok, qty_detail = _normalize_repaired_quantity(
-                    raw_qty=raw_qty,
-                    policy=quantity_policy,
-                )
+                norm_qty, ok, qty_detail = _normalize_repaired_quantity(raw_qty=raw_qty, policy=quantity_policy)
+
                 if not ok:
                     manual_rows.append(
                         _manual_row(
@@ -715,34 +642,23 @@ def _process_asset_chain(trades: List[TradeRow]) -> tuple[list[RepairRow], list[
                 reason_parts.append("SELL open/add => quantity := value / price")
                 reason_parts.append("value := quantity * price")
 
-        # ----------------------------
-        # SHORT REDUCE / CLOSE
-        # ----------------------------
+        # SHORT CLOSE
         elif t.side == "BUY" and t.action_tag == "close":
             if open_long_qty > QTY_TOL:
                 manual_rows.append(
-                    _manual_row(
-                        t,
-                        "BUY close encountered while long chain is still open",
-                        quantity_policy=quantity_policy,
-                    )
+                    _manual_row(t, "BUY close encountered while long chain is still open", quantity_policy=quantity_policy)
                 )
                 continue
+
             if open_short_qty <= QTY_TOL:
                 manual_rows.append(
-                    _manual_row(
-                        t,
-                        "BUY close with no remaining open short quantity",
-                        quantity_policy=quantity_policy,
-                    )
+                    _manual_row(t, "BUY close with no remaining open short quantity", quantity_policy=quantity_policy)
                 )
                 continue
 
             raw_qty = float(open_short_qty)
-            norm_qty, ok, qty_detail = _normalize_repaired_quantity(
-                raw_qty=raw_qty,
-                policy=quantity_policy,
-            )
+            norm_qty, ok, qty_detail = _normalize_repaired_quantity(raw_qty=raw_qty, policy=quantity_policy)
+
             if not ok:
                 manual_rows.append(
                     _manual_row(
@@ -761,23 +677,17 @@ def _process_asset_chain(trades: List[TradeRow]) -> tuple[list[RepairRow], list[
             reason_parts.append("BUY close => quantity := remaining open short qty")
             reason_parts.append("value := quantity * price")
 
+        # SHORT REDUCE
         elif t.side == "BUY" and t.action_tag == "reduce":
             if open_long_qty > QTY_TOL:
                 manual_rows.append(
-                    _manual_row(
-                        t,
-                        "BUY reduce encountered while long chain is still open",
-                        quantity_policy=quantity_policy,
-                    )
+                    _manual_row(t, "BUY reduce encountered while long chain is still open", quantity_policy=quantity_policy)
                 )
                 continue
+
             if open_short_qty <= QTY_TOL:
                 manual_rows.append(
-                    _manual_row(
-                        t,
-                        "BUY reduce with no remaining open short quantity",
-                        quantity_policy=quantity_policy,
-                    )
+                    _manual_row(t, "BUY reduce with no remaining open short quantity", quantity_policy=quantity_policy)
                 )
                 continue
 
@@ -795,19 +705,13 @@ def _process_asset_chain(trades: List[TradeRow]) -> tuple[list[RepairRow], list[
 
             if candidate_qty is None:
                 manual_rows.append(
-                    _manual_row(
-                        t,
-                        "BUY reduce missing both usable quantity and value",
-                        quantity_policy=quantity_policy,
-                    )
+                    _manual_row(t, "BUY reduce missing both usable quantity and value", quantity_policy=quantity_policy)
                 )
                 continue
 
             raw_qty = min(float(candidate_qty), float(open_short_qty))
-            norm_qty, ok, qty_detail = _normalize_repaired_quantity(
-                raw_qty=raw_qty,
-                policy=quantity_policy,
-            )
+            norm_qty, ok, qty_detail = _normalize_repaired_quantity(raw_qty=raw_qty, policy=quantity_policy)
+
             if not ok:
                 manual_rows.append(
                     _manual_row(
@@ -828,19 +732,18 @@ def _process_asset_chain(trades: List[TradeRow]) -> tuple[list[RepairRow], list[
 
         else:
             manual_rows.append(
-                _manual_row(
-                    t,
-                    "Unsupported chain semantic in automatic repair",
-                    quantity_policy=quantity_policy,
-                )
+                _manual_row(t, "Unsupported chain semantic in automatic repair", quantity_policy=quantity_policy)
             )
             continue
 
         changed = False
+
         if old_qty is None or abs(float(new_qty) - float(old_qty)) > QTY_TOL:
             changed = True
+
         if new_unit != old_unit:
             changed = True
+
         if old_val is None or abs(float(new_val) - float(old_val)) > VALUE_TOL:
             changed = True
 
@@ -879,6 +782,7 @@ def _process_asset_chain(trades: List[TradeRow]) -> tuple[list[RepairRow], list[
 # ----------------------------
 def repair_all_trade_chains(
     *,
+    cfg: RuntimeConfig,
     out_auto_csv: str,
     out_manual_csv: str,
     python_entrypoint: str,
@@ -887,19 +791,25 @@ def repair_all_trade_chains(
     stop_on_error: bool = False,
     asset_ids: Optional[set[str]] = None,
     tickers: Optional[set[str]] = None,
+    confirm_prod_write: bool = False,
 ) -> None:
-    s3 = s3_client(REGION)
-    raw_trades = _load_all_trades(s3, bucket=BUCKET)
+    s3 = s3_client(cfg)
+    raw_trades = _load_all_trades(s3, cfg=cfg)
 
     all_trades: list[TradeRow] = []
+
     for raw in raw_trades:
         try:
             t = _normalize_trade(raw)
+
             if asset_ids and t.asset_id not in asset_ids:
                 continue
+
             if tickers and t.ticker not in tickers:
                 continue
+
             all_trades.append(t)
+
         except Exception:
             continue
 
@@ -918,19 +828,28 @@ def repair_all_trade_chains(
 
         for row in asset_auto:
             if row.repair_action != "NO_CHANGE":
-                cmd_args = _build_edit_command_args(row, python_entrypoint=python_entrypoint, dry_run=dry_run)
+                cmd_args = _build_edit_command_args(
+                    row,
+                    cfg=cfg,
+                    python_entrypoint=python_entrypoint,
+                    dry_run=dry_run,
+                    confirm_prod_write=confirm_prod_write,
+                )
                 row.command = _command_args_to_text(cmd_args)
 
                 if execute:
                     print("\n=== EXECUTE TRADE CHAIN REPAIR ===")
                     print(row.command)
+
                     try:
                         subprocess.run(cmd_args, check=True)
                         exec_ok += 1
+
                     except subprocess.CalledProcessError as e:
                         exec_fail += 1
                         row.repair_action = "EXEC_FAILED"
                         row.repair_reason = f"{row.repair_reason}; execution failed rc={e.returncode}"
+
                         if stop_on_error:
                             auto_rows.extend(asset_auto)
                             manual_rows.extend(asset_manual)
@@ -945,6 +864,9 @@ def repair_all_trade_chains(
     pd.DataFrame([asdict(r) for r in manual_rows]).to_csv(out_manual_csv, index=False)
 
     print("\n=== ALL TRADE CHAIN REPAIR ===")
+    print(f"env:                 {cfg.env}")
+    print(f"bucket:              {cfg.bucket}")
+    print(f"root:                {cfg.engine_root}")
     print(f"assets:              {len(grouped)}")
     print(f"trades:              {len(all_trades)}")
     print(f"auto_rows:           {len(auto_rows)}")
@@ -953,9 +875,11 @@ def repair_all_trade_chains(
     print(f"manual_csv:          {out_manual_csv}")
     print(f"execute:             {execute}")
     print(f"dry_run:             {dry_run}")
+
     if execute:
         print(f"exec_ok:             {exec_ok}")
         print(f"exec_fail:           {exec_fail}")
+
     print("")
 
 
@@ -963,19 +887,24 @@ def repair_all_trade_chains(
 # CLI
 # ----------------------------
 def main() -> None:
-    ap = argparse.ArgumentParser(
-        description="Chain-aware quantity repair for all trade types."
-    )
+    ap = argparse.ArgumentParser(description="Chain-aware quantity repair for all trade types.")
+
+    ap.add_argument("--env", default=None, choices=["dev", "staging", "prod"])
+    ap.add_argument("--confirm-prod-write", action="store_true")
+
     ap.add_argument("--out-auto-csv", default="./data/repair_all_trade_chains_auto.csv")
     ap.add_argument("--out-manual-csv", default="./data/repair_all_trade_chains_manual.csv")
+
     ap.add_argument(
         "--python-entrypoint",
         default="src/alpha_edge/operations/record_trade.py",
         help="Path used in generated poetry edit commands.",
     )
+
     ap.add_argument("--execute", action="store_true")
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--stop-on-error", action="store_true")
+
     ap.add_argument(
         "--asset-ids",
         default=None,
@@ -986,26 +915,62 @@ def main() -> None:
         default=None,
         help='Optional comma-separated ticker filter, e.g. "BTC-USD,VXH6"',
     )
+
     args = ap.parse_args()
 
-    asset_ids = None
-    if args.asset_ids:
-        asset_ids = {x.strip() for x in str(args.asset_ids).split(",") if x.strip()}
+    cfg = load_runtime_config(args.env)
 
-    tickers = None
-    if args.tickers:
-        tickers = {x.strip().upper() for x in str(args.tickers).split(",") if x.strip()}
+    if bool(args.execute) and not bool(args.dry_run):
+        require_prod_confirmation(cfg, bool(args.confirm_prod_write))
 
-    repair_all_trade_chains(
-        out_auto_csv=str(args.out_auto_csv),
-        out_manual_csv=str(args.out_manual_csv),
-        python_entrypoint=str(args.python_entrypoint),
-        execute=bool(args.execute),
+    with capture_script_run(
+        cfg=cfg,
+        script_name="repair_all_trade_chains.py",
+        input_args=vars(args),
         dry_run=bool(args.dry_run),
-        stop_on_error=bool(args.stop_on_error),
-        asset_ids=asset_ids,
-        tickers=tickers,
-    )
+    ) as run_id:
+        asset_ids = None
+        if args.asset_ids:
+            asset_ids = {x.strip() for x in str(args.asset_ids).split(",") if x.strip()}
+
+        tickers = None
+        if args.tickers:
+            tickers = {x.strip().upper() for x in str(args.tickers).split(",") if x.strip()}
+
+        repair_all_trade_chains(
+            cfg=cfg,
+            out_auto_csv=str(args.out_auto_csv),
+            out_manual_csv=str(args.out_manual_csv),
+            python_entrypoint=str(args.python_entrypoint),
+            execute=bool(args.execute),
+            dry_run=bool(args.dry_run),
+            stop_on_error=bool(args.stop_on_error),
+            asset_ids=asset_ids,
+            tickers=tickers,
+            confirm_prod_write=bool(args.confirm_prod_write),
+        )
+
+        audit_event = build_audit_event(
+            cfg=cfg,
+            run_id=run_id,
+            event_type=("execute_repair_plan" if args.execute else "build_plan"),
+            entity_type="trade_chain_repair_plan",
+            entity_id=None,
+            as_of=None,
+            source_script="repair_all_trade_chains.py",
+            source_mode=("execute" if args.execute else "plan"),
+            status=("dry_run" if args.dry_run else "success"),
+            reason=None,
+            input_args=vars(args),
+            output_keys=[str(args.out_auto_csv), str(args.out_manual_csv)],
+            metadata={
+                "asset_ids": sorted(asset_ids) if asset_ids else None,
+                "tickers": sorted(tickers) if tickers else None,
+                "execute": bool(args.execute),
+                "note": "Individual trade edits are audited by record_trade.py when executed.",
+            },
+        )
+        write_audit_event(cfg=cfg, event=audit_event, dry_run=bool(args.dry_run))
 
 
 if __name__ == "__main__":

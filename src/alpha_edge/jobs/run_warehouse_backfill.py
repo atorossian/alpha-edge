@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from alpha_edge.core.audit import build_audit_event, write_audit_event
+from alpha_edge.core.run_logging import capture_script_run
+
 import argparse
 import datetime as dt
 import re
@@ -9,6 +12,8 @@ from dataclasses import dataclass
 from typing import Any, Optional
 
 import boto3
+
+from alpha_edge.core.runtime import RuntimeConfig, load_runtime_config, require_prod_confirmation
 
 
 DEFAULT_BUCKET = "alpha-edge-algo"
@@ -23,6 +28,33 @@ WAREHOUSE_VERSION = "v=1"
 
 CASHFLOWS_TABLE = "cashflows"
 DIVIDENDS_TABLE = "dividends"
+
+
+# ----------------------------
+# Runtime helpers
+# ----------------------------
+def cfg_bucket(cfg: RuntimeConfig) -> str:
+    return str(getattr(cfg, "bucket", DEFAULT_BUCKET))
+
+
+def cfg_region(cfg: RuntimeConfig) -> str:
+    return str(getattr(cfg, "region", DEFAULT_REGION))
+
+
+def cfg_engine_root(cfg: RuntimeConfig) -> str:
+    return str(getattr(cfg, "engine_root", DEFAULT_ENGINE_ROOT)).strip("/")
+
+
+def cfg_env(cfg: RuntimeConfig) -> str:
+    return str(getattr(cfg, "env", "dev"))
+
+
+def maybe_append_runtime_args(cmd: list[str], *, env: str | None, confirm_prod_write: bool) -> list[str]:
+    if env:
+        cmd.extend(["--env", str(env)])
+    if confirm_prod_write:
+        cmd.append("--confirm-prod-write")
+    return cmd
 
 
 # ----------------------------
@@ -47,15 +79,20 @@ def wh_key(engine_root: str, table: str, *parts: str) -> str:
 def s3_list_objects(s3, *, bucket: str, prefix: str) -> list[dict]:
     out: list[dict] = []
     token = None
+
     while True:
         kwargs: dict[str, Any] = dict(Bucket=bucket, Prefix=prefix)
         if token:
             kwargs["ContinuationToken"] = token
+
         resp = s3.list_objects_v2(**kwargs)
         out.extend(resp.get("Contents", []))
+
         if not resp.get("IsTruncated"):
             break
+
         token = resp.get("NextContinuationToken")
+
     return out
 
 
@@ -84,11 +121,13 @@ def fmt_date(d: dt.date) -> str:
 def daterange(start: dt.date, end: dt.date) -> list[dt.date]:
     if end < start:
         return []
+
     out: list[dt.date] = []
     cur = start
     while cur <= end:
         out.append(cur)
         cur = cur + dt.timedelta(days=1)
+
     return out
 
 
@@ -100,15 +139,18 @@ def discover_first_activity_date(s3, *, bucket: str, engine_root: str) -> Option
     ]
 
     dates: list[dt.date] = []
+
     for prefix in prefixes:
         objs = s3_list_objects(s3, bucket=bucket, prefix=prefix)
-        for o in objs:
-            k = o.get("Key")
-            if not isinstance(k, str):
+        for obj in objs:
+            key = obj.get("Key")
+            if not isinstance(key, str):
                 continue
-            m = _DT_PART_RE.search(k.replace("\\", "/"))
+
+            m = _DT_PART_RE.search(key.replace("\\", "/"))
             if not m:
                 continue
+
             try:
                 dates.append(parse_date(m.group(1)))
             except Exception:
@@ -123,19 +165,24 @@ def discover_latest_dt_under_prefix(s3, *, bucket: str, prefix: str) -> Optional
         return None
 
     latest: Optional[dt.date] = None
-    for o in objs:
-        k = o.get("Key")
-        if not isinstance(k, str):
+
+    for obj in objs:
+        key = obj.get("Key")
+        if not isinstance(key, str):
             continue
-        m = _DT_PART_RE.search(k.replace("\\", "/"))
+
+        m = _DT_PART_RE.search(key.replace("\\", "/"))
         if not m:
             continue
+
         try:
             d = parse_date(m.group(1))
         except Exception:
             continue
+
         if latest is None or d > latest:
             latest = d
+
     return latest
 
 
@@ -145,17 +192,19 @@ def discover_latest_warehouse_dt(s3, *, bucket: str, engine_root: str) -> Option
         wh_key(engine_root, "fct_positions_daily", ""),
         wh_key(engine_root, "fct_trades", ""),
     ]
-    for p in candidates:
-        latest = discover_latest_dt_under_prefix(s3, bucket=bucket, prefix=p)
+
+    for prefix in candidates:
+        latest = discover_latest_dt_under_prefix(s3, bucket=bucket, prefix=prefix)
         if latest is not None:
             return latest
+
     return None
 
 
 # ----------------------------
 # Runner logic
 # ----------------------------
-@dataclass
+@dataclass(frozen=True)
 class DayPlan:
     dt: str
     need_ledger: bool
@@ -187,15 +236,10 @@ def plan_for_day(
     wh_pnl_key = wh_key(engine_root, "fct_account_pnl_daily", f"dt={dt_str}", "part-00000.parquet")
     wh_report_key = wh_key(engine_root, "fct_daily_report_stats", f"dt={dt_str}", "part-00000.parquet")
 
-    wh_trades_exists = s3_key_exists(s3, bucket=bucket, key=wh_trades_key)
-    wh_positions_exists = s3_key_exists(s3, bucket=bucket, key=wh_positions_key)
-    wh_pnl_exists = s3_key_exists(s3, bucket=bucket, key=wh_pnl_key)
-    wh_report_exists = s3_key_exists(s3, bucket=bucket, key=wh_report_key)
-
-    need_wh_trades = (not wh_trades_exists) or force_warehouse
-    need_wh_positions = (not wh_positions_exists) or force_warehouse
-    need_wh_pnl = (not wh_pnl_exists) or force_warehouse
-    need_wh_report = (not wh_report_exists) or force_warehouse
+    need_wh_trades = (not s3_key_exists(s3, bucket=bucket, key=wh_trades_key)) or force_warehouse
+    need_wh_positions = (not s3_key_exists(s3, bucket=bucket, key=wh_positions_key)) or force_warehouse
+    need_wh_pnl = (not s3_key_exists(s3, bucket=bucket, key=wh_pnl_key)) or force_warehouse
+    need_wh_report = (not s3_key_exists(s3, bucket=bucket, key=wh_report_key)) or force_warehouse
 
     return DayPlan(
         dt=dt_str,
@@ -214,49 +258,44 @@ def run_subprocess(cmd: list[str]) -> None:
         raise RuntimeError(f"Command failed with exit code {proc.returncode}: {' '.join(cmd)}")
 
 
+# ----------------------------
+# CLI
+# ----------------------------
 def parse_args() -> argparse.Namespace:
     ap = argparse.ArgumentParser(
         description="Daily warehouse update: rebuild_ledger + build_warehouse for calendar days."
     )
 
-    ap.add_argument("--bucket", default=DEFAULT_BUCKET)
-    ap.add_argument("--region", default=DEFAULT_REGION)
-    ap.add_argument("--engine-root", default=DEFAULT_ENGINE_ROOT)
+    ap.add_argument("--bucket", default=None)
+    ap.add_argument("--region", default=None)
+    ap.add_argument("--engine-root", default=None)
 
     ap.add_argument(
         "--start",
         default="auto",
-        help="Start date YYYY-MM-DD, or 'auto' to resume from latest warehouse dt + 1 (default: auto).",
+        help="Start date YYYY-MM-DD, or 'auto' to resume from latest warehouse dt + 1.",
     )
     ap.add_argument("--end", default=None, help="End date YYYY-MM-DD. Default: today.")
 
     ap.add_argument("--account-id", default="main")
 
     ap.add_argument("--build-dim-assets", action="store_true", help="Build dim_assets snapshot once at the start.")
-    ap.add_argument("--universe-path", default=None, help="Local universe.csv path (required if --build-dim-assets).")
+    ap.add_argument("--universe-path", default=None, help="Local universe.csv path. Required if --build-dim-assets.")
 
     ap.add_argument("--force-ledger", action="store_true", help="Rebuild ledger even if it exists for dt.")
     ap.add_argument("--force-warehouse", action="store_true", help="Rewrite warehouse partitions even if they exist.")
     ap.add_argument("--dry-run", action="store_true", help="Print what would run but do not execute.")
-    ap.add_argument(
-        "--stop-on-error",
-        action="store_true",
-        help="Stop immediately on first failing day. Default: continue and print errors.",
-    )
+    ap.add_argument("--stop-on-error", action="store_true", help="Stop immediately on first failing day.")
 
     ap.add_argument(
         "--ledger-prices-mode",
         choices=["asof", "latest"],
         default="asof",
-        help="Pricing mode to pass to rebuild_ledger.py.",
+        help="Pricing mode to pass to rebuild_ledger.",
     )
 
     ap.add_argument("--use-checkpoints", action="store_true", help="Pass --use-checkpoints to rebuild_ledger.")
-    ap.add_argument(
-        "--write-checkpoints",
-        action="store_true",
-        help="Pass --write-checkpoints to rebuild_ledger while backfilling.",
-    )
+    ap.add_argument("--write-checkpoints", action="store_true", help="Pass --write-checkpoints to rebuild_ledger.")
     ap.add_argument(
         "--checkpoint-policy",
         choices=["month_end", "always"],
@@ -275,16 +314,25 @@ def parse_args() -> argparse.Namespace:
         help="Python module to execute for warehouse build.",
     )
 
+    ap.add_argument("--env", default=None, choices=["dev", "staging", "prod"])
+    ap.add_argument("--confirm-prod-write", action="store_true")
+
     return ap.parse_args()
 
 
-def main() -> None:
+def _main_impl() -> None:
     args = parse_args()
 
-    bucket = str(args.bucket)
-    region = str(args.region)
-    engine_root = str(args.engine_root).strip("/")
+    cfg = load_runtime_config(args.env)
+
+    bucket = str(args.bucket or cfg_bucket(cfg))
+    region = str(args.region or cfg_region(cfg))
+    engine_root = str(args.engine_root or cfg_engine_root(cfg)).strip("/")
     account_id = str(args.account_id)
+
+    writes_requested = not bool(args.dry_run)
+    if writes_requested:
+        require_prod_confirmation(cfg, bool(args.confirm_prod_write))
 
     s3 = s3_client(region)
 
@@ -301,10 +349,7 @@ def main() -> None:
     start_arg = str(args.start).strip().lower()
     if start_arg == "auto":
         latest_wh = discover_latest_warehouse_dt(s3, bucket=bucket, engine_root=engine_root)
-        if latest_wh is not None:
-            wh_start_d = latest_wh + dt.timedelta(days=1)
-        else:
-            wh_start_d = first_activity_d
+        wh_start_d = latest_wh + dt.timedelta(days=1) if latest_wh is not None else first_activity_d
     else:
         wh_start_d = parse_date(args.start)
 
@@ -314,10 +359,11 @@ def main() -> None:
 
     days = daterange(wh_start_d, end_d)
     if not days:
-        print("[OK] nothing to do (empty date range).")
+        print("[OK] nothing to do: empty date range.")
         return
 
     print("\n=== WAREHOUSE DAILY UPDATE ===")
+    print(f"env:                {cfg_env(cfg)}")
     print(f"bucket:             {bucket}")
     print(f"engine_root:        {engine_root}")
     print(f"region:             {region}")
@@ -334,6 +380,7 @@ def main() -> None:
     if args.build_dim_assets:
         if not args.universe_path:
             raise SystemExit("--build-dim-assets requires --universe-path")
+
         cmd = [
             sys.executable,
             "-m",
@@ -353,10 +400,17 @@ def main() -> None:
             "--universe-path",
             str(args.universe_path),
         ]
+
         if args.dry_run:
             cmd.append("--dry-run")
 
-        print("[plan] build dim_assets snapshot once (dim-assets-only)")
+        maybe_append_runtime_args(
+            cmd,
+            env=args.env,
+            confirm_prod_write=bool(args.confirm_prod_write),
+        )
+
+        print("[plan] build dim_assets snapshot once")
         if args.dry_run:
             print("[dry] would run:")
             print(" ".join(cmd))
@@ -379,11 +433,11 @@ def main() -> None:
         )
 
         if (
-            (not plan.need_ledger)
-            and (not plan.need_wh_trades)
-            and (not plan.need_wh_positions)
-            and (not plan.need_wh_pnl)
-            and (not plan.need_wh_report)
+            not plan.need_ledger
+            and not plan.need_wh_trades
+            and not plan.need_wh_positions
+            and not plan.need_wh_pnl
+            and not plan.need_wh_report
         ):
             continue
 
@@ -398,7 +452,7 @@ def main() -> None:
 
         try:
             if plan.need_ledger:
-                cmd = [
+                ledger_cmd = [
                     sys.executable,
                     "-m",
                     str(args.rebuild_ledger_module),
@@ -415,10 +469,10 @@ def main() -> None:
                 ]
 
                 if args.use_checkpoints:
-                    cmd.append("--use-checkpoints")
+                    ledger_cmd.append("--use-checkpoints")
 
                 if args.write_checkpoints:
-                    cmd.extend(
+                    ledger_cmd.extend(
                         [
                             "--write-checkpoints",
                             "--checkpoint-policy",
@@ -427,15 +481,21 @@ def main() -> None:
                     )
 
                 if args.dry_run:
-                    cmd.append("--dry-run")
+                    ledger_cmd.append("--dry-run")
+
+                maybe_append_runtime_args(
+                    ledger_cmd,
+                    env=args.env,
+                    confirm_prod_write=bool(args.confirm_prod_write),
+                )
 
                 if args.dry_run:
                     print("[dry] would run ledger rebuild:")
-                    print(" ".join(cmd))
+                    print(" ".join(ledger_cmd))
                 else:
-                    run_subprocess(cmd)
+                    run_subprocess(ledger_cmd)
 
-            cmd = [
+            wh_cmd = [
                 sys.executable,
                 "-m",
                 str(args.build_warehouse_module),
@@ -450,32 +510,106 @@ def main() -> None:
                 "--account-id",
                 account_id,
             ]
+
             if args.dry_run:
-                cmd.append("--dry-run")
+                wh_cmd.append("--dry-run")
+
+            maybe_append_runtime_args(
+                wh_cmd,
+                env=args.env,
+                confirm_prod_write=bool(args.confirm_prod_write),
+            )
 
             if args.dry_run:
                 print("[dry] would run warehouse build:")
-                print(" ".join(cmd))
+                print(" ".join(wh_cmd))
             else:
-                run_subprocess(cmd)
+                run_subprocess(wh_cmd)
 
         except Exception as e:
             msg = f"dt={dt_str} :: {type(e).__name__}: {e}"
             print(f"[ERROR] {msg}")
             errors.append(msg)
+
             if args.stop_on_error:
                 break
 
     print("\n=== DONE ===")
+
     if errors:
         print(f"[WARN] failures={len(errors)}")
-        for m in errors[:30]:
-            print(f" - {m}")
+        for msg in errors[:30]:
+            print(f" - {msg}")
         if len(errors) > 30:
             print(f" - ... ({len(errors) - 30} more)")
         raise SystemExit(2)
 
     print("[OK] update completed with no errors.")
+
+
+# ----------------------------
+# Audit/logging entrypoint wrapper
+# ----------------------------
+def _tier1_audit_is_dry_run(args: argparse.Namespace) -> bool:
+    return bool(getattr(args, "dry_run", False) or getattr(args, "no_write", False))
+
+
+def main_with_audit() -> None:
+    args = parse_args()
+    cfg = load_runtime_config(getattr(args, "env", None))
+    is_dry_run = _tier1_audit_is_dry_run(args)
+
+    with capture_script_run(
+        cfg=cfg,
+        script_name="run_warehouse_backfill.py",
+        input_args=vars(args),
+        dry_run=is_dry_run,
+    ) as run_id:
+        try:
+            _main_impl()
+
+            event = build_audit_event(
+                cfg=cfg,
+                run_id=run_id,
+                event_type="backfill",
+                entity_type="warehouse_backfill",
+                entity_id=None,
+                as_of=str(getattr(args, "as_of", None) or getattr(args, "dt", None) or getattr(args, "run_dt", None) or ""),
+                source_script="run_warehouse_backfill.py",
+                source_mode="warehouse_backfill",
+                status=("dry_run" if is_dry_run else "success"),
+                input_args=vars(args),
+                metadata={
+                    "tier": "tier_1",
+                    "payload_policy": "large_dataset_metadata_only",
+                    "note": "Tier 1 audit event is entrypoint-level. Detailed output keys/row counts are available in the script log stdout and script-specific metadata where emitted by the script.",
+                },
+            )
+            write_audit_event(cfg=cfg, event=event, dry_run=is_dry_run)
+        except Exception as exc:
+            event = build_audit_event(
+                cfg=cfg,
+                run_id=run_id,
+                event_type="backfill",
+                entity_type="warehouse_backfill",
+                entity_id=None,
+                as_of=str(getattr(args, "as_of", None) or getattr(args, "dt", None) or getattr(args, "run_dt", None) or ""),
+                source_script="run_warehouse_backfill.py",
+                source_mode="warehouse_backfill",
+                status="failed",
+                input_args=vars(args),
+                metadata={
+                    "tier": "tier_1",
+                    "payload_policy": "large_dataset_metadata_only",
+                },
+                error=f"{type(exc).__name__}: {exc}",
+            )
+            write_audit_event(cfg=cfg, event=event, dry_run=is_dry_run)
+            raise
+
+
+def main() -> None:
+    main_with_audit()
 
 
 if __name__ == "__main__":

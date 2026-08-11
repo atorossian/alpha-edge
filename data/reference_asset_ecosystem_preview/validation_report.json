@@ -1,0 +1,21 @@
+{
+  "summary": {
+    "regions_rows": 12,
+    "countries_rows": 13,
+    "markets_rows": 15,
+    "calendar_definitions_rows": 14,
+    "calendar_dates_rows": 132944,
+    "assets_rows": 1982,
+    "assets_active_rows": 1982,
+    "asset_issues_rows": 0,
+    "missing_calendar_id": 0,
+    "missing_market_id": 0,
+    "missing_country_id": 0,
+    "missing_region_id": 0,
+    "unknown_calendar_id": 0,
+    "unknown_market_id": 0,
+    "calendar_start": "2010-01-01",
+    "calendar_end": "2035-12-31"
+  },
+  "asset_issues": []
+}

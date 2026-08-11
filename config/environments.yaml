@@ -1,0 +1,22 @@
+# config/environments.yaml
+
+dev:
+  bucket: alpha-edge-algo
+  region: eu-west-1
+  root_prefix: dev/engine/v1
+  market_root: dev/market
+  warehouse_root: dev/engine/v1/warehouse
+
+staging:
+  bucket: alpha-edge-algo
+  region: eu-west-1
+  root_prefix: staging/engine/v1
+  market_root: staging/market
+  warehouse_root: staging/engine/v1/warehouse
+
+prod:
+  bucket: alpha-edge-algo
+  region: eu-west-1
+  root_prefix: prod/engine/v1
+  market_root: market
+  warehouse_root: prod/engine/v1/warehouse

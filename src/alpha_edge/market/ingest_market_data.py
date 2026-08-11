@@ -1,11 +1,18 @@
 # ingest_market_data.py
 from __future__ import annotations
 
+from alpha_edge.core.audit import build_audit_event, write_audit_event
+from alpha_edge.core.run_logging import capture_script_run
+
+import argparse
 import threading
 from typing import Optional, Any
 from pathlib import Path
 import hashlib
 import os
+
+from alpha_edge.core.runtime import load_runtime_config, require_prod_confirmation
+from alpha_edge.core.schemas import RuntimeConfig
 
 from alpha_edge import paths
 
@@ -55,6 +62,41 @@ UTC = "UTC"
 _CACHE_DIR: Path = paths.ensure_dir(paths.local_outputs_dir() / "yf_result_cache")
 _CACHE_LOCK = threading.Lock()
 
+DEFAULT_BUCKET = "alpha-edge-algo"
+DEFAULT_REGION = "eu-west-1"
+DEFAULT_MARKET_ROOT = "market"
+
+
+def _cfg_bucket(cfg: RuntimeConfig) -> str:
+    return str(getattr(cfg, "bucket", DEFAULT_BUCKET)).strip()
+
+
+def _cfg_region(cfg: RuntimeConfig) -> str:
+    return str(getattr(cfg, "region", DEFAULT_REGION)).strip()
+
+
+def _cfg_market_root(cfg: RuntimeConfig) -> str:
+    return str(getattr(cfg, "market_root", DEFAULT_MARKET_ROOT)).strip("/")
+
+
+def _make_market_store(*, bucket: str, region: str, market_root: str) -> MarketStore:
+    """
+    Build a runtime-aware MarketStore.
+
+    Important:
+      - dev/staging MUST write under cfg.market_root.
+      - if MarketStore does not support base_prefix yet, fail loudly for non-prod roots
+        instead of silently writing to prod market/.
+    """
+    try:
+        return MarketStore(bucket=bucket, region=region, base_prefix=market_root)
+    except TypeError:
+        if str(market_root).strip("/") != DEFAULT_MARKET_ROOT:
+            raise RuntimeError(
+                "MarketStore does not accept base_prefix yet, but this ingest run requires "
+                f"market_root={market_root!r}. Patch MarketStore before running dev/staging ingest."
+            )
+        return MarketStore(bucket=bucket, region=region)
 
 # -------------------------
 # timezone helpers (STANDARD: tz-aware UTC everywhere)
@@ -63,6 +105,38 @@ def _to_utc_ts(x) -> pd.Timestamp:
     """Parse anything into a tz-aware UTC Timestamp (or NaT)."""
     t = pd.to_datetime(x, errors="coerce", utc=True)
     return pd.Timestamp(t) if pd.notna(t) else pd.NaT
+
+def _valid_latest_price_rows(ohlcv_usd: pd.DataFrame) -> pd.DataFrame:
+    """
+    Rows eligible for latest executable/analytics snapshots.
+
+    Yahoo can return an incomplete current daily candle, especially for FX,
+    where open/high/low exist but close/adj_close are NaN. Those rows may be
+    useful to inspect, but they must never become latest_prices snapshots.
+    """
+    if ohlcv_usd is None or ohlcv_usd.empty:
+        return pd.DataFrame()
+
+    out = ohlcv_usd.copy()
+
+    required = ["close_raw_usd", "close_adjusted_usd", "close_usd", "adj_close_usd"]
+    for c in required:
+        if c not in out.columns:
+            return pd.DataFrame()
+        out[c] = pd.to_numeric(out[c], errors="coerce")
+
+    mask = (
+        out["close_raw_usd"].notna()
+        & out["close_adjusted_usd"].notna()
+        & out["close_usd"].notna()
+        & out["adj_close_usd"].notna()
+        & np.isfinite(out["close_raw_usd"])
+        & np.isfinite(out["close_adjusted_usd"])
+        & (out["close_raw_usd"] > 0)
+        & (out["close_adjusted_usd"] > 0)
+    )
+
+    return out.loc[mask].copy()
 
 
 def _to_utc_series(x) -> pd.Series:
@@ -282,10 +356,27 @@ def _yf_pop_error_for(symbol: str) -> str | None:
 
 
 def _is_retryable_yf_error(err: str | None) -> bool:
+    """
+    Retry only errors that are likely transient.
+
+    Yahoo's "User is unable to access this feature" is usually not fixed by
+    hammering retries, so treating it as retryable slows full-universe ingest.
+    """
     if not err:
         return False
-    e = err.lower()
-    return ("invalid crumb" in e) or ("unauthorized" in e) or ("unable to access this feature" in e)
+
+    e = str(err).lower()
+
+    if "unable to access this feature" in e:
+        return False
+
+    if "invalid crumb" in e:
+        return True
+
+    if "unauthorized" in e and "unable to access this feature" not in e:
+        return True
+
+    return False
 
 
 def _is_up_to_date_for_run(*, start: str, end: str | None) -> bool:
@@ -358,6 +449,29 @@ def fetch_yahoo_currency(ticker: str, session=None) -> dict:
 
     return out
 
+def _as_1d_series(df: pd.DataFrame, col: str) -> pd.Series:
+    """
+    Return a single Series for a column name.
+
+    Defensive fix for yfinance outputs where column normalization can create
+    duplicated names, causing df[col] to return a DataFrame instead of Series.
+    """
+    if col not in df.columns:
+        return pd.Series(np.nan, index=df.index, name=col)
+
+    x = df[col]
+
+    if isinstance(x, pd.DataFrame):
+        if x.shape[1] == 0:
+            return pd.Series(np.nan, index=df.index, name=col)
+        x = x.iloc[:, 0]
+
+    return pd.Series(x, index=df.index, name=col)
+
+
+def _to_numeric_1d(df: pd.DataFrame, col: str) -> pd.Series:
+    return pd.to_numeric(_as_1d_series(df, col), errors="coerce").astype("float64")
+
 
 def download_ohlcv(
     ticker: str,
@@ -385,19 +499,61 @@ def download_ohlcv(
         if df is None or df.empty:
             return pd.DataFrame()
 
-        try:
-            if hasattr(df.columns, "levels"):
-                df.columns = df.columns.get_level_values(0)
-        except Exception:
-            pass
+        df = df.copy()
+
+        # yfinance can return either:
+        #   columns = ["Open", "High", ...]
+        # or MultiIndex columns:
+        #   level 0 = price fields, level 1 = ticker
+        # or occasionally the reverse.
+        if isinstance(df.columns, pd.MultiIndex):
+            field_names = {"open", "high", "low", "close", "adj_close", "adjclose", "volume"}
+
+            best_level = 0
+            best_score = -1
+
+            for level in range(df.columns.nlevels):
+                vals = [
+                    str(x).strip().replace(" ", "_").lower()
+                    for x in df.columns.get_level_values(level)
+                ]
+                score = sum(v in field_names for v in vals)
+                if score > best_score:
+                    best_score = score
+                    best_level = level
+
+            df.columns = df.columns.get_level_values(best_level)
 
         df.columns = [str(c).strip().replace(" ", "_").lower() for c in df.columns]
+
+        # Normalize common aliases.
+        rename_map = {
+            "adjclose": "adj_close",
+            "adj_close_": "adj_close",
+            "datetime": "date",
+            "index": "date",
+        }
+        df = df.rename(columns={c: rename_map.get(c, c) for c in df.columns})
+
+        # Remove duplicated columns defensively. Duplicates make df["close"]
+        # return a DataFrame, which later breaks pd.to_numeric.
+        df = df.loc[:, ~pd.Index(df.columns).duplicated(keep="first")].copy()
+
         df.index = pd.to_datetime(df.index, errors="coerce", utc=True)
-        df = df.reset_index().rename(columns={"index": "date"})
+        df = df.reset_index()
+
         df.columns = [str(c).strip().replace(" ", "_").lower() for c in df.columns]
+
+        if "date" not in df.columns:
+            if "index" in df.columns:
+                df = df.rename(columns={"index": "date"})
+            elif "datetime" in df.columns:
+                df = df.rename(columns={"datetime": "date"})
 
         if "adj_close" not in df.columns and "adjclose" in df.columns:
             df = df.rename(columns={"adjclose": "adj_close"})
+
+        df = df.loc[:, ~pd.Index(df.columns).duplicated(keep="first")].copy()
 
         return df
 
@@ -412,9 +568,10 @@ def download_ohlcv(
     )
 
     err = _yf_pop_error_for(ticker)
-    if _is_retryable_yf_error(err):
-        raise RuntimeError(err)
+
     if err and (df is None or df.empty):
+        if _is_retryable_yf_error(err):
+            raise RuntimeError(err)
         raise RuntimeError(f"yfinance_error[{ticker}] {err}")
 
     df = _normalize_df(df)
@@ -424,10 +581,12 @@ def download_ohlcv(
             t = yf.Ticker(ticker)
             h = t.history(start=start, end=end, interval=interval, auto_adjust=False)
             err2 = _yf_pop_error_for(ticker)
-            if _is_retryable_yf_error(err2):
-                raise RuntimeError(err2)
+
             if err2 and (h is None or h.empty):
+                if _is_retryable_yf_error(err2):
+                    raise RuntimeError(err2)
                 raise RuntimeError(f"yfinance_error[{ticker}] {err2}")
+
             df = _normalize_df(h)
         except Exception:
             return pd.DataFrame()
@@ -683,23 +842,51 @@ def get_fx_to_usd_for_dates(
 
 def compute_returns_per_ticker(ohlcv_usd: pd.DataFrame) -> pd.DataFrame:
     """
-    Compute USD returns per ticker without groupby.apply (future-proof).
-    Canonical returns are computed on adjusted USD closes.
+    Compute canonical USD log returns per ticker.
+
+    Canonical returns are computed on adjusted USD closes:
+
+        ret_log = log(close_adjusted_usd_t / close_adjusted_usd_{t-1})
+
+    Compatibility:
+      - ret_close_adjusted_usd remains the canonical return column.
+      - ret_adj_close_usd remains a backward-compatible alias.
+      - both now contain log returns.
     """
+    cols = [
+        "date",
+        "ticker",
+        "ret_close_adjusted_usd",
+        "ret_adj_close_usd",
+        "ret_log_close_adjusted_usd",
+    ]
+
     if ohlcv_usd.empty:
-        return pd.DataFrame(columns=["date", "ticker", "ret_close_adjusted_usd", "ret_adj_close_usd"])
+        return pd.DataFrame(columns=cols)
 
     df = ohlcv_usd[["date", "ticker", "close_adjusted_usd"]].copy()
     df["date"] = pd.to_datetime(df["date"], errors="coerce", utc=True)
-    df = df.sort_values(["ticker", "date"])
+    df["ticker"] = df["ticker"].astype(str).str.upper().str.strip()
+    df["close_adjusted_usd"] = pd.to_numeric(df["close_adjusted_usd"], errors="coerce")
 
-    df["ret_close_adjusted_usd"] = df.groupby("ticker")["close_adjusted_usd"].pct_change()
-    df["ret_adj_close_usd"] = df["ret_close_adjusted_usd"]
+    df = (
+        df.dropna(subset=["date", "ticker", "close_adjusted_usd"])
+        .sort_values(["ticker", "date"], kind="stable")
+        .drop_duplicates(subset=["ticker", "date"], keep="last")
+    )
 
-    df = df.replace([np.inf, -np.inf], np.nan)
-    df = df.dropna(subset=["ret_close_adjusted_usd"])
+    prev = df.groupby("ticker")["close_adjusted_usd"].shift(1)
 
-    return df[["date", "ticker", "ret_close_adjusted_usd", "ret_adj_close_usd"]]
+    ret_log = np.log(df["close_adjusted_usd"] / prev.replace(0.0, np.nan))
+    ret_log = ret_log.replace([np.inf, -np.inf], np.nan)
+
+    df["ret_log_close_adjusted_usd"] = ret_log
+    df["ret_close_adjusted_usd"] = df["ret_log_close_adjusted_usd"]
+    df["ret_adj_close_usd"] = df["ret_log_close_adjusted_usd"]
+
+    df = df.dropna(subset=["ret_log_close_adjusted_usd"])
+
+    return df[cols]
 
 
 class RateLimiter:
@@ -728,8 +915,8 @@ def call_yf_with_retries(
     *,
     sem: threading.Semaphore,
     limiter: RateLimiter,
-    attempts: int = 4,
-    base_sleep: float = 0.6,
+    attempts: int = 2,
+    base_sleep: float = 0.4
 ):
     """
     Wrap any yfinance call with:
@@ -755,18 +942,25 @@ def call_yf_with_retries(
 
 def ingest(
     *,
-    bucket: str = "alpha-edge-algo",
-    universe_csv: str = paths.universe_dir() / "universe.csv",
+    bucket: str = DEFAULT_BUCKET,
+    region: str = DEFAULT_REGION,
+    market_root: str = DEFAULT_MARKET_ROOT,
+    universe_csv: str | Path = paths.universe_dir() / "universe.csv",
     start_base: str = "2010-01-01",
+    end_date: str | None = None,
     interval: str = "1d",
-    max_tickers: Optional[int] = None,
-    force_refresh_csv: str | None = paths.universe_dir() / "ingest_force_refresh.csv",
+    max_assets: Optional[int] = None,
+    force_refresh_csv: str | Path | None = paths.universe_dir() / "ingest_force_refresh.csv",
     max_workers: int = 4,
     yahoo_max_concurrency: int = 2,
     yahoo_rate_per_sec: float = 1.5,
     print_first_failures: int = 25,
     flush_failures_every: int = 50,
     flush_failures_min_seconds: float = 30.0,
+    ignore_existing_state: bool = False,
+    run_triage: bool = True,
+    env_name: str = "dev",
+    allow_large_dev_universe: bool = False,
 ) -> None:
     import time
 
@@ -778,12 +972,44 @@ def ingest(
     yf_sem = threading.Semaphore(int(yahoo_max_concurrency))
     limiter = RateLimiter(rate_per_sec=float(yahoo_rate_per_sec))
 
-    store = MarketStore(bucket=bucket)
-    end = safe_end_date_for_interval(interval)
-    expected_last = _expected_last_closed_day_utc()
+    universe_csv = Path(universe_csv)
+    market_root = str(market_root).strip("/")
 
-    u = pd.read_csv(universe_csv)
-    u = u[u.get("include", 1).fillna(1).astype(int) == 1].copy()
+    store = _make_market_store(bucket=bucket, region=region, market_root=market_root)
+
+    # yfinance end is exclusive. If caller passes --end 2024-02-05, we pass that through.
+    end = str(end_date).strip() if end_date else safe_end_date_for_interval(interval)
+    expected_last = (
+        pd.Timestamp(end).tz_localize("UTC").normalize() - pd.Timedelta(days=1)
+        if end
+        else _expected_last_closed_day_utc()
+    )
+
+    if not universe_csv.exists():
+        raise FileNotFoundError(f"Universe CSV not found: {universe_csv}")
+
+    u_raw = pd.read_csv(universe_csv)
+    u = u_raw[u_raw.get("include", 1).fillna(1).astype(int) == 1].copy()
+
+    print("\n=== INGEST MARKET DATA ===")
+    print(f"env:           {env_name}")
+    print(f"bucket:        {bucket}")
+    print(f"region:        {region}")
+    print(f"market_root:   {market_root}")
+    print(f"universe_csv:  {universe_csv}")
+    print(f"universe_rows: {len(u_raw)}")
+    print(f"included_rows: {len(u)}")
+    print(f"start:         {start_base}")
+    print(f"end:           {end}")
+    print(f"interval:      {interval}")
+    print(f"ignore_state:  {bool(ignore_existing_state)}")
+    print("")
+
+    if str(env_name).lower() == "dev" and len(u) > 100 and not bool(allow_large_dev_universe):
+        raise RuntimeError(
+            f"Refusing dev ingest with included_rows={len(u)}. "
+            "This looks like a full universe run. Pass --allow-large-dev-universe only if intentional."
+        )
 
     if "asset_id" not in u.columns:
         raise RuntimeError("Universe CSV must include 'asset_id' column (partition key).")
@@ -811,8 +1037,8 @@ def ingest(
             u["currency"].tolist(),
         )
     )
-    if max_tickers:
-        triples = triples[:max_tickers]
+    if max_assets:
+        triples = triples[:max_assets]
     n_total = len(triples)
 
     force_refresh: set[str] = set()
@@ -834,8 +1060,12 @@ def ingest(
         except Exception:
             force_refresh = set()
 
-    last_state = store.read_last_date_state()
-    provider_state = store.read_provider_symbol_state()
+    if ignore_existing_state:
+        last_state = {}
+        provider_state = {}
+    else:
+        last_state = store.read_last_date_state() or {}
+        provider_state = store.read_provider_symbol_state() or {}
 
     # Seed map for adjusted-return continuity only.
     prev_adjusted_px_map: dict[str, float] = {}
@@ -1062,14 +1292,12 @@ def ingest(
             df["currency"] = ("USD" if is_fx_asset else ccy)
 
             # Phase 0 explicit semantics
-            df["close_raw_usd"] = (
-                pd.to_numeric(df["close"], errors="coerce").astype("float64")
-                * pd.to_numeric(df["fx_to_usd"], errors="coerce").astype("float64")
-            )
-            df["close_adjusted_usd"] = (
-                pd.to_numeric(df["adj_close"], errors="coerce").astype("float64")
-                * pd.to_numeric(df["fx_to_usd"], errors="coerce").astype("float64")
-            )
+            close_s = _to_numeric_1d(df, "close")
+            adj_close_s = _to_numeric_1d(df, "adj_close")
+            fx_s = _to_numeric_1d(df, "fx_to_usd")
+
+            df["close_raw_usd"] = close_s * fx_s
+            df["close_adjusted_usd"] = adj_close_s * fx_s
 
             # Backward-compatibility aliases
             df["close_usd"] = df["close_raw_usd"]
@@ -1149,9 +1377,16 @@ def ingest(
                         ignore_index=True,
                     ).sort_values("date")
 
-            px["ret_close_adjusted_usd"] = px["close_adjusted_usd"].pct_change()
-            px["ret_adj_close_usd"] = px["ret_close_adjusted_usd"]
-            px = px.replace([np.inf, -np.inf], np.nan).dropna(subset=["ret_close_adjusted_usd"])
+            prev_close = px["close_adjusted_usd"].shift(1).replace(0.0, np.nan)
+
+            px["ret_log_close_adjusted_usd"] = np.log(px["close_adjusted_usd"] / prev_close)
+            px["ret_log_close_adjusted_usd"] = px["ret_log_close_adjusted_usd"].replace([np.inf, -np.inf], np.nan)
+
+            # Backward-compatible aliases. These are now log returns.
+            px["ret_close_adjusted_usd"] = px["ret_log_close_adjusted_usd"]
+            px["ret_adj_close_usd"] = px["ret_log_close_adjusted_usd"]
+
+            px = px.dropna(subset=["ret_log_close_adjusted_usd"])
 
             returns_written = 0
             last_return_row = None
@@ -1166,10 +1401,13 @@ def ingest(
                             "date": ret_new["date"].values,
                             "asset_id": asset_id,
                             "ticker": ticker,
-                            "ret_close_adjusted_usd": ret_new["ret_close_adjusted_usd"].astype("float64").values,
+                            "ret_log_close_adjusted_usd": ret_new["ret_log_close_adjusted_usd"].astype("float64").values,
                         }
                     )
-                    returns["ret_adj_close_usd"] = returns["ret_close_adjusted_usd"]
+
+                    # Backward-compatible aliases. These are now log returns.
+                    returns["ret_close_adjusted_usd"] = returns["ret_log_close_adjusted_usd"]
+                    returns["ret_adj_close_usd"] = returns["ret_log_close_adjusted_usd"]
                     returns["date"] = pd.to_datetime(returns["date"], errors="coerce", utc=True).dt.normalize()
                     returns["year"] = returns["date"].dt.year.astype(int)
 
@@ -1200,12 +1438,35 @@ def ingest(
                     if returns_written > 0:
                         last_return_row = returns.sort_values("date").iloc[-1].to_dict()
 
-            last_price_row = ohlcv_usd.sort_values("date").iloc[-1].to_dict()
+            ohlcv_snapshot_valid = _valid_latest_price_rows(ohlcv_usd)
+
+            if ohlcv_snapshot_valid.empty:
+                return {
+                    "status": "empty_valid_price",
+                    "asset_id": asset_id,
+                    "ticker": ticker,
+                    "yahoo_ticker": yahoo_sym,
+                    "start": start,
+                    "error": (
+                        "downloaded rows exist but no valid close_raw_usd/close_adjusted_usd; "
+                        "likely incomplete current-day candle"
+                    ),
+                }
+
+            last_price_row = ohlcv_snapshot_valid.sort_values("date").iloc[-1].to_dict()
             last_date = pd.Timestamp(last_price_row["date"]).date().isoformat()
             last_raw = last_price_row.get("close_raw_usd")
             last_adj = last_price_row.get("close_adjusted_usd")
 
-            if freshness_note:
+            raw_latest_downloaded = ohlcv_usd.sort_values("date").iloc[-1].to_dict()
+            raw_latest_date = pd.Timestamp(raw_latest_downloaded["date"]).date().isoformat()
+
+            if raw_latest_date != last_date:
+                last_price_row["_freshness"] = (
+                    f"ignored_incomplete_latest_bar: raw_latest_date={raw_latest_date} "
+                    f"snapshot_date={last_date}"
+                )
+            elif freshness_note:
                 last_price_row["_freshness"] = freshness_note
 
             raw_snapshot_row = _build_raw_snapshot_row(last_price_row)
@@ -1320,7 +1581,10 @@ def ingest(
         latest_prices["date"] = pd.to_datetime(latest_prices["date"], errors="coerce", utc=True).dt.normalize()
         latest_prices = latest_prices.dropna(subset=["date"])
         latest_prices["asset_id"] = latest_prices["asset_id"].astype(str).str.strip()
+
+        latest_prices = _valid_latest_price_rows(latest_prices)
         latest_prices = latest_prices.sort_values("date").drop_duplicates(subset=["asset_id"], keep="last")
+
         store.write_latest_prices_snapshot(latest_prices.reset_index(drop=True))
 
     # Raw latest prices snapshot
@@ -1338,6 +1602,12 @@ def ingest(
         latest_prices_raw["date"] = pd.to_datetime(latest_prices_raw["date"], errors="coerce", utc=True).dt.normalize()
         latest_prices_raw = latest_prices_raw.dropna(subset=["date"])
         latest_prices_raw["asset_id"] = latest_prices_raw["asset_id"].astype(str).str.strip()
+        latest_prices_raw["close_raw_usd"] = pd.to_numeric(latest_prices_raw["close_raw_usd"], errors="coerce")
+        latest_prices_raw = latest_prices_raw[
+            latest_prices_raw["close_raw_usd"].notna()
+            & np.isfinite(latest_prices_raw["close_raw_usd"])
+            & (latest_prices_raw["close_raw_usd"] > 0)
+        ].copy()
         latest_prices_raw = latest_prices_raw.sort_values("date").drop_duplicates(subset=["asset_id"], keep="last")
 
         if hasattr(store, "write_latest_prices_raw_snapshot"):
@@ -1363,6 +1633,15 @@ def ingest(
         ).dt.normalize()
         latest_prices_adjusted = latest_prices_adjusted.dropna(subset=["date"])
         latest_prices_adjusted["asset_id"] = latest_prices_adjusted["asset_id"].astype(str).str.strip()
+        latest_prices_adjusted["close_adjusted_usd"] = pd.to_numeric(
+            latest_prices_adjusted["close_adjusted_usd"],
+            errors="coerce",
+        )
+        latest_prices_adjusted = latest_prices_adjusted[
+            latest_prices_adjusted["close_adjusted_usd"].notna()
+            & np.isfinite(latest_prices_adjusted["close_adjusted_usd"])
+            & (latest_prices_adjusted["close_adjusted_usd"] > 0)
+        ].copy()
         latest_prices_adjusted = latest_prices_adjusted.sort_values("date").drop_duplicates(
             subset=["asset_id"], keep="last"
         )
@@ -1414,18 +1693,19 @@ def ingest(
             }
         )
 
-    run_post_ingest_triage(
-        store=store,
-        as_of=as_of,
-        universe_csv=universe_csv,
-        overrides_csv=paths.universe_dir() / "universe_overrides.csv",
-        excluded_csv=paths.universe_dir() / "asset_excluded.csv",
-        mapping_changes=pd.DataFrame(),
-        mapping_validation=pd.DataFrame(),
-        verbose=True,
-        sample_n=15,
-        local_out_dir=paths.universe_dir() / "triage_outputs",
-    )
+    if run_triage:
+        run_post_ingest_triage(
+            store=store,
+            as_of=as_of,
+            universe_csv=universe_csv,
+            overrides_csv=paths.universe_dir() / "universe_overrides.csv",
+            excluded_csv=paths.universe_dir() / "asset_excluded.csv",
+            mapping_changes=pd.DataFrame(),
+            mapping_validation=pd.DataFrame(),
+            verbose=True,
+            sample_n=15,
+            local_out_dir=paths.universe_dir() / "triage_outputs",
+        )
 
     print("\n[DONE]")
     print(f"assets_total={n_total}")
@@ -1442,5 +1722,121 @@ def ingest(
     print(f"[cache] dir={_CACHE_DIR}")
 
 
+def parse_args() -> argparse.Namespace:
+    ap = argparse.ArgumentParser(description="Ingest Alpha Edge market data into S3.")
+
+    ap.add_argument("--env", default=None, choices=["dev", "staging", "prod"])
+    ap.add_argument("--confirm-prod-write", action="store_true")
+
+    ap.add_argument("--universe-path", default=str(paths.universe_dir() / "universe.csv"))
+    ap.add_argument("--start", default="2010-01-01")
+    ap.add_argument("--end", default=None)
+    ap.add_argument("--interval", default="1d")
+
+    ap.add_argument("--max-assets", type=int, default=None)
+    ap.add_argument("--force-refresh-csv", default=str(paths.universe_dir() / "ingest_force_refresh.csv"))
+
+    ap.add_argument("--max-workers", type=int, default=4)
+    ap.add_argument("--yahoo-max-concurrency", type=int, default=2)
+    ap.add_argument("--yahoo-rate-per-sec", type=float, default=1.5)
+
+    ap.add_argument("--ignore-existing-state", action="store_true")
+    ap.add_argument("--no-triage", action="store_true")
+    ap.add_argument("--allow-large-dev-universe", action="store_true")
+
+    return ap.parse_args()
+
+
+def _main_impl() -> None:
+    args = parse_args()
+
+    cfg = load_runtime_config(args.env)
+    require_prod_confirmation(cfg, bool(args.confirm_prod_write))
+
+    ingest(
+        bucket=_cfg_bucket(cfg),
+        region=_cfg_region(cfg),
+        market_root=_cfg_market_root(cfg),
+        universe_csv=args.universe_path,
+        start_base=str(args.start),
+        end_date=args.end,
+        interval=str(args.interval),
+        max_assets=args.max_assets,
+        force_refresh_csv=args.force_refresh_csv,
+        max_workers=int(args.max_workers),
+        yahoo_max_concurrency=int(args.yahoo_max_concurrency),
+        yahoo_rate_per_sec=float(args.yahoo_rate_per_sec),
+        ignore_existing_state=bool(args.ignore_existing_state),
+        run_triage=(not bool(args.no_triage)),
+        env_name=str(getattr(cfg, "env", args.env or "dev")),
+        allow_large_dev_universe=bool(args.allow_large_dev_universe),
+    )
+
+
+# ----------------------------
+# Audit/logging entrypoint wrapper
+# ----------------------------
+def _tier1_audit_is_dry_run(args: argparse.Namespace) -> bool:
+    return bool(getattr(args, "dry_run", False) or getattr(args, "no_write", False))
+
+
+def main_with_audit() -> None:
+    args = parse_args()
+    cfg = load_runtime_config(getattr(args, "env", None))
+    is_dry_run = _tier1_audit_is_dry_run(args)
+
+    with capture_script_run(
+        cfg=cfg,
+        script_name="ingest_market_data.py",
+        input_args=vars(args),
+        dry_run=is_dry_run,
+    ) as run_id:
+        try:
+            _main_impl()
+
+            event = build_audit_event(
+                cfg=cfg,
+                run_id=run_id,
+                event_type="build_dataset",
+                entity_type="ingest_market_data",
+                entity_id=None,
+                as_of=str(getattr(args, "as_of", None) or getattr(args, "dt", None) or getattr(args, "run_dt", None) or ""),
+                source_script="ingest_market_data.py",
+                source_mode="market_data_ingestion",
+                status=("dry_run" if is_dry_run else "success"),
+                input_args=vars(args),
+                metadata={
+                    "tier": "tier_1",
+                    "payload_policy": "large_dataset_metadata_only",
+                    "note": "Tier 1 audit event is entrypoint-level. Detailed output keys/row counts are available in the script log stdout and script-specific metadata where emitted by the script.",
+                },
+            )
+            write_audit_event(cfg=cfg, event=event, dry_run=is_dry_run)
+        except Exception as exc:
+            event = build_audit_event(
+                cfg=cfg,
+                run_id=run_id,
+                event_type="build_dataset",
+                entity_type="ingest_market_data",
+                entity_id=None,
+                as_of=str(getattr(args, "as_of", None) or getattr(args, "dt", None) or getattr(args, "run_dt", None) or ""),
+                source_script="ingest_market_data.py",
+                source_mode="market_data_ingestion",
+                status="failed",
+                input_args=vars(args),
+                metadata={
+                    "tier": "tier_1",
+                    "payload_policy": "large_dataset_metadata_only",
+                },
+                error=f"{type(exc).__name__}: {exc}",
+            )
+            write_audit_event(cfg=cfg, event=event, dry_run=is_dry_run)
+            raise
+
+
+def main() -> None:
+    main_with_audit()
+
+
 if __name__ == "__main__":
-    ingest()
+    main()

@@ -4,7 +4,12 @@ from __future__ import annotations
 from typing import Dict
 import numpy as np
 
-from alpha_edge.core.schemas import DiscreteAllocation
+from alpha_edge.core.schemas import (
+    DiscreteAllocation,
+    TransitionExecutionConfig,
+    TransitionExecutionPlan,
+    TransitionTradeDelta,
+)
 
 DEFAULT_CRYPTO_DECIMALS = 8
 
@@ -324,4 +329,492 @@ def weights_to_discrete_shares(
         realized_weights=realized_weights,
         total_spent=gross_used_final,  # gross used
         cash_left=cash_left,           # gross remaining
+    )
+
+
+def _clean_signed_quantity_map(values: Dict[str, float] | None) -> Dict[str, float]:
+    out: Dict[str, float] = {}
+
+    for k, v in (values or {}).items():
+        t = str(k).upper().strip()
+        if not t:
+            continue
+
+        try:
+            q = float(v)
+        except Exception:
+            continue
+
+        if not np.isfinite(q) or abs(q) <= 1e-12:
+            continue
+
+        out[t] = float(q)
+
+    return out
+
+
+def _clean_price_map(values: Dict[str, float] | None) -> Dict[str, float]:
+    out: Dict[str, float] = {}
+
+    for k, v in (values or {}).items():
+        t = str(k).upper().strip()
+        if not t:
+            continue
+
+        try:
+            p = float(v)
+        except Exception:
+            continue
+
+        if not np.isfinite(p) or p <= 0:
+            continue
+
+        out[t] = float(p)
+
+    return out
+
+
+def _trade_direction(delta_quantity: float) -> str:
+    if float(delta_quantity) > 0:
+        return "BUY"
+    if float(delta_quantity) < 0:
+        return "SELL"
+    return "HOLD"
+
+
+def _gross_weight_map_from_shares(
+    *,
+    shares: Dict[str, float],
+    prices: Dict[str, float],
+    notional: float,
+) -> Dict[str, float]:
+    """
+    Convert signed shares into signed notional weights.
+
+    Uses the supplied notional as denominator, consistent with
+    weights_to_discrete_shares(), where realized_weights are exposure / notional.
+    """
+    denom = float(notional)
+    if not np.isfinite(denom) or denom <= 0:
+        raise ValueError("notional must be finite and > 0")
+
+    out: Dict[str, float] = {}
+
+    for t, q in _clean_signed_quantity_map(shares).items():
+        if t not in prices:
+            raise ValueError(f"Missing price for current holding {t!r}")
+
+        value = float(q) * float(prices[t])
+        if abs(value) <= 1e-12:
+            continue
+
+        out[t] = float(value / denom)
+
+    return out
+
+
+def _weight_turnover(
+    current_weights: Dict[str, float],
+    target_weights: Dict[str, float],
+) -> float:
+    keys = set(current_weights.keys()) | set(target_weights.keys())
+
+    return float(
+        0.5
+        * sum(
+            abs(float(target_weights.get(k, 0.0)) - float(current_weights.get(k, 0.0)))
+            for k in keys
+        )
+    )
+
+
+def _scale_target_weights_to_daily_turnover(
+    *,
+    current_weights: Dict[str, float],
+    target_weights: Dict[str, float],
+    max_daily_turnover: float,
+) -> tuple[Dict[str, float], float, float]:
+    """
+    Move only part of the way from current weights to target weights when
+    required turnover exceeds max_daily_turnover.
+
+    This function works at the weight level. The resulting adjusted target
+    is later passed into weights_to_discrete_shares(), which remains the
+    source of truth for executable sizing.
+    """
+    full_turnover = _weight_turnover(current_weights, target_weights)
+
+    if full_turnover <= 1e-12:
+        return dict(current_weights), 0.0, 0.0
+
+    if full_turnover <= float(max_daily_turnover):
+        return dict(target_weights), float(full_turnover), 0.0
+
+    scale = float(max_daily_turnover) / float(full_turnover)
+
+    keys = sorted(set(current_weights.keys()) | set(target_weights.keys()))
+
+    adjusted = {
+        k: float(
+            float(current_weights.get(k, 0.0))
+            + scale
+            * (
+                float(target_weights.get(k, 0.0))
+                - float(current_weights.get(k, 0.0))
+            )
+        )
+        for k in keys
+    }
+
+    adjusted = {
+        k: v
+        for k, v in adjusted.items()
+        if abs(float(v)) > 1e-12
+    }
+
+    daily_turnover = _weight_turnover(current_weights, adjusted)
+    blocked_turnover = max(0.0, full_turnover - daily_turnover)
+
+    return adjusted, float(daily_turnover), float(blocked_turnover)
+
+
+def allocation_to_trade_deltas(
+    *,
+    current_shares: Dict[str, float],
+    target_allocation: DiscreteAllocation,
+    prices: Dict[str, float],
+    notional: float,
+    cfg: TransitionExecutionConfig | None = None,
+) -> tuple[list[TransitionTradeDelta], list[TransitionTradeDelta]]:
+    """
+    Compare current signed shares against target signed shares and produce
+    recommendation-only BUY/SELL deltas.
+
+    This does not execute trades.
+    This does not write to the ledger.
+    """
+    if cfg is None:
+        cfg = TransitionExecutionConfig()
+
+    px = _clean_price_map(prices)
+    current = _clean_signed_quantity_map(current_shares)
+    target = _clean_signed_quantity_map(target_allocation.shares)
+
+    denom = float(notional)
+    if not np.isfinite(denom) or denom <= 0:
+        raise ValueError("notional must be finite and > 0")
+
+    tickers = sorted(set(current.keys()) | set(target.keys()))
+
+    trades: list[TransitionTradeDelta] = []
+    blocked_trades: list[TransitionTradeDelta] = []
+
+    for t in tickers:
+        if t not in px:
+            raise ValueError(f"Missing price for trade delta asset {t!r}")
+
+        price = float(px[t])
+
+        current_qty = float(current.get(t, 0.0))
+        target_qty = float(target.get(t, 0.0))
+        delta_qty = float(target_qty - current_qty)
+
+        if abs(delta_qty) <= 1e-12:
+            continue
+
+        current_value = float(current_qty * price)
+        target_value = float(target_qty * price)
+        delta_value = float(target_value - current_value)
+
+        current_weight = float(current_value / denom)
+        target_weight = float(target_value / denom)
+        delta_weight = float(delta_value / denom)
+
+        direction = _trade_direction(delta_qty)
+
+        reason = "included"
+        is_blocked = False
+
+        if abs(delta_value) < float(cfg.min_trade_value):
+            reason = (
+                f"abs(delta_value) {abs(delta_value):.2f} below "
+                f"min_trade_value {float(cfg.min_trade_value):.2f}"
+            )
+            is_blocked = True
+
+        if abs(delta_qty) < float(cfg.min_trade_quantity):
+            reason = (
+                f"abs(delta_quantity) {abs(delta_qty):.10f} below "
+                f"min_trade_quantity {float(cfg.min_trade_quantity):.10f}"
+            )
+            is_blocked = True
+
+        trade = TransitionTradeDelta(
+            asset_id=str(t),
+            direction=direction,
+            current_quantity=float(current_qty),
+            target_quantity=float(target_qty),
+            delta_quantity=float(delta_qty),
+            price=float(price),
+            current_value=float(current_value),
+            target_value=float(target_value),
+            delta_value=float(delta_value),
+            current_weight=float(current_weight),
+            target_weight=float(target_weight),
+            delta_weight=float(delta_weight),
+            reason=reason,
+        )
+
+        if is_blocked:
+            blocked_trades.append(trade)
+        else:
+            trades.append(trade)
+
+    return trades, blocked_trades
+
+
+def build_transition_execution_plan(
+    *,
+    as_of: str,
+    source: str,
+    current_shares: Dict[str, float],
+    target_weights: Dict[str, float],
+    prices: Dict[str, float],
+    notional: float,
+    cfg: TransitionExecutionConfig | None = None,
+    # passthrough controls for weights_to_discrete_shares()
+    min_weight: float = 0.01,
+    min_units_equity: float = 1.0,
+    min_units_crypto: float = 0.0,
+    min_units_weight_thr: float = 0.03,
+    crypto_decimals: int = DEFAULT_CRYPTO_DECIMALS,
+    nearest_step_remaining_frac: float = 0.10,
+    max_topup_iters: int = 200000,
+    topup_chunk_max_steps: int = 5000,
+) -> TransitionExecutionPlan:
+    """
+    Build a recommendation-only transition execution plan.
+
+    Responsibilities:
+      - apply turnover limits
+      - call weights_to_discrete_shares()
+      - compare target shares with current shares
+      - produce BUY/SELL deltas
+
+    Non-responsibilities:
+      - portfolio search
+      - portfolio health scoring
+      - broker execution
+      - ledger writing
+    """
+    if cfg is None:
+        cfg = TransitionExecutionConfig()
+
+    notional = float(notional)
+    if not np.isfinite(notional) or notional <= 0:
+        raise ValueError("notional must be finite and > 0")
+
+    px = _clean_price_map(prices)
+    current = _clean_signed_quantity_map(current_shares)
+
+    if not current:
+        raise ValueError("current_shares is empty; cannot build transition plan.")
+
+    current_weights = _gross_weight_map_from_shares(
+        shares=current,
+        prices=px,
+        notional=notional,
+    )
+
+    # Build the full target allocation first so we can measure true target turnover
+    # using the same executable allocation logic that the project already trusts.
+    full_target_allocation = weights_to_discrete_shares(
+        weights=target_weights,
+        prices=px,
+        notional=notional,
+        min_weight=float(min_weight),
+        min_units_equity=float(min_units_equity),
+        min_units_crypto=float(min_units_crypto),
+        min_units_weight_thr=float(min_units_weight_thr),
+        crypto_decimals=int(crypto_decimals),
+        nearest_step_remaining_frac=float(nearest_step_remaining_frac),
+        max_topup_iters=int(max_topup_iters),
+        topup_chunk_max_steps=int(topup_chunk_max_steps),
+    )
+
+    full_target_weights = {
+        str(k).upper().strip(): float(v)
+        for k, v in (full_target_allocation.realized_weights or {}).items()
+        if str(k).upper().strip() != "CASH" and abs(float(v)) > 1e-12
+    }
+
+    total_turnover = _weight_turnover(current_weights, full_target_weights)
+
+    if total_turnover <= 1e-12:
+        trades, blocked_trades = allocation_to_trade_deltas(
+            current_shares=current,
+            target_allocation=full_target_allocation,
+            prices=px,
+            notional=notional,
+            cfg=cfg,
+        )
+
+        return TransitionExecutionPlan(
+            as_of=str(as_of),
+            recommendation="NO_TRADE",
+            reason="Current shares already match target allocation.",
+            source=str(source),
+            notional=float(notional),
+            total_turnover=0.0,
+            daily_turnover_used=0.0,
+            blocked_turnover=0.0,
+            target_allocation=full_target_allocation,
+            trades=trades,
+            blocked_trades=blocked_trades,
+            config=cfg,
+            diagnostics={
+                "current_weights": current_weights,
+                "target_weights_full": full_target_weights,
+                "partial_transition": False,
+            },
+        )
+
+    if total_turnover > float(cfg.max_total_turnover):
+        return TransitionExecutionPlan(
+            as_of=str(as_of),
+            recommendation="TRADE_BLOCKED",
+            reason=(
+                f"Required turnover {total_turnover:.2%} exceeds "
+                f"max_total_turnover {float(cfg.max_total_turnover):.2%}."
+            ),
+            source=str(source),
+            notional=float(notional),
+            total_turnover=float(total_turnover),
+            daily_turnover_used=0.0,
+            blocked_turnover=float(total_turnover),
+            target_allocation=full_target_allocation,
+            trades=[],
+            blocked_trades=[],
+            config=cfg,
+            diagnostics={
+                "blocked_reason": "max_total_turnover_exceeded",
+                "current_weights": current_weights,
+                "target_weights_full": full_target_weights,
+                "partial_transition": False,
+            },
+        )
+
+    target_weights_for_today = dict(target_weights)
+    daily_turnover_used = float(total_turnover)
+    blocked_turnover = 0.0
+    partial_transition = False
+
+    if total_turnover > float(cfg.max_daily_turnover):
+        if not bool(cfg.allow_partial_transition):
+            return TransitionExecutionPlan(
+                as_of=str(as_of),
+                recommendation="TRADE_BLOCKED",
+                reason=(
+                    f"Required turnover {total_turnover:.2%} exceeds "
+                    f"max_daily_turnover {float(cfg.max_daily_turnover):.2%} "
+                    "and partial transition is disabled."
+                ),
+                source=str(source),
+                notional=float(notional),
+                total_turnover=float(total_turnover),
+                daily_turnover_used=0.0,
+                blocked_turnover=float(total_turnover),
+                target_allocation=full_target_allocation,
+                trades=[],
+                blocked_trades=[],
+                config=cfg,
+                diagnostics={
+                    "blocked_reason": "max_daily_turnover_exceeded",
+                    "current_weights": current_weights,
+                    "target_weights_full": full_target_weights,
+                    "partial_transition": False,
+                },
+            )
+
+        target_weights_for_today, daily_turnover_used, blocked_turnover = _scale_target_weights_to_daily_turnover(
+            current_weights=current_weights,
+            target_weights=full_target_weights,
+            max_daily_turnover=float(cfg.max_daily_turnover),
+        )
+        partial_transition = True
+
+    target_allocation = weights_to_discrete_shares(
+        weights=target_weights_for_today,
+        prices=px,
+        notional=notional,
+        min_weight=float(min_weight),
+        min_units_equity=float(min_units_equity),
+        min_units_crypto=float(min_units_crypto),
+        min_units_weight_thr=float(min_units_weight_thr),
+        crypto_decimals=int(crypto_decimals),
+        nearest_step_remaining_frac=float(nearest_step_remaining_frac),
+        max_topup_iters=int(max_topup_iters),
+        topup_chunk_max_steps=int(topup_chunk_max_steps),
+    )
+
+    trades, blocked_trades = allocation_to_trade_deltas(
+        current_shares=current,
+        target_allocation=target_allocation,
+        prices=px,
+        notional=notional,
+        cfg=cfg,
+    )
+
+    if not trades:
+        return TransitionExecutionPlan(
+            as_of=str(as_of),
+            recommendation="NO_TRADE",
+            reason="All computed trade deltas are below execution thresholds.",
+            source=str(source),
+            notional=float(notional),
+            total_turnover=float(total_turnover),
+            daily_turnover_used=float(daily_turnover_used),
+            blocked_turnover=float(blocked_turnover),
+            target_allocation=target_allocation,
+            trades=[],
+            blocked_trades=blocked_trades,
+            config=cfg,
+            diagnostics={
+                "current_weights": current_weights,
+                "target_weights_full": full_target_weights,
+                "target_weights_for_today": target_weights_for_today,
+                "partial_transition": bool(partial_transition),
+                "trade_count": 0,
+                "blocked_trade_count": int(len(blocked_trades)),
+            },
+        )
+
+    transition_notional = float(sum(abs(t.delta_value) for t in trades))
+
+    return TransitionExecutionPlan(
+        as_of=str(as_of),
+        recommendation="TRADE_RECOMMENDED",
+        reason=(
+            f"{len(trades)} trade recommendation(s), "
+            f"transition_notional={transition_notional:.2f}, "
+            f"daily_turnover={float(daily_turnover_used):.2%}."
+        ),
+        source=str(source),
+        notional=float(notional),
+        total_turnover=float(total_turnover),
+        daily_turnover_used=float(daily_turnover_used),
+        blocked_turnover=float(blocked_turnover),
+        target_allocation=target_allocation,
+        trades=trades,
+        blocked_trades=blocked_trades,
+        config=cfg,
+        diagnostics={
+            "current_weights": current_weights,
+            "target_weights_full": full_target_weights,
+            "target_weights_for_today": target_weights_for_today,
+            "partial_transition": bool(partial_transition),
+            "trade_count": int(len(trades)),
+            "blocked_trade_count": int(len(blocked_trades)),
+            "transition_notional": float(transition_notional),
+        },
     )

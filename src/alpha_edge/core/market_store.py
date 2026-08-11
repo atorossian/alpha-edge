@@ -69,6 +69,44 @@ class MarketStore:
                     keys.append(k)
         return keys
 
+
+    def _read_parquet_tolerant(
+        self,
+        key: str,
+        columns: Optional[list[str]] = None,
+    ) -> pd.DataFrame:
+        """
+        Read one parquet file while tolerating schema evolution.
+
+        If requested columns are missing in older parquet files, read the full
+        file, add missing requested columns as NA, and return columns in the
+        requested order.
+
+        This is important for append-only partitioned datasets where old parts
+        may not contain newer compatibility columns.
+        """
+        raw = self._get_bytes(key)
+
+        if columns is None:
+            return pd.read_parquet(io.BytesIO(raw))
+
+        try:
+            return pd.read_parquet(io.BytesIO(raw), columns=columns)
+        except Exception:
+            df = pd.read_parquet(io.BytesIO(raw))
+
+            if df is None or df.empty:
+                return pd.DataFrame(columns=columns)
+
+            out = df.copy()
+
+            for col in columns:
+                if col not in out.columns:
+                    out[col] = pd.NA
+
+            return out[columns].copy()
+        
+
     # -------------------------
     # Prefixes (S3 KEYS, not s3://)
     # -------------------------
@@ -183,7 +221,7 @@ class MarketStore:
 
         df["asset_id"] = df["asset_id"].astype(str).str.strip()
         for c in df.columns:
-            if pd.api.types.is_categorical_dtype(df[c]):
+            if isinstance(df[c].dtype, pd.CategoricalDtype):
                 df[c] = df[c].astype(str)
 
         df["year"] = df["date"].dt.year.astype(int)
@@ -343,6 +381,233 @@ class MarketStore:
             return json.loads(self._get_bytes(key).decode("utf-8"))
         except Exception:
             return {}
+
+
+
+    # -------------------------
+    # MARKET REGIME HMM OUTPUTS
+    # -------------------------
+    @property
+    def market_hmm_prefix(self) -> str:
+        """
+        Regime HMM output prefix.
+
+        Use a MarketStore whose base_prefix is the engine root, for example:
+            MarketStore(bucket=bucket, region=region, base_prefix="engine/v1")
+
+        Result:
+            engine/v1/regimes/market_hmm
+        """
+        return f"{self.base_prefix}/regimes/market_hmm"
+
+    def _market_hmm_regime_key(self, as_of: str) -> str:
+        as_of = str(as_of).strip()
+        if not as_of:
+            raise ValueError("as_of is required for market HMM regime key")
+        return f"{self.market_hmm_prefix}/dt={as_of}/regime.json"
+
+    def _market_hmm_latest_key(self) -> str:
+        return f"{self.market_hmm_prefix}/latest.json"
+
+    def write_market_hmm_regime(
+        self,
+        *,
+        as_of: str,
+        payload: dict,
+        update_latest: bool = True,
+    ) -> list[str]:
+        """
+        Write market HMM regime output to the existing regime path.
+
+        Writes:
+            <base_prefix>/regimes/market_hmm/dt=YYYY-MM-DD/regime.json
+            <base_prefix>/regimes/market_hmm/latest.json, if update_latest=True
+        """
+        key = self._market_hmm_regime_key(as_of)
+
+        self._put_bytes(
+            key,
+            json.dumps(payload, indent=2, default=str, sort_keys=True).encode("utf-8"),
+            content_type="application/json",
+        )
+
+        written = [key]
+
+        if update_latest:
+            latest_key = self._market_hmm_latest_key()
+            self._put_bytes(
+                latest_key,
+                json.dumps(payload, indent=2, default=str, sort_keys=True).encode("utf-8"),
+                content_type="application/json",
+            )
+            written.append(latest_key)
+
+        return written
+
+    def read_market_hmm_regime(self, as_of: str | None = None) -> dict:
+        """
+        Read market HMM regime output.
+
+        If as_of is None, reads latest.json.
+        Otherwise reads dt=YYYY-MM-DD/regime.json.
+        """
+        key = self._market_hmm_latest_key() if as_of is None else self._market_hmm_regime_key(as_of)
+
+        try:
+            return json.loads(self._get_bytes(key).decode("utf-8"))
+        except Exception:
+            return {}
+
+    def list_market_hmm_regime_dates(self) -> list[str]:
+        """
+        Return available dt=YYYY-MM-DD partitions under the existing regime path.
+        """
+        prefix = f"{self.market_hmm_prefix}/dt="
+        keys = self._list_keys(prefix)
+
+        dates: set[str] = set()
+
+        for key in keys:
+            marker = "/dt="
+            if marker not in key:
+                continue
+
+            tail = key.split(marker, 1)[1]
+            dt_part = tail.split("/", 1)[0]
+
+            if len(dt_part) == 10:
+                dates.add(dt_part)
+
+        return sorted(dates)
+
+    def read_market_hmm_regime_history(
+        self,
+        *,
+        start: str | None = None,
+        end: str | None = None,
+        include_mixed: bool = True,
+        require_point_in_time: bool = False,
+    ) -> pd.DataFrame:
+        """
+        Read point-in-time market HMM regime history from the existing path.
+
+        Existing path:
+            <base_prefix>/regimes/market_hmm/dt=YYYY-MM-DD/regime.json
+
+        This method does not create a new table. It reconstructs regime history
+        from the daily JSON files that already exist under regimes/market_hmm.
+        """
+        start_ts = pd.to_datetime(start).normalize() if start else None
+        end_ts = pd.to_datetime(end).normalize() if end else None
+
+        rows: list[dict[str, Any]] = []
+
+        for d in self.list_market_hmm_regime_dates():
+            d_ts = pd.to_datetime(d, errors="coerce")
+            if pd.isna(d_ts):
+                continue
+
+            d_ts = pd.Timestamp(d_ts).normalize()
+
+            if start_ts is not None and d_ts < start_ts:
+                continue
+            if end_ts is not None and d_ts > end_ts:
+                continue
+
+            key = self._market_hmm_regime_key(d)
+
+            try:
+                payload = json.loads(self._get_bytes(key).decode("utf-8"))
+            except Exception:
+                continue
+
+            if not isinstance(payload, dict):
+                continue
+
+            hmm = payload.get("hmm") or {}
+            if not isinstance(hmm, dict):
+                hmm = {}
+
+            p_label = hmm.get("p_label_today") or {}
+            if not isinstance(p_label, dict):
+                p_label = {}
+
+            label = hmm.get("label_commit")
+            label_or_mixed = str(label) if label else "MIXED"
+
+            if not include_mixed and label_or_mixed == "MIXED":
+                continue
+
+            meta = payload.get("meta") or {}
+            hmm_meta = hmm.get("meta") or {}
+            point_in_time = bool(meta.get("point_in_time", False) or hmm_meta.get("point_in_time", False))
+            lookahead_safe = bool(meta.get("lookahead_safe", False) or hmm_meta.get("lookahead_safe", False))
+
+            if require_point_in_time and not (point_in_time and lookahead_safe):
+                continue
+
+            lev = payload.get("leverage_recommendation") or {}
+            if not isinstance(lev, dict):
+                lev = {}
+
+            try:
+                confidence = max(float(v) for v in p_label.values()) if p_label else None
+            except Exception:
+                confidence = None
+
+            rows.append(
+                {
+                    "date": d_ts,
+                    "as_of": str(payload.get("as_of") or d),
+                    "label": label,
+                    "label_or_mixed": label_or_mixed,
+                    "regime": label_or_mixed,
+                    "confidence": confidence,
+                    "p_CALM_BULL": float(p_label.get("CALM_BULL", 0.0) or 0.0),
+                    "p_CHOPPY_BULL": float(p_label.get("CHOPPY_BULL", 0.0) or 0.0),
+                    "p_CHOPPY_BEAR": float(p_label.get("CHOPPY_BEAR", 0.0) or 0.0),
+                    "p_STRESS_BEAR": float(p_label.get("STRESS_BEAR", 0.0) or 0.0),
+                    "target_leverage": (
+                        None if lev.get("leverage") is None else float(lev.get("leverage"))
+                    ),
+                    "source_key": key,
+                    "point_in_time": point_in_time,
+                    "lookahead_safe": lookahead_safe,
+                }
+            )
+
+        columns = [
+            "date",
+            "as_of",
+            "label",
+            "label_or_mixed",
+            "regime",
+            "confidence",
+            "p_CALM_BULL",
+            "p_CHOPPY_BULL",
+            "p_CHOPPY_BEAR",
+            "p_STRESS_BEAR",
+            "target_leverage",
+            "source_key",
+            "point_in_time",
+            "lookahead_safe",
+        ]
+
+        if not rows:
+            return pd.DataFrame(columns=columns)
+
+        out = pd.DataFrame(rows)
+        out["date"] = pd.to_datetime(out["date"], errors="coerce").dt.normalize()
+        out = out.dropna(subset=["date"])
+        out = out.sort_values("date", kind="stable")
+        out = out.drop_duplicates(subset=["date"], keep="last")
+        out = out.reset_index(drop=True)
+
+        for col in columns:
+            if col not in out.columns:
+                out[col] = pd.NA
+
+        return out[columns].copy()
 
     # -------------------------
     # Universe triage outputs
@@ -507,14 +772,21 @@ class MarketStore:
         columns: Optional[list[str]],
     ) -> pd.DataFrame:
         def _load_one(key: str) -> pd.DataFrame | None:
-            raw = self._get_bytes(key)
-            df = pd.read_parquet(io.BytesIO(raw), columns=columns)
+            df = self._read_parquet_tolerant(key, columns=columns)
+
             if df is None or df.empty:
                 return None
+
             if "asset_id" in df.columns:
                 df["asset_id"] = df["asset_id"].astype(str).str.strip()
+
             if "date" in df.columns:
-                df["date"] = pd.to_datetime(df["date"], errors="coerce").dt.tz_localize(None).dt.normalize()
+                df["date"] = (
+                    pd.to_datetime(df["date"], errors="coerce", utc=True)
+                    .dt.tz_convert(None)
+                    .dt.normalize()
+                )
+
             return df
 
         ids = [str(a).strip() for a in asset_ids if str(a).strip()]
@@ -568,7 +840,31 @@ class MarketStore:
         if not dfs:
             return pd.DataFrame()
 
-        out = pd.concat(dfs, ignore_index=True)
+        clean_dfs: list[pd.DataFrame] = []
+
+        for df in dfs:
+            if df is None or df.empty:
+                continue
+
+            # Drop columns that are entirely NA in this individual part.
+            # This avoids pandas FutureWarning when concatenating mixed old/new schemas.
+            df2 = df.dropna(axis=1, how="all").copy()
+
+            if df2.empty:
+                continue
+
+            clean_dfs.append(df2)
+
+        if not clean_dfs:
+            return pd.DataFrame(columns=columns or None)
+
+        out = pd.concat(clean_dfs, ignore_index=True, sort=False)
+
+        if columns is not None:
+            for col in columns:
+                if col not in out.columns:
+                    out[col] = pd.NA
+            out = out[columns].copy()
 
         if "date" in out.columns:
             out = out.dropna(subset=["date"])

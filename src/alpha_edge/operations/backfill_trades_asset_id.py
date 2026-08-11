@@ -1,470 +1,768 @@
 from __future__ import annotations
 
 import argparse
-import concurrent.futures as cf
-import io
 import json
-from dataclasses import dataclass
-from typing import Any, Optional, Tuple
+import math
+import subprocess
+from dataclasses import asdict, dataclass
+from typing import Any, List, Optional, Tuple
 
 import boto3
 import pandas as pd
 
-BUCKET = "alpha-edge-algo"
-REGION = "eu-west-1"
-ENGINE_ROOT = "engine/v1"
+from alpha_edge.core.audit import build_audit_event, write_audit_event
+from alpha_edge.core.run_logging import capture_script_run
+from alpha_edge.core.runtime import RuntimeConfig, load_runtime_config, require_prod_confirmation
+
+
+DEFAULT_BUCKET = "alpha-edge-algo"
+DEFAULT_REGION = "eu-west-1"
+DEFAULT_ENGINE_ROOT = "engine/v1"
 TRADES_TABLE = "trades"
-UNIVERSE_PREFIX = "engine/v1/universe/"
+
+QTY_DECIMALS = 8
+VALUE_DECIMALS = 2
+QTY_TOL = 1e-8
+VALUE_TOL = 0.01
+INTEGER_QTY_TOL = 1e-6
+
+FRACTIONAL_EQUITY_TICKERS = {
+    "AI.PA",
+}
+FRACTIONAL_EQUITY_ASSET_IDS = {
+    # "EQHxxxxxxxxxxxxxxxxxxx",
+}
+
+
+# ----------------------------
+# Runtime helpers
+# ----------------------------
+def cfg_bucket(cfg: RuntimeConfig) -> str:
+    return str(getattr(cfg, "bucket", DEFAULT_BUCKET))
+
+
+def cfg_region(cfg: RuntimeConfig) -> str:
+    return str(getattr(cfg, "region", DEFAULT_REGION))
+
+
+def cfg_engine_root(cfg: RuntimeConfig) -> str:
+    return str(getattr(cfg, "engine_root", DEFAULT_ENGINE_ROOT)).strip("/")
+
+
+def cfg_env(cfg: RuntimeConfig) -> str:
+    return str(getattr(cfg, "env", "dev"))
 
 
 # ----------------------------
 # S3 helpers
 # ----------------------------
-def s3_client(region: str = REGION):
+def s3_client(region: str):
     return boto3.client("s3", region_name=region)
 
 
-def engine_key(*parts: str) -> str:
-    return "/".join([ENGINE_ROOT.strip("/")] + [p.strip("/") for p in parts])
+def engine_key(cfg: RuntimeConfig, *parts: str) -> str:
+    return "/".join([cfg_engine_root(cfg)] + [p.strip("/") for p in parts])
 
 
-def s3_list_objects(s3, *, bucket: str, prefix: str) -> list[dict]:
-    out: list[dict] = []
-    token = None
-    while True:
-        kwargs: dict[str, Any] = dict(Bucket=bucket, Prefix=prefix)
-        if token:
-            kwargs["ContinuationToken"] = token
-        resp = s3.list_objects_v2(**kwargs)
-        out.extend(resp.get("Contents", []))
-        if not resp.get("IsTruncated"):
-            break
-        token = resp.get("NextContinuationToken")
+def dt_key(cfg: RuntimeConfig, table: str, dt_str: str, filename: str) -> str:
+    return engine_key(cfg, table, f"dt={dt_str}", filename)
+
+
+def s3_get_json(s3, *, bucket: str, key: str) -> dict:
+    obj = s3.get_object(Bucket=bucket, Key=key)
+    body = obj["Body"].read()
+    return json.loads(body.decode("utf-8"))
+
+
+def s3_get_json_optional(s3, *, bucket: str, key: str) -> Optional[dict]:
+    try:
+        return s3_get_json(s3, bucket=bucket, key=key)
+    except Exception:
+        return None
+
+
+# ----------------------------
+# Helpers
+# ----------------------------
+def _round_qty(x: float, decimals: int = QTY_DECIMALS) -> float:
+    return round(float(x), decimals)
+
+
+def _round_value(x: float, decimals: int = VALUE_DECIMALS) -> float:
+    return round(float(x), decimals)
+
+
+def _is_finite_positive(x: Any) -> bool:
+    try:
+        v = float(x)
+        return math.isfinite(v) and v > 0.0
+    except Exception:
+        return False
+
+
+def _normalize_quantity_unit(x: Optional[str], ticker: str) -> Optional[str]:
+    if x is None:
+        return None
+
+    s = str(x).strip().lower()
+    if s == "":
+        return None
+
+    unit_map = {
+        "share": "shares",
+        "shares": "shares",
+        "contract": "contracts",
+        "contracts": "contracts",
+        "coin": "coins",
+        "coins": "coins",
+        "ounce": "ounces",
+        "ounces": "ounces",
+        "btc": "coins",
+        "eth": "coins",
+        "sol": "coins",
+        "ada": "coins",
+        "xrp": "coins",
+        "dot": "coins",
+        "ltc": "coins",
+        "bnb": "coins",
+        "avax": "coins",
+        "link": "coins",
+        "matic": "coins",
+        "atom": "coins",
+        "near": "coins",
+        "uni": "coins",
+        "aave": "coins",
+        "trx": "coins",
+        "etc": "coins",
+        "doge": "coins",
+        "hbar": "coins",
+        "sui": "coins",
+        "dash": "coins",
+        "bch": "coins",
+        "qtum": "coins",
+        "apt": "coins",
+        "arb": "coins",
+        "inj": "coins",
+        "mana": "coins",
+        "neo": "coins",
+        "render": "coins",
+        "derivative": "derivative",
+        "derivatives": "derivative",
+    }
+
+    out = unit_map.get(s, s)
+
+    t = str(ticker).upper().strip().replace("/", "-")
+    if "-" in t:
+        base = t.split("-", 1)[0]
+        crypto_bases = {
+            "BTC", "ETH", "SOL", "ADA", "XRP", "DOT", "LTC", "BNB",
+            "AVAX", "LINK", "MATIC", "ATOM", "NEAR", "UNI", "AAVE",
+            "TRX", "ETC", "DOGE", "HBAR", "SUI", "DASH", "BCH",
+            "QTUM", "APT", "ARB", "INJ", "MANA", "NEO", "RENDER",
+        }
+        if base in crypto_bases:
+            return "coins"
+
     return out
 
 
-def discover_latest_key(s3, *, bucket: str, prefix: str) -> str | None:
-    objs = s3_list_objects(s3, bucket=bucket, prefix=prefix)
-    if not objs:
-        return None
-    objs = [o for o in objs if "Key" in o and "LastModified" in o]
-    if not objs:
-        return None
-    objs.sort(key=lambda o: o["LastModified"], reverse=True)
-    return str(objs[0]["Key"])
+def _infer_quantity_from_value_price(value: float, price: float) -> float:
+    if not _is_finite_positive(value):
+        raise ValueError(f"Cannot infer quantity: invalid value={value!r}")
+    if not _is_finite_positive(price):
+        raise ValueError(f"Cannot infer quantity: invalid price={price!r}")
+    return float(value) / float(price)
 
 
-def s3_get_bytes(s3, *, bucket: str, key: str) -> bytes:
-    obj = s3.get_object(Bucket=bucket, Key=key)
-    return obj["Body"].read()
+def _is_crypto_pair(ticker: str) -> bool:
+    t = str(ticker).upper().strip().replace("/", "-")
+    if "-" not in t:
+        return False
+
+    base, quote = t.split("-", 1)
+    crypto_bases = {
+        "BTC", "ETH", "SOL", "ADA", "XRP", "DOT", "LTC", "BNB",
+        "AVAX", "LINK", "MATIC", "ATOM", "NEAR", "UNI", "AAVE",
+        "TRX", "ETC", "DOGE", "HBAR", "SUI", "DASH", "BCH",
+        "QTUM", "APT", "ARB", "INJ", "MANA", "NEO", "RENDER",
+    }
+    crypto_quotes = {"USD", "USDT", "USDC", "EUR"}
+    return base in crypto_bases and quote in crypto_quotes
 
 
-def s3_put_json(s3, *, bucket: str, key: str, payload: dict) -> None:
-    s3.put_object(
-        Bucket=bucket,
-        Key=key,
-        Body=json.dumps(payload, indent=2).encode("utf-8"),
-        ContentType="application/json",
-    )
+def _quantity_policy(*, ticker: str, asset_id: str, quantity_unit: Optional[str]) -> str:
+    t = str(ticker).upper().strip()
+    aid = str(asset_id or "").strip()
+    unit = str(quantity_unit or "").strip().lower()
+
+    if aid in FRACTIONAL_EQUITY_ASSET_IDS or t in FRACTIONAL_EQUITY_TICKERS:
+        return "fractional"
+
+    if _is_crypto_pair(t):
+        return "fractional"
+
+    if unit in {"derivative", "derivatives", "contracts", "coins"}:
+        return "fractional"
+
+    return "integer"
 
 
-# ----------------------------
-# Load universe (local or S3)
-# ----------------------------
-def load_df_from_local(path: str) -> pd.DataFrame:
-    if path.lower().endswith(".parquet"):
-        return pd.read_parquet(path, engine="pyarrow")
-    return pd.read_csv(path)
+def _normalize_repaired_quantity(*, raw_qty: float, policy: str) -> tuple[float, bool, str]:
+    if not math.isfinite(raw_qty) or raw_qty <= 0.0:
+        return raw_qty, False, "raw quantity is invalid"
 
+    if policy == "fractional":
+        return _round_qty(raw_qty), True, "fractional quantity allowed"
 
-def load_df_from_s3(s3, *, bucket: str, key: str) -> pd.DataFrame:
-    data = s3_get_bytes(s3, bucket=bucket, key=key)
-    if key.lower().endswith(".parquet"):
-        return pd.read_parquet(io.BytesIO(data), engine="pyarrow")
-    return pd.read_csv(io.StringIO(data.decode("utf-8", errors="replace")))
+    nearest = round(raw_qty)
+    if abs(raw_qty - nearest) <= INTEGER_QTY_TOL:
+        return float(nearest), True, "integer quantity snapped from value / price"
 
-
-def load_universe_df(
-    s3,
-    *,
-    bucket: str,
-    universe_path: str | None = None,
-    universe_key: str | None = None,
-) -> tuple[pd.DataFrame, str]:
-    """
-    Returns (universe_df, universe_ref_string)
-    """
-    if universe_path:
-        df = load_df_from_local(universe_path)
-        ref = f"file://{universe_path}"
-    else:
-        key = universe_key or discover_latest_key(s3, bucket=bucket, prefix=UNIVERSE_PREFIX)
-        if not key:
-            raise RuntimeError(
-                f"Could not find universe under s3://{bucket}/{UNIVERSE_PREFIX}. "
-                "Pass --universe-path or --universe-key explicitly."
-            )
-        df = load_df_from_s3(s3, bucket=bucket, key=key)
-        ref = f"s3://{bucket}/{key}"
-
-    # required universe columns
-    for c in ["row_id", "ticker", "asset_id"]:
-        if c not in df.columns:
-            raise RuntimeError(f"Universe missing required column: {c}")
-
-    df = df.copy()
-    df["row_id"] = df["row_id"].astype(str).str.strip()
-    df["ticker"] = df["ticker"].astype(str).str.upper().str.strip()
-    df["asset_id"] = df["asset_id"].astype(str).str.strip()
-
-    return df, ref
-
-
-def build_broker_map(universe_df: pd.DataFrame) -> dict[str, list[str]]:
-    """
-    ticker -> list[asset_id] (keeps duplicates so we can detect ambiguity)
-    """
-    m: dict[str, list[str]] = {}
-    for bt, sub in universe_df.groupby("ticker"):
-        ids = [str(x) for x in sub["asset_id"].dropna().unique().tolist() if str(x).strip()]
-        if ids:
-            m[str(bt)] = ids
-    return m
-
-
-def build_rowid_to_assetid_map(universe_df: pd.DataFrame) -> dict[str, str]:
-    """
-    row_id -> asset_id (must be unique per row_id)
-    """
-    m: dict[str, str] = {}
-    sub = universe_df[["row_id", "asset_id"]].dropna().copy()
-    for _, r in sub.iterrows():
-        rid = str(r["row_id"]).strip()
-        aid = str(r["asset_id"]).strip()
-        if rid and aid:
-            m[rid] = aid
-    return m
+    return _round_qty(raw_qty), False, "quantity is materially fractional for integer-only instrument"
 
 
 # ----------------------------
-# Overrides (local or S3) - row-based
-# ----------------------------
-def load_overrides_df_from_local(path: str) -> pd.DataFrame:
-    return pd.read_csv(path)
-
-
-def load_overrides_df_from_s3(s3, *, bucket: str, key: str) -> pd.DataFrame:
-    data = s3_get_bytes(s3, bucket=bucket, key=key)
-    return pd.read_csv(io.StringIO(data.decode("utf-8", errors="replace")))
-
-
-def load_overrides_row_pick(
-    s3,
-    *,
-    bucket: str,
-    overrides_path: str | None = None,
-    overrides_key: str | None = None,
-    overrides_ticker_col: str = "ticker",
-    overrides_id_col: str = "target_row_id",
-) -> tuple[dict[str, str], str | None]:
-    """
-    Overrides file selects a universe row to use for a given trade ticker.
-
-    Expected columns (defaults):
-      - ticker              (trade/broker ticker)
-      - target_row_id       (universe row_id to use)
-    Returns:
-      ticker -> target_row_id
-    """
-    if not overrides_path and not overrides_key:
-        return {}, None
-
-    if overrides_path:
-        df = load_overrides_df_from_local(overrides_path)
-        ref = f"file://{overrides_path}"
-    else:
-        df = load_overrides_df_from_s3(s3, bucket=bucket, key=str(overrides_key))
-        ref = f"s3://{bucket}/{overrides_key}"
-
-    if overrides_ticker_col not in df.columns:
-        raise RuntimeError(f"Overrides CSV missing required column: {overrides_ticker_col}")
-    if overrides_id_col not in df.columns:
-        raise RuntimeError(f"Overrides CSV missing required column: {overrides_id_col}")
-
-    df = df.copy()
-    df[overrides_ticker_col] = df[overrides_ticker_col].astype(str).str.upper().str.strip()
-    df[overrides_id_col] = df[overrides_id_col].astype(str).str.strip()
-
-    out: dict[str, str] = {}
-    for _, r in df.iterrows():
-        t = str(r[overrides_ticker_col]).upper().strip()
-        rid = str(r[overrides_id_col]).strip()
-        if t and rid:
-            out[t] = rid
-
-    return out, ref
-
-
-# ----------------------------
-# Backfill logic
+# Repair row model
 # ----------------------------
 @dataclass
-class BackfillResult:
-    key: str
-    status: str  # "updated" | "skipped" | "error"
-    reason: str | None = None
-    ticker: str | None = None
-    asset_id: str | None = None
+class RepairPlanRow:
+    trade_id: str
+    as_of: str
+    ticker: str
+    asset_id: str
+    side: str
+    action_tag: str
+    status_from_audit: str
+    issue_code: str
+    s3_key: str
+
+    old_quantity: Optional[float]
+    new_quantity: Optional[float]
+
+    old_price: Optional[float]
+    new_price: Optional[float]
+
+    old_value: Optional[float]
+    new_value: Optional[float]
+
+    old_quantity_unit: Optional[str]
+    new_quantity_unit: Optional[str]
+
+    old_reported_pnl: Optional[float]
+    new_reported_pnl: Optional[float]
+
+    quantity_policy: Optional[str]
+    repair_action: str
+    repair_reason: str
+    command: str
 
 
-def resolve_asset_id_for_trade(
-    *,
-    ticker: str,
-    broker_map: dict[str, list[str]],
-    overrides_rowpick: dict[str, str],
-    rowid_to_assetid: dict[str, str],
-    mode: str,
-) -> tuple[str | None, list[str] | None, str | None]:
-    """
-    Returns (asset_id, candidates, err_reason)
-
-    mode:
-      - strict: missing/ambiguous => error
-      - null:   missing/ambiguous => asset_id=None, candidates populated if ambiguous
-
-    resolution order:
-      1) overrides_rowpick (ticker -> target_row_id -> asset_id)
-      2) broker_map (ticker -> [asset_id])
-    """
-    bt = str(ticker).upper().strip()
-
-    # (1) overrides pick exact universe row
-    if bt in overrides_rowpick:
-        rid = overrides_rowpick[bt]
-        aid = rowid_to_assetid.get(str(rid).strip())
-        if not aid:
-            if mode == "null":
-                return None, None, None
-            return None, None, f"override row_id not found in universe: ticker={bt} target_row_id={rid}"
-        return str(aid), None, None
-
-    # (2) fallback: broker_map
-    ids = broker_map.get(bt)
-    if not ids:
-        if mode == "null":
-            return None, None, None
-        return None, None, f"no universe mapping for ticker={bt}"
-
-    if len(ids) == 1:
-        return ids[0], None, None
-
-    if mode == "null":
-        return None, [str(x) for x in ids], None
-    return None, [str(x) for x in ids], f"ambiguous ticker={bt} asset_ids={ids}"
-
-
-def backfill_one_key(
-    *,
+# ----------------------------
+# Load audit + original trade
+# ----------------------------
+def _load_original_trade(
     s3,
-    bucket: str,
-    key: str,
-    broker_map: dict[str, list[str]],
-    overrides_rowpick: dict[str, str],
-    rowid_to_assetid: dict[str, str],
-    universe_ref: str,
-    overrides_ref: str | None,
-    mode: str,
+    *,
+    cfg: RuntimeConfig,
+    trade_id: str,
+    as_of: str,
+    s3_key: Optional[str],
+) -> dict:
+    bucket = cfg_bucket(cfg)
+
+    if s3_key:
+        obj = s3_get_json_optional(s3, bucket=bucket, key=s3_key)
+        if isinstance(obj, dict):
+            return obj
+
+    key = dt_key(cfg, TRADES_TABLE, str(as_of), f"trade_{trade_id}.json")
+    obj = s3_get_json_optional(s3, bucket=bucket, key=key)
+    if isinstance(obj, dict):
+        return obj
+
+    raise RuntimeError(f"Could not load original trade trade_id={trade_id} as_of={as_of} s3_key={s3_key}")
+
+
+def _build_edit_command_args(
+    row: RepairPlanRow,
+    *,
+    python_entrypoint: str,
     dry_run: bool,
-) -> BackfillResult:
-    try:
-        payload = json.loads(s3_get_bytes(s3, bucket=bucket, key=key).decode("utf-8"))
+    cfg: RuntimeConfig,
+    confirm_prod_write: bool,
+) -> List[str]:
+    parts = [
+        "poetry",
+        "run",
+        "python",
+        python_entrypoint,
+        "--mode",
+        "edit",
+        "--trade-id",
+        str(row.trade_id),
+        "--old-as-of",
+        str(row.as_of),
+        "--env",
+        cfg_env(cfg),
+    ]
 
-        if not isinstance(payload, dict):
-            return BackfillResult(key=key, status="error", reason="payload is not a dict")
+    if confirm_prod_write:
+        parts.append("--confirm-prod-write")
 
-        if payload.get("asset_id"):
-            return BackfillResult(key=key, status="skipped", reason="already has asset_id")
+    if row.new_quantity is not None and (
+        row.old_quantity is None or abs(float(row.new_quantity) - float(row.old_quantity)) > QTY_TOL
+    ):
+        parts.extend(["--quantity", str(row.new_quantity)])
 
-        ticker = payload.get("ticker")
-        if ticker is None:
-            return BackfillResult(key=key, status="error", reason="missing ticker field")
+    if row.new_price is not None and row.old_price != row.new_price:
+        parts.extend(["--price", str(row.new_price)])
 
-        asset_id, candidates, err = resolve_asset_id_for_trade(
-            ticker=str(ticker),
-            broker_map=broker_map,
-            overrides_rowpick=overrides_rowpick,
-            rowid_to_assetid=rowid_to_assetid,
-            mode=mode,
-        )
-        if err is not None:
-            return BackfillResult(key=key, status="error", reason=err, ticker=str(ticker))
+    if row.new_value is not None and (
+        row.old_value is None or abs(float(row.new_value) - float(row.old_value)) > VALUE_TOL
+    ):
+        parts.extend(["--value", str(row.new_value)])
 
-        payload["asset_id"] = asset_id  # may be None if mode=null
-        if candidates:
-            payload["asset_id_candidates"] = candidates
+    if row.new_quantity_unit is not None and row.old_quantity_unit != row.new_quantity_unit:
+        parts.extend(["--quantity-unit", str(row.new_quantity_unit)])
 
-        payload["_universe_ref"] = universe_ref
-        if overrides_ref:
-            payload["_overrides_ref"] = overrides_ref
+    if row.new_reported_pnl is not None and row.old_reported_pnl != row.new_reported_pnl:
+        parts.extend(["--reported-pnl", str(row.new_reported_pnl)])
 
-        payload["_backfill"] = {
-            "job": "backfill_trades_asset_id",
-            "ts_utc": pd.Timestamp.utcnow().isoformat(),
-            "mode": mode,
-        }
+    if dry_run:
+        parts.append("--dry-run")
 
-        if dry_run:
-            return BackfillResult(key=key, status="updated", ticker=str(ticker), asset_id=asset_id)
+    return parts
 
-        s3_put_json(s3, bucket=bucket, key=key, payload=payload)
-        return BackfillResult(key=key, status="updated", ticker=str(ticker), asset_id=asset_id)
 
-    except Exception as e:
-        return BackfillResult(key=key, status="error", reason=f"{type(e).__name__}: {e}")
+def _command_args_to_text(args: List[str]) -> str:
+    def q(x: str) -> str:
+        if any(ch in x for ch in [' ', '"', "'"]):
+            return '"' + x.replace('"', '\\"') + '"'
+        return x
+
+    return " ".join(q(x) for x in args)
+
+
+def _manual_row(
+    *,
+    trade_id: str,
+    as_of: str,
+    ticker: str,
+    asset_id: str,
+    side: str,
+    action_tag: str,
+    status: str,
+    issue_code: str,
+    s3_key: str,
+    reason: str,
+    old_quantity: Optional[float] = None,
+    new_quantity: Optional[float] = None,
+    old_price: Optional[float] = None,
+    new_price: Optional[float] = None,
+    old_value: Optional[float] = None,
+    new_value: Optional[float] = None,
+    old_quantity_unit: Optional[str] = None,
+    new_quantity_unit: Optional[str] = None,
+    old_reported_pnl: Optional[float] = None,
+    new_reported_pnl: Optional[float] = None,
+    quantity_policy: Optional[str] = None,
+) -> RepairPlanRow:
+    return RepairPlanRow(
+        trade_id=trade_id,
+        as_of=as_of,
+        ticker=ticker,
+        asset_id=asset_id,
+        side=side,
+        action_tag=action_tag,
+        status_from_audit=status,
+        issue_code=issue_code,
+        s3_key=s3_key,
+        old_quantity=old_quantity,
+        new_quantity=new_quantity,
+        old_price=old_price,
+        new_price=new_price,
+        old_value=old_value,
+        new_value=new_value,
+        old_quantity_unit=old_quantity_unit,
+        new_quantity_unit=new_quantity_unit,
+        old_reported_pnl=old_reported_pnl,
+        new_reported_pnl=new_reported_pnl,
+        quantity_policy=quantity_policy,
+        repair_action="MANUAL_REVIEW",
+        repair_reason=reason,
+        command="",
+    )
 
 
 # ----------------------------
-# Main
+# Core repair-plan / execution logic
 # ----------------------------
-def parse_args() -> argparse.Namespace:
-    ap = argparse.ArgumentParser(
-        description="Backfill asset_id into engine/v1/trades/dt=*/trade_*.json using universe ticker mapping + row-based overrides."
-    )
-    ap.add_argument("--bucket", default=BUCKET)
-    ap.add_argument("--region", default=REGION)
+def build_repair_plan(
+    *,
+    cfg: RuntimeConfig,
+    audit_rows_csv: str,
+    out_auto_csv: str,
+    out_manual_csv: str,
+    python_entrypoint: str,
+    only_status: Tuple[str, ...] = ("REFactor",),
+    recompute_reported_pnl: bool = False,
+    execute: bool = False,
+    dry_run: bool = False,
+    stop_on_error: bool = False,
+    confirm_prod_write: bool = False,
+) -> None:
+    s3 = s3_client(cfg_region(cfg))
 
-    ap.add_argument("--universe-path", default=None, help="Local path to universe snapshot (csv/parquet).")
-    ap.add_argument("--universe-key", default=None, help="S3 key to universe snapshot (csv/parquet).")
+    audit_df = pd.read_csv(audit_rows_csv)
+    if audit_df.empty:
+        pd.DataFrame().to_csv(out_auto_csv, index=False)
+        pd.DataFrame().to_csv(out_manual_csv, index=False)
+        print("[OK] Empty audit file. No repair plan generated.")
+        return
 
-    ap.add_argument("--overrides-path", default=None, help="Local path to universe_overrides.csv (row-based).")
-    ap.add_argument("--overrides-key", default=None, help="S3 key to overrides CSV.")
+    audit_df = audit_df.where(pd.notna(audit_df), None)
 
-    ap.add_argument("--overrides-ticker-col", default="ticker", help="Column in overrides that contains the broker ticker.")
-    ap.add_argument("--overrides-id-col", default="target_row_id", help="Column in overrides that contains the universe row_id to use.")
+    auto_rows: List[RepairPlanRow] = []
+    manual_rows: List[RepairPlanRow] = []
 
-    ap.add_argument("--start", default=None, help="Only process dt >= start (YYYY-MM-DD).")
-    ap.add_argument("--end", default=None, help="Only process dt <= end (YYYY-MM-DD).")
+    exec_ok = 0
+    exec_fail = 0
+    exec_skipped = 0
 
-    ap.add_argument("--mode", default="strict", choices=["strict", "null"], help="strict: fail on missing/ambiguous; null: write asset_id=None (and candidates for ambiguous).")
-    ap.add_argument("--max-workers", type=int, default=16)
-    ap.add_argument("--limit", type=int, default=None, help="Optional max number of trade files to process.")
-    ap.add_argument("--dry-run", action="store_true")
+    for _, a in audit_df.iterrows():
+        status = str(a.get("status") or "")
+        if status not in only_status:
+            continue
 
-    return ap.parse_args()
+        trade_id = str(a.get("trade_id") or "").strip()
+        as_of = str(a.get("as_of") or "").strip()
+        s3_key = None if a.get("s3_key") is None else str(a.get("s3_key")).strip()
+        issue_code = str(a.get("issue_code") or "")
+        ticker = str(a.get("ticker") or "").upper().strip()
+        asset_id = str(a.get("asset_id") or "").strip()
+        side = str(a.get("side") or "").upper().strip()
+        action_tag = str(a.get("action_tag") or "").lower().strip()
 
-
-def _extract_dt_from_key(key: str) -> str | None:
-    parts = key.split("/")
-    for p in parts:
-        if p.startswith("dt="):
-            return p.replace("dt=", "")
-    return None
-
-
-def main() -> None:
-    args = parse_args()
-
-    s3 = s3_client(args.region)
-
-    universe_df, universe_ref = load_universe_df(
-        s3,
-        bucket=args.bucket,
-        universe_path=args.universe_path,
-        universe_key=args.universe_key,
-    )
-    broker_map = build_broker_map(universe_df)
-    rowid_to_assetid = build_rowid_to_assetid_map(universe_df)
-
-    overrides_rowpick, overrides_ref = load_overrides_row_pick(
-        s3,
-        bucket=args.bucket,
-        overrides_path=args.overrides_path,
-        overrides_key=args.overrides_key,
-        overrides_ticker_col=args.overrides_ticker_col,
-        overrides_id_col=args.overrides_id_col,
-    )
-
-    prefix = engine_key(TRADES_TABLE, "dt=")
-    objs = s3_list_objects(s3, bucket=args.bucket, prefix=prefix)
-    keys = [o["Key"] for o in objs if isinstance(o.get("Key"), str)]
-    keys = [k for k in keys if k.endswith(".json") and "/trade_" in k]
-
-    # filter by dt range if provided
-    if args.start or args.end:
-        start_d = pd.Timestamp(args.start).date() if args.start else None
-        end_d = pd.Timestamp(args.end).date() if args.end else None
-        filtered: list[str] = []
-        for k in keys:
-            dts = _extract_dt_from_key(k)
-            if not dts:
-                continue
-            d = pd.Timestamp(dts).date()
-            if start_d and d < start_d:
-                continue
-            if end_d and d > end_d:
-                continue
-            filtered.append(k)
-        keys = filtered
-
-    keys.sort()
-    if args.limit is not None:
-        keys = keys[: int(args.limit)]
-
-    print("=== BACKFILL TRADES ASSET_ID ===")
-    print(f"bucket:         {args.bucket}")
-    print(f"prefix:         s3://{args.bucket}/{prefix}")
-    print(f"universe_ref:   {universe_ref}")
-    print(f"overrides_ref:  {overrides_ref or '(none)'}")
-    print(f"mode:           {args.mode}")
-    print(f"dry_run:        {bool(args.dry_run)}")
-    print(f"keys_to_check:  {len(keys)}")
-    if overrides_rowpick:
-        print(f"overrides:      {len(overrides_rowpick)} tickers (row-pick)")
-    print("")
-
-    updated = 0
-    skipped = 0
-    errors = 0
-
-    with cf.ThreadPoolExecutor(max_workers=max(1, int(args.max_workers))) as ex:
-        futs = [
-            ex.submit(
-                backfill_one_key,
-                s3=s3,
-                bucket=args.bucket,
-                key=k,
-                broker_map=broker_map,
-                overrides_rowpick=overrides_rowpick,
-                rowid_to_assetid=rowid_to_assetid,
-                universe_ref=universe_ref,
-                overrides_ref=overrides_ref,
-                mode=args.mode,
-                dry_run=bool(args.dry_run),
+        if not trade_id or not as_of:
+            manual_rows.append(
+                _manual_row(
+                    trade_id=trade_id,
+                    as_of=as_of,
+                    ticker=ticker,
+                    asset_id=asset_id,
+                    side=side,
+                    action_tag=action_tag,
+                    status=status,
+                    issue_code=issue_code,
+                    s3_key=s3_key or "",
+                    reason="Missing trade_id or as_of in audit row.",
+                )
             )
-            for k in keys
-        ]
+            exec_skipped += 1
+            continue
 
-        for i, fut in enumerate(cf.as_completed(futs), start=1):
-            r: BackfillResult = fut.result()
-            if r.status == "updated":
-                updated += 1
-            elif r.status == "skipped":
-                skipped += 1
+        try:
+            obj = _load_original_trade(
+                s3,
+                cfg=cfg,
+                trade_id=trade_id,
+                as_of=as_of,
+                s3_key=s3_key,
+            )
+        except Exception as e:
+            manual_rows.append(
+                _manual_row(
+                    trade_id=trade_id,
+                    as_of=as_of,
+                    ticker=ticker,
+                    asset_id=asset_id,
+                    side=side,
+                    action_tag=action_tag,
+                    status=status,
+                    issue_code=issue_code,
+                    s3_key=s3_key or "",
+                    reason=f"Could not load original trade: {e}",
+                )
+            )
+            exec_skipped += 1
+            continue
+
+        old_qty = None if obj.get("quantity") is None else float(obj.get("quantity"))
+        old_px = None if obj.get("price") is None else float(obj.get("price"))
+        old_val = None if obj.get("value") is None else float(obj.get("value"))
+        old_unit = None if obj.get("quantity_unit") is None else str(obj.get("quantity_unit"))
+        old_rpnl = None if obj.get("reported_pnl") is None else float(obj.get("reported_pnl"))
+
+        if not ticker:
+            ticker = str(obj.get("ticker") or "").upper().strip()
+        if not asset_id:
+            asset_id = str(obj.get("asset_id") or "").strip()
+        if not side:
+            side = str(obj.get("side") or "").upper().strip()
+        if not action_tag:
+            action_tag = str(obj.get("action_tag") or "").lower().strip()
+
+        new_qty = old_qty
+        new_px = old_px
+        new_val = old_val
+        new_unit = _normalize_quantity_unit(old_unit, ticker=ticker)
+        new_rpnl = old_rpnl
+
+        repair_reason_parts: List[str] = []
+        quantity_policy = _quantity_policy(ticker=ticker, asset_id=asset_id, quantity_unit=new_unit)
+
+        if _is_finite_positive(old_val) and _is_finite_positive(old_px):
+            raw_qty = _infer_quantity_from_value_price(float(old_val), float(old_px))
+            normalized_qty, auto_ok, qty_detail = _normalize_repaired_quantity(
+                raw_qty=raw_qty,
+                policy=quantity_policy,
+            )
+
+            if not auto_ok:
+                manual_rows.append(
+                    _manual_row(
+                        trade_id=trade_id,
+                        as_of=as_of,
+                        ticker=ticker,
+                        asset_id=asset_id,
+                        side=side,
+                        action_tag=action_tag,
+                        status=status,
+                        issue_code=issue_code,
+                        s3_key=s3_key or "",
+                        old_quantity=old_qty,
+                        new_quantity=normalized_qty,
+                        old_price=old_px,
+                        new_price=old_px,
+                        old_value=old_val,
+                        new_value=old_val,
+                        old_quantity_unit=old_unit,
+                        new_quantity_unit=new_unit,
+                        old_reported_pnl=old_rpnl,
+                        new_reported_pnl=old_rpnl,
+                        quantity_policy=quantity_policy,
+                        reason=qty_detail,
+                    )
+                )
+                exec_skipped += 1
+                continue
+
+            if old_qty is None or abs(float(normalized_qty) - float(old_qty)) > QTY_TOL:
+                new_qty = normalized_qty
+                repair_reason_parts.append("quantity := value / price")
             else:
-                errors += 1
-                print(f"[ERROR] {r.key} :: {r.reason}")
+                new_qty = old_qty
 
-            if i % 250 == 0 or i == len(futs):
-                print(f"[progress] done={i}/{len(futs)} updated={updated} skipped={skipped} errors={errors}")
+            new_val = _round_value(float(new_qty) * float(old_px))
+            if old_val is None or abs(float(new_val) - float(old_val)) > VALUE_TOL:
+                repair_reason_parts.append("value := quantity * price")
 
-    print("\n=== DONE ===")
-    print(f"updated: {updated}")
-    print(f"skipped: {skipped}")
-    print(f"errors:  {errors}")
+        else:
+            manual_rows.append(
+                _manual_row(
+                    trade_id=trade_id,
+                    as_of=as_of,
+                    ticker=ticker,
+                    asset_id=asset_id,
+                    side=side,
+                    action_tag=action_tag,
+                    status=status,
+                    issue_code=issue_code,
+                    s3_key=s3_key or "",
+                    old_quantity=old_qty,
+                    new_quantity=None,
+                    old_price=old_px,
+                    new_price=old_px,
+                    old_value=old_val,
+                    new_value=old_val,
+                    old_quantity_unit=old_unit,
+                    new_quantity_unit=new_unit,
+                    old_reported_pnl=old_rpnl,
+                    new_reported_pnl=old_rpnl,
+                    quantity_policy=quantity_policy,
+                    reason="Cannot infer quantity because value and/or price are missing/invalid.",
+                )
+            )
+            exec_skipped += 1
+            continue
+
+        if recompute_reported_pnl:
+            # Intentionally disabled: reported_pnl should come from broker/import logic, not this quantity repair.
+            pass
+
+        changed = False
+
+        if old_qty is None or new_qty is None:
+            changed = True
+        elif abs(float(new_qty) - float(old_qty)) > QTY_TOL:
+            changed = True
+
+        if new_unit != old_unit:
+            changed = True
+
+        if new_val is not None and old_val is not None:
+            if abs(float(new_val) - float(old_val)) > VALUE_TOL:
+                changed = True
+        elif new_val != old_val:
+            changed = True
+
+        row = RepairPlanRow(
+            trade_id=trade_id,
+            as_of=as_of,
+            ticker=ticker,
+            asset_id=asset_id,
+            side=side,
+            action_tag=action_tag,
+            status_from_audit=status,
+            issue_code=issue_code,
+            s3_key=s3_key or dt_key(cfg, TRADES_TABLE, as_of, f"trade_{trade_id}.json"),
+            old_quantity=old_qty,
+            new_quantity=new_qty,
+            old_price=old_px,
+            new_price=new_px,
+            old_value=old_val,
+            new_value=new_val,
+            old_quantity_unit=old_unit,
+            new_quantity_unit=new_unit,
+            old_reported_pnl=old_rpnl,
+            new_reported_pnl=new_rpnl,
+            quantity_policy=quantity_policy,
+            repair_action="AUTO_PATCH" if changed else "NO_CHANGE",
+            repair_reason="; ".join(repair_reason_parts) if repair_reason_parts else "no effective patch required",
+            command="",
+        )
+
+        cmd_args: List[str] = []
+        if changed:
+            cmd_args = _build_edit_command_args(
+                row,
+                python_entrypoint=python_entrypoint,
+                dry_run=dry_run,
+                cfg=cfg,
+                confirm_prod_write=confirm_prod_write,
+            )
+            row.command = _command_args_to_text(cmd_args)
+
+        auto_rows.append(row)
+
+        if execute and changed:
+            print("\n=== EXECUTE REPAIR ===")
+            print(row.command)
+            try:
+                subprocess.run(cmd_args, check=True)
+                exec_ok += 1
+            except subprocess.CalledProcessError as e:
+                exec_fail += 1
+                row.repair_action = "EXEC_FAILED"
+                row.repair_reason = f"{row.repair_reason}; execution failed rc={e.returncode}"
+
+                if stop_on_error:
+                    pd.DataFrame([asdict(r) for r in auto_rows]).to_csv(out_auto_csv, index=False)
+                    pd.DataFrame([asdict(r) for r in manual_rows]).to_csv(out_manual_csv, index=False)
+                    raise
+
+    pd.DataFrame([asdict(r) for r in auto_rows]).to_csv(out_auto_csv, index=False)
+    pd.DataFrame([asdict(r) for r in manual_rows]).to_csv(out_manual_csv, index=False)
+
+    print("\n=== TRADE REPAIR PLAN ===")
+    print(f"env:                {cfg_env(cfg)}")
+    print(f"bucket:             {cfg_bucket(cfg)}")
+    print(f"engine_root:        {cfg_engine_root(cfg)}")
+    print(f"audit_rows_csv:     {audit_rows_csv}")
+    print(f"auto_rows:          {len(auto_rows)}")
+    print(f"manual_rows:        {len(manual_rows)}")
+    print(f"auto_csv:           {out_auto_csv}")
+    print(f"manual_csv:         {out_manual_csv}")
+    print(f"execute:            {execute}")
+    print(f"dry_run:            {dry_run}")
+
+    if execute:
+        print(f"exec_ok:            {exec_ok}")
+        print(f"exec_fail:          {exec_fail}")
+        print(f"exec_skipped:       {exec_skipped}")
+
     print("")
 
-    if errors > 0 and args.mode == "strict":
-        raise SystemExit(2)
+
+# ----------------------------
+# CLI
+# ----------------------------
+def main() -> None:
+    ap = argparse.ArgumentParser(
+        description="Build deterministic repair plan for broken trade quantities and optionally execute edits."
+    )
+
+    ap.add_argument("--audit-rows-csv", required=True, help="Path to audit_crypto_quantity_rows.csv")
+    ap.add_argument("--out-auto-csv", default="./data/trade_repair_plan_auto.csv")
+    ap.add_argument("--out-manual-csv", default="./data/trade_repair_plan_manual.csv")
+    ap.add_argument(
+        "--python-entrypoint",
+        default="src/alpha_edge/operations/record_trade.py",
+        help="Path used in generated poetry edit commands.",
+    )
+    ap.add_argument(
+        "--statuses",
+        default="REFactor",
+        help='Comma-separated audit statuses to include. Default: "REFactor"',
+    )
+    ap.add_argument("--execute", action="store_true", help="Actually execute the generated edit commands.")
+    ap.add_argument("--dry-run", action="store_true", help="Pass --dry-run to each generated edit command.")
+    ap.add_argument("--stop-on-error", action="store_true", help="Stop immediately if one executed command fails.")
+
+    ap.add_argument("--env", default=None, choices=["dev", "staging", "prod"])
+    ap.add_argument("--confirm-prod-write", action="store_true")
+
+    args = ap.parse_args()
+
+    cfg = load_runtime_config(args.env)
+
+    if bool(args.execute) and not bool(args.dry_run):
+        require_prod_confirmation(cfg, bool(args.confirm_prod_write))
+
+    with capture_script_run(
+        cfg=cfg,
+        script_name="backfill_trades_asset_id.py",
+        input_args=vars(args),
+        dry_run=bool(args.dry_run),
+    ) as run_id:
+        statuses = tuple(x.strip() for x in str(args.statuses).split(",") if x.strip())
+
+        build_repair_plan(
+            cfg=cfg,
+            audit_rows_csv=str(args.audit_rows_csv),
+            out_auto_csv=str(args.out_auto_csv),
+            out_manual_csv=str(args.out_manual_csv),
+            python_entrypoint=str(args.python_entrypoint),
+            only_status=statuses,
+            recompute_reported_pnl=False,
+            execute=bool(args.execute),
+            dry_run=bool(args.dry_run),
+            stop_on_error=bool(args.stop_on_error),
+            confirm_prod_write=bool(args.confirm_prod_write),
+        )
+
+        audit_event = build_audit_event(
+            cfg=cfg,
+            run_id=run_id,
+            event_type=("execute_repair_plan" if args.execute else "build_plan"),
+            entity_type="trade_repair_plan",
+            entity_id=None,
+            as_of=None,
+            source_script="backfill_trades_asset_id.py",
+            source_mode=("execute" if args.execute else "plan"),
+            status=("dry_run" if args.dry_run else "success"),
+            reason=None,
+            input_args=vars(args),
+            output_keys=[str(args.out_auto_csv), str(args.out_manual_csv)],
+            metadata={
+                "audit_rows_csv": str(args.audit_rows_csv),
+                "statuses": list(statuses),
+                "execute": bool(args.execute),
+                "note": "Individual trade edits are audited by record_trade.py when executed.",
+            },
+        )
+        write_audit_event(cfg=cfg, event=audit_event, dry_run=bool(args.dry_run))
 
 
 if __name__ == "__main__":

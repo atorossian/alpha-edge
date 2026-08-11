@@ -1,0 +1,57 @@
+ticker_norm,asset_id_norm,yahoo_ticker_norm,broker_ticker_norm,name_norm,asset_class,region,include_norm
+AC,EQH800f1b3b2098934c,AC.MX,AC,Arca Continental,equity,BMV,1
+AC,EQH561b3463ca3cc228,AC.PA,AC,Accor S.A.,equity,Cboe Europe,1
+ACA,EQH4113c94384740eeb,ACA,ACA,Arcosa Inc.,equity,NYSE,1
+ACA,EQH2fd50ce01251cc54,ACA.PA,ACA,Credit Agricole SA,equity,Cboe Europe,1
+ADP,EQH5cd6ee5dd8d979a3,ADP,ADP,Automatic Data Processing Inc.,equity,NASDAQ,1
+ADP,EQH8983943c3dcf91dc,ADP,ADP,Aeroports de Paris SA,equity,Cboe Europe,1
+AI,EQH0df32599d85cc6c5,AI,AI,C3.ai Inc.,equity,NYSE,1
+AI,EQH1d950ce3e134f54b,AI.PA,AI,Air Liquide S.A.,equity,Cboe Europe,1
+AM,EQH6fd36d2f7e238840,AM,AM,Antero Midstream Corp.,equity,NYSE,1
+AM,EQH535fecf5547e0940,AM.PA,AM,Dassault Aviation SA,equity,Cboe Europe,1
+AMP,EQH118c9ecad4e8723f,AMP,AMP,"Ameriprise Financial, Inc.",equity,NYSE,1
+AMP,EQH6bd3d656cb90cc50,AMP,AMP,Amplifon S.p.A.,equity,Cboe Europe,1
+BG,EQH2975ec323a9886df,BG,BG,Bunge Global SA,equity,NYSE,1
+BG,EQH09876e42c6fb7c5f,BG.VI,BG,BAWAG Group AG,equity,Cboe Europe,1
+BN,EQHbc1cd4d1a50c1c94,BN,BN,Brookfield Corporation,equity,NYSE,1
+BN,EQH089bafade0b5b110,BN.PA,BN,Danone S.A.,equity,Cboe Europe,1
+CON,EQH3b868e4d23706502,CON,CON,Concentra Group Holdings Parent Inc,equity,NYSE,1
+CON,EQH1a4d702f5ed396f9,CON.DE,CON,Continental AG O.N.,equity,Cboe Europe,1
+COP,EQH0816028bb3741194,COP,COP,CompuGroup Medical SE & Co. KGaA,equity,Cboe Europe,1
+COP,EQH341782fd07d43832,COP,COP,ConocoPhillips,equity,NYSE,1
+DG,EQH1d131e37dfa410e6,DG,DG,Dollar General Corporation,equity,NYSE,1
+DG,EQH3ece6ebc5bd1bb4b,DG.PA,DG,Vinci S.A.,equity,Cboe Europe,1
+DIA,EQH5c97d832742945c9,DIA,DIA,SPDR Dow Jones Industrial Average ETF,equity,NYSE,1
+DIA,EQH7c7035eda0f6b715,DIA,DIA,DiaSorin S.p.A.,equity,Cboe Europe,1
+DTE,EQH25264f1fda71ec80,DTE,DTE,DTE Energy Co,equity,NYSE,1
+DTE,EQH58dc8e80db97ea0d,DTE.DE,DTE,Deutsche Telekom AG,equity,Cboe Europe,1
+EL,EQH9717f179a70f5581,EL,EL,Estee Lauder Companies Inc.,equity,NYSE,1
+EL,EQH879872c52d68a45e,EL.PA,EL,EssilorLuxottica S.A.,equity,Cboe Europe,1
+FR,EQH664cf50b6fe41288,FR,FR,First Industrial Realty Trust Inc.,equity,NYSE,1
+FR,EQH73f584e5d7aed5ac,FR.PA,FR,Valeo S.A.,equity,Cboe Europe,1
+G,EQH3817411bbda3214c,G,G,Genpact Ltd,equity,NYSE,1
+G,EQH4e48f73a16cfd58e,G.MI,G,Assicurazioni Generali S.p.A.,equity,Cboe Europe,1
+HEI,EQH66a6a3c66cdff12a,HEI,HEI,Heico Corp.,equity,NYSE,1
+HEI,EQH83ec1a250d929275,HEI.DE,HEI,Heidelberg Materials AG,equity,Cboe Europe,1
+LI,EQH3eb901be41974d6a,LI,LI,Li Auto Inc.,equity,NASDAQ,1
+LI,EQH287e1cb2b8de3a26,LI.PA,LI,Klepierre SA,equity,Cboe Europe,1
+MC,EQHe93aee68b654332f,MC,MC,Moelis & Co,equity,NYSE,1
+MC,EQH65423d42e6ad7a9c,MC.PA,MC,LVMH Moet Hennessy Louis Vuitton SE,equity,Cboe Europe,1
+MRK,EQHd5db961edd5024f8,MRK,MRK,Merck & Co Inc.,equity,NYSE,1
+MRK,EQH001c29fe564c5036,MRK.DE,MRK,Merck KGaA,equity,Cboe Europe,1
+NDA,EQH54bab57353b5391d,NDA-FI.HE,NDA,Nordea Bank Abp,equity,Cboe Europe,1
+NDA,EQH4d8c549ef7af6b41,NDA.DE,NDA,Aurubis AG,equity,Cboe Europe,1
+NEM,EQHddc2e6e74e7ef037,NEM,NEM,Newmont Corporation,equity,NYSE,1
+NEM,EQH106829dadb9d5f92,NEM.DE,NEM,Nemetschek SE,equity,Cboe Europe,1
+ORA,EQH1f1f1e1dd63ddb5a,ORA,ORA,ORANGE S.A.,equity,Cboe Europe,1
+ORA,EQHc910a8fac40775d2,ORA,ORA,Ormat Technologies Inc.,equity,NYSE,1
+RF,EQHbe7647a72fd5c7db,RF,RF,Regions Financial Corp,equity,NYSE,1
+RF,EQH6da65732ba49306d,RF.PA,RF,Eurazeo SE,equity,Cboe Europe,1
+SAN,EQH93fbaa1d25603f2d,SAN.MC,SAN,Banco Santander SA,equity,Cboe Europe,1
+SAN,EQHe42ec253064a85da,SAN.PA,SAN,Sanofi S.A.,equity,Cboe Europe,1
+SW,EQH805469f3324934d9,SW,SW,Smurfit WestRock PLC,equity,NYSE,1
+SW,EQH105f7ae9abe4f4ea,SW.PA,SW,Sodexo SA,equity,Cboe Europe,1
+TRI,EQHb5f0b64c8a97fd70,TRI,TRI,Thomson Reuters Corp,equity,NYSE,1
+TRI,EQH77655c0fdb4f520f,TRI.PA,TRI,Trigano S.A.,equity,Cboe Europe,1
+VIV,EQHdd5e34152649a5ee,VIV,VIV,Telefonica Brasil SA,equity,NYSE,1
+VIV,EQH16d9ffdd3289a90c,VIV.PA,VIV,Vivendi S.A.,equity,Cboe Europe,1

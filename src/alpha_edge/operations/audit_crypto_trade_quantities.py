@@ -1,49 +1,77 @@
 from __future__ import annotations
 
 import argparse
-import csv
-import datetime as dt
-import io
 import json
-from dataclasses import dataclass, asdict
-from typing import Any, Dict, List, Optional
+from dataclasses import asdict, dataclass
+from pathlib import Path
+from typing import Any, List, Optional
 
 import boto3
 import pandas as pd
 
+from alpha_edge.core.runtime import RuntimeConfig, load_runtime_config
+from alpha_edge.core.run_logging import capture_script_run
 
-BUCKET = "alpha-edge-algo"
-REGION = "eu-west-1"
-ENGINE_ROOT = "engine/v1"
+
+DEFAULT_BUCKET = "alpha-edge-algo"
+DEFAULT_REGION = "eu-west-1"
+DEFAULT_ENGINE_ROOT = "engine/v1"
 TRADES_TABLE = "trades"
 
 QTY_EPS = 1e-9
 
 
 # ----------------------------
+# Runtime helpers
+# ----------------------------
+def cfg_bucket(cfg: RuntimeConfig) -> str:
+    return str(getattr(cfg, "bucket", DEFAULT_BUCKET))
+
+
+def cfg_region(cfg: RuntimeConfig) -> str:
+    return str(getattr(cfg, "region", DEFAULT_REGION))
+
+
+def cfg_engine_root(cfg: RuntimeConfig) -> str:
+    return str(getattr(cfg, "engine_root", DEFAULT_ENGINE_ROOT)).strip("/")
+
+
+def cfg_env(cfg: RuntimeConfig) -> str:
+    return str(getattr(cfg, "env", "dev"))
+
+
+# ----------------------------
 # S3 helpers
 # ----------------------------
-def s3_client(region: str = REGION):
+def s3_client(region: str):
     return boto3.client("s3", region_name=region)
 
 
-def engine_key(*parts: str) -> str:
-    return "/".join([ENGINE_ROOT.strip("/")] + [p.strip("/") for p in parts])
+def engine_key(cfg: RuntimeConfig, *parts: str) -> str:
+    return "/".join([cfg_engine_root(cfg)] + [p.strip("/") for p in parts])
 
 
 def s3_list_keys(s3, *, bucket: str, prefix: str) -> list[str]:
     keys: list[str] = []
     token = None
+
     while True:
         kwargs: dict[str, Any] = dict(Bucket=bucket, Prefix=prefix)
         if token:
             kwargs["ContinuationToken"] = token
+
         resp = s3.list_objects_v2(**kwargs)
+
         for it in resp.get("Contents", []):
-            keys.append(it["Key"])
+            k = it.get("Key")
+            if isinstance(k, str):
+                keys.append(k)
+
         if not resp.get("IsTruncated"):
             break
+
         token = resp.get("NextContinuationToken")
+
     return keys
 
 
@@ -66,7 +94,11 @@ def _parse_ts(ts_utc: str) -> pd.Timestamp:
 def _normalize_unit(u: Optional[str]) -> Optional[str]:
     if u is None:
         return None
+
     s = str(u).strip().lower()
+    if s == "":
+        return None
+
     if s in {"share", "shares"}:
         return "shares"
     if s in {"contract", "contracts"}:
@@ -75,54 +107,73 @@ def _normalize_unit(u: Optional[str]) -> Optional[str]:
         return "coins"
     if s in {"ounce", "ounces"}:
         return "ounces"
-    # crypto symbol units that should really behave as coins
+
     if s in {
         "btc", "eth", "sol", "ada", "xrp", "dot", "ltc", "bnb",
         "avax", "link", "matic", "atom", "near", "uni", "aave",
-        "trx", "etc", "doge", "hbar", "sui", "dash", "bch"
+        "trx", "etc", "doge", "hbar", "sui", "dash", "bch",
+        "qtum", "apt", "arb", "inj", "mana", "neo", "render",
     }:
         return "coins"
+
+    if s in {"derivative", "derivatives"}:
+        return "derivative"
+
     return s
 
 
-_FX_PAIR_RE = r"^[A-Z]{3}[-/][A-Z]{3}$"
 _CRYPTO_BASES = {
     "BTC", "ETH", "ADA", "XRP", "DOT", "BCH", "LTC", "SOL", "DOGE", "SUI",
     "HBAR", "DASH", "BNB", "AVAX", "LINK", "MATIC", "ATOM", "NEAR", "UNI",
-    "AAVE", "TRX", "ETC"
+    "AAVE", "TRX", "ETC", "QTUM", "APT", "ARB", "INJ", "MANA", "NEO", "RENDER",
 }
 _CRYPTO_QUOTES = {"USD", "USDT", "USDC", "EUR"}
 
 
 def _is_crypto_pair(ticker: str) -> bool:
-    t = str(ticker).upper().strip()
+    t = str(ticker).upper().strip().replace("/", "-")
     if "-" not in t:
         return False
+
     base, quote = t.split("-", 1)
     return base in _CRYPTO_BASES and quote in _CRYPTO_QUOTES
 
 
-def _load_trades(s3, *, start: Optional[str] = None, end: Optional[str] = None) -> List[dict]:
-    prefix = engine_key(TRADES_TABLE, "dt=")
-    keys = s3_list_keys(s3, bucket=BUCKET, prefix=prefix)
+def _load_trades(
+    s3,
+    *,
+    cfg: RuntimeConfig,
+    start: Optional[str] = None,
+    end: Optional[str] = None,
+) -> List[dict]:
+    bucket = cfg_bucket(cfg)
+    prefix = engine_key(cfg, TRADES_TABLE, "dt=")
+
+    keys = s3_list_keys(s3, bucket=bucket, prefix=prefix)
     keys = [k for k in keys if k.endswith(".json") and "/trade_" in k]
 
     start_d = pd.Timestamp(start).date() if start else None
     end_d = pd.Timestamp(end).date() if end else None
 
     out: List[dict] = []
+
     for k in keys:
         parts = k.split("/")
         dt_part = next((p for p in parts if p.startswith("dt=")), None)
         if not dt_part:
             continue
+
         d = pd.Timestamp(dt_part.replace("dt=", "")).date()
         if start_d and d < start_d:
             continue
         if end_d and d > end_d:
             continue
 
-        payload = s3_get_json(s3, bucket=BUCKET, key=k)
+        try:
+            payload = s3_get_json(s3, bucket=bucket, key=k)
+        except Exception:
+            continue
+
         if isinstance(payload, dict):
             payload["_s3_key"] = k
             out.append(payload)
@@ -130,18 +181,27 @@ def _load_trades(s3, *, start: Optional[str] = None, end: Optional[str] = None) 
     return out
 
 
+def _float_or_none(x: Any) -> Optional[float]:
+    if x is None:
+        return None
+    try:
+        v = float(x)
+        if pd.isna(v):
+            return None
+        return v
+    except Exception:
+        return None
+
+
 def _normalize_trade(t: dict) -> dict:
-    trade_id = str(t.get("trade_id"))
-    as_of = str(t.get("as_of"))
-    ts_utc = str(t.get("ts_utc"))
-    ticker = str(t.get("ticker")).upper().strip()
-    side = str(t.get("side")).upper().strip()
+    trade_id = str(t.get("trade_id") or "").strip()
+    as_of = str(t.get("as_of") or "").strip()
+    ts_utc = str(t.get("ts_utc") or "").strip()
+    ticker = str(t.get("ticker") or "").upper().strip().replace("/", "-")
+    side = str(t.get("side") or "").upper().strip()
 
-    qty = t.get("quantity")
-    qty = None if qty is None else float(qty)
-
-    price = t.get("price")
-    price = None if price is None else float(price)
+    qty = _float_or_none(t.get("quantity"))
+    price = _float_or_none(t.get("price"))
 
     ccy = str(t.get("currency") or "USD").upper().strip()
     asset_id = t.get("asset_id", None)
@@ -152,11 +212,8 @@ def _normalize_trade(t: dict) -> dict:
 
     quantity_unit = _normalize_unit(t.get("quantity_unit"))
 
-    value = t.get("value", None)
-    value = None if value is None else float(value)
-
-    reported_pnl = t.get("reported_pnl", None)
-    reported_pnl = None if reported_pnl is None else float(reported_pnl)
+    value = _float_or_none(t.get("value"))
+    reported_pnl = _float_or_none(t.get("reported_pnl"))
 
     _ = pd.Timestamp(as_of).date()
     _ = _parse_ts(ts_utc)
@@ -219,10 +276,17 @@ def _snap(x: float, eps: float = QTY_EPS) -> float:
 
 
 def audit_crypto_quantity_consistency(trades: list[dict]) -> tuple[list[AuditRow], list[dict]]:
-    norm = [_normalize_trade(t) for t in trades]
-    norm = [t for t in norm if _is_crypto_pair(t["ticker"])]
+    norm: list[dict] = []
 
-    # Keep only trades with asset_id for proper grouping
+    for raw in trades:
+        try:
+            t = _normalize_trade(raw)
+        except Exception:
+            continue
+
+        if _is_crypto_pair(t["ticker"]):
+            norm.append(t)
+
     grouped: dict[str, list[dict]] = {}
     missing_asset_rows: list[AuditRow] = []
 
@@ -253,7 +317,8 @@ def audit_crypto_quantity_consistency(trades: list[dict]) -> tuple[list[AuditRow
                 )
             )
             continue
-        grouped.setdefault(asset_id, []).append(t)
+
+        grouped.setdefault(str(asset_id), []).append(t)
 
     audit_rows: list[AuditRow] = []
     asset_summary: list[dict] = []
@@ -291,41 +356,44 @@ def audit_crypto_quantity_consistency(trades: list[dict]) -> tuple[list[AuditRow
                 status = "REFactor"
                 issue_code = "BAD_ACTION_TAG"
                 issue_detail = f"Invalid action_tag={action_tag!r}"
+
             elif qty is None or qty <= 0:
                 status = "REFactor"
                 issue_code = "BAD_QUANTITY"
                 issue_detail = f"Invalid quantity={qty!r}"
+
             elif px is None or px <= 0:
                 status = "REFactor"
                 issue_code = "BAD_PRICE"
                 issue_detail = f"Invalid price={px!r}"
+
+            elif side not in {"BUY", "SELL"}:
+                status = "REFactor"
+                issue_code = "BAD_SIDE"
+                issue_detail = f"Invalid side={side!r}"
+
             else:
-                # SPOT-style signed quantity logic
                 if action_tag in {"open", "add"}:
                     qty_delta = qty if side == "BUY" else -qty
                     qty_open = _snap(qty_open + qty_delta)
 
-                    # optional warning: adding opposite direction while still open
                     if qty_before > QTY_EPS and side == "SELL":
                         status = "CHECK"
                         issue_code = "OPEN_ADD_OPPOSITE_TO_LONG"
                         issue_detail = (
                             "open/add SELL while existing long quantity was open. "
-                            "Could be valid if this asset was actually intended as short/CFD, "
-                            "but for crypto SPOT this is suspicious."
+                            "This may be valid only if the position is intended as short/margin/CFD."
                         )
                     elif qty_before < -QTY_EPS and side == "BUY":
                         status = "CHECK"
                         issue_code = "OPEN_ADD_OPPOSITE_TO_SHORT"
                         issue_detail = (
                             "open/add BUY while existing short quantity was open. "
-                            "Could be valid in margin/CFD logic, suspicious for crypto SPOT."
+                            "This may be valid only if the position is intended as long after short/margin/CFD."
                         )
 
                 else:
-                    # close / reduce
                     if side == "SELL":
-                        # closing long
                         if qty_before <= QTY_EPS:
                             status = "REFactor"
                             issue_code = "SELL_CLOSE_WITHOUT_LONG"
@@ -345,7 +413,6 @@ def audit_crypto_quantity_consistency(trades: list[dict]) -> tuple[list[AuditRow
                             qty_open = _snap(qty_open + qty_delta)
 
                     elif side == "BUY":
-                        # closing short
                         if qty_before >= -QTY_EPS:
                             status = "REFactor"
                             issue_code = "BUY_CLOSE_WITHOUT_SHORT"
@@ -363,10 +430,6 @@ def audit_crypto_quantity_consistency(trades: list[dict]) -> tuple[list[AuditRow
                         else:
                             qty_delta = qty
                             qty_open = _snap(qty_open + qty_delta)
-                    else:
-                        status = "REFactor"
-                        issue_code = "BAD_SIDE"
-                        issue_detail = f"Invalid side={side!r}"
 
             qty_after = qty_open if status != "REFactor" or qty_delta != 0.0 else qty_before
 
@@ -397,15 +460,17 @@ def audit_crypto_quantity_consistency(trades: list[dict]) -> tuple[list[AuditRow
             if status in {"REFactor", "CHECK"}:
                 asset_issues.append(issue_code or "UNKNOWN")
 
+        asset_rows = [r for r in audit_rows if r.asset_id == asset_id]
+
         asset_summary.append(
             {
                 "asset_id": asset_id,
                 "ticker": ticker,
                 "trade_count": len(rows),
                 "final_quantity": float(qty_open),
-                "n_ok": sum(1 for r in audit_rows if r.asset_id == asset_id and r.status == "OK"),
-                "n_check": sum(1 for r in audit_rows if r.asset_id == asset_id and r.status == "CHECK"),
-                "n_refactor": sum(1 for r in audit_rows if r.asset_id == asset_id and r.status == "REFactor"),
+                "n_ok": sum(1 for r in asset_rows if r.status == "OK"),
+                "n_check": sum(1 for r in asset_rows if r.status == "CHECK"),
+                "n_refactor": sum(1 for r in asset_rows if r.status == "REFactor"),
                 "issue_codes": "|".join(sorted(set(asset_issues))) if asset_issues else "",
             }
         )
@@ -418,45 +483,81 @@ def audit_crypto_quantity_consistency(trades: list[dict]) -> tuple[list[AuditRow
 # Output
 # ----------------------------
 def write_csv(path: str, rows: list[dict]) -> None:
+    p = Path(path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+
     if not rows:
-        pd.DataFrame().to_csv(path, index=False)
+        pd.DataFrame().to_csv(p, index=False)
         return
-    pd.DataFrame(rows).to_csv(path, index=False)
+
+    pd.DataFrame(rows).to_csv(p, index=False)
 
 
-def main() -> None:
+def parse_args() -> argparse.Namespace:
     ap = argparse.ArgumentParser(description="Audit crypto trade quantity consistency for SPOT migration.")
     ap.add_argument("--start", default=None)
     ap.add_argument("--end", default=None)
     ap.add_argument("--out-dir", default="./data/audit_crypto_quantity")
-    args = ap.parse_args()
+    ap.add_argument("--env", default=None, choices=["dev", "staging", "prod"])
 
-    s3 = s3_client(REGION)
-    trades = _load_trades(s3, start=args.start, end=args.end)
+    return ap.parse_args()
+
+
+def _main_impl(args: argparse.Namespace, cfg: RuntimeConfig) -> None:
+    s3 = s3_client(cfg_region(cfg))
+
+    trades = _load_trades(
+        s3,
+        cfg=cfg,
+        start=args.start,
+        end=args.end,
+    )
 
     audit_rows, asset_summary = audit_crypto_quantity_consistency(trades)
 
-    out_dir = args.out_dir
-    pd.DataFrame([asdict(r) for r in audit_rows]).to_csv(f"{out_dir}_rows.csv", index=False)
-    pd.DataFrame(asset_summary).to_csv(f"{out_dir}_assets.csv", index=False)
+    out_prefix = Path(str(args.out_dir))
+    out_prefix.parent.mkdir(parents=True, exist_ok=True)
+
+    rows_csv = f"{out_prefix}_rows.csv"
+    assets_csv = f"{out_prefix}_assets.csv"
+
+    pd.DataFrame([asdict(r) for r in audit_rows]).to_csv(rows_csv, index=False)
+    pd.DataFrame(asset_summary).to_csv(assets_csv, index=False)
 
     print("\n=== CRYPTO QUANTITY AUDIT ===")
+    print(f"env:              {cfg_env(cfg)}")
+    print(f"bucket:           {cfg_bucket(cfg)}")
+    print(f"engine_root:      {cfg_engine_root(cfg)}")
     print(f"trades_loaded:    {len(trades)}")
     print(f"audit_rows:       {len(audit_rows)}")
     print(f"assets_audited:   {len(asset_summary)}")
-    print(f"rows_csv:         {out_dir}_rows.csv")
-    print(f"assets_csv:       {out_dir}_assets.csv")
+    print(f"rows_csv:         {rows_csv}")
+    print(f"assets_csv:       {assets_csv}")
     print("")
 
     if asset_summary:
         df = pd.DataFrame(asset_summary)
         bad = df[(df["n_refactor"] > 0) | (df["n_check"] > 0)].copy()
+
         if not bad.empty:
             print("Assets needing review:")
             print(bad.to_string(index=False))
             print("")
         else:
             print("No quantity inconsistencies detected in audited crypto assets.\n")
+
+
+def main() -> None:
+    args = parse_args()
+    cfg = load_runtime_config(args.env)
+
+    with capture_script_run(
+        cfg=cfg,
+        script_name="operations/audit_crypto_trade_quantities.py",
+        input_args=vars(args),
+        dry_run=False,
+    ):
+        _main_impl(args, cfg)
 
 
 if __name__ == "__main__":

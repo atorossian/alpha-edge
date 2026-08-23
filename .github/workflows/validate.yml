@@ -2,9 +2,9 @@ name: Validate Alpha Edge
 
 on:
   pull_request:
-    branches: [beta, main]
+    branches: [dev, main]
   push:
-    branches: [beta, main]
+    branches: [dev, main]
   workflow_dispatch:
 
 permissions:
@@ -19,22 +19,23 @@ jobs:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
-      - name: Enforce feature to beta and beta to main flow
+      - name: Enforce feature to dev and dev to main flow
         env:
           BASE_REF: ${{ github.base_ref }}
           HEAD_REF: ${{ github.head_ref }}
         run: |
           set -euo pipefail
+
           echo "Validating ${HEAD_REF} -> ${BASE_REF}"
 
           if [[ "${BASE_REF}" == "main" ]]; then
-            [[ "${HEAD_REF}" == "beta" ]] || {
-              echo "Only beta may be merged into main."
+            [[ "${HEAD_REF}" == "dev" ]] || {
+              echo "Only dev may be merged into main."
               exit 1
             }
-          elif [[ "${BASE_REF}" == "beta" ]]; then
+          elif [[ "${BASE_REF}" == "dev" ]]; then
             [[ "${HEAD_REF}" =~ ^(feature/[^/]+|bugfix/[^/]+|hotfix/[^/]+)$ ]] || {
-              echo "beta only accepts feature/*, bugfix/*, or hotfix/* branches."
+              echo "dev only accepts feature/*, bugfix/*, or hotfix/* branches."
               exit 1
             }
           fi

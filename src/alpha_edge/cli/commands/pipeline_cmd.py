@@ -196,7 +196,6 @@ def morning(
         "--indicator-progress-every",
         help="Print indicator progress after this many completed assets.",
     ),
-
     indicator_build_mode: str = typer.Option(
         "incremental",
         "--indicator-build-mode",
@@ -205,18 +204,12 @@ def morning(
     indicator_lookback_calendar_days: int = typer.Option(
         500,
         "--indicator-lookback-calendar-days",
-        help=(
-            "Calendar-day warm-up window used when incrementally "
-            "recalculating indicators."
-        ),
+        help=("Calendar-day warm-up window used when incrementally recalculating indicators."),
     ),
     indicator_replacement_calendar_days: int = typer.Option(
         60,
         "--indicator-replacement-calendar-days",
-        help=(
-            "Recent calendar-day overlap replaced during an "
-            "incremental indicator build."
-        ),
+        help=("Recent calendar-day overlap replaced during an incremental indicator build."),
     ),
     skip_indicators: bool = typer.Option(
         False,
@@ -241,10 +234,7 @@ def morning(
     cache_force: bool = typer.Option(
         False,
         "--cache-force",
-        help=(
-            "Force execution of the returns cache build in the selected "
-            "cache mode, even if it appears up to date."
-        ),
+        help=("Force execution of the returns cache build in the selected cache mode, even if it appears up to date."),
     ),
     cache_build_mode: str = typer.Option(
         "incremental",
@@ -254,18 +244,12 @@ def morning(
     cache_replacement_calendar_days: int = typer.Option(
         30,
         "--cache-replacement-calendar-days",
-        help=(
-            "Recent calendar-day overlap replaced during an "
-            "incremental returns-wide cache update."
-        ),
+        help=("Recent calendar-day overlap replaced during an incremental returns-wide cache update."),
     ),
     cache_max_new_assets_full_build: int = typer.Option(
         100,
         "--cache-max-new-assets-full-build",
-        help=(
-            "Maximum number of new assets allowed to be full-backfilled "
-            "during an incremental cache update."
-        ),
+        help=("Maximum number of new assets allowed to be full-backfilled during an incremental cache update."),
     ),
     no_triage: bool = typer.Option(
         False,
@@ -292,7 +276,7 @@ def morning(
         "--dry-run",
         help="Print child commands only; do not execute them.",
     ),
-        run_transition: bool = typer.Option(
+    run_transition: bool = typer.Option(
         False,
         "--run-transition",
         help=(
@@ -344,10 +328,7 @@ def morning(
     print("\n=== PIPELINE: morning ===")
 
     if no_write and not dry_run:
-        print(
-            "[WARN] --no-write does not apply to ingest_market_data.py. "
-            "Use --dry-run to prevent ingestion writes."
-        )
+        print("[WARN] --no-write does not apply to ingest_market_data.py. Use --dry-run to prevent ingestion writes.")
     # ---------------------------------------------------------
     # 1. Market ingestion
     #
@@ -357,50 +338,32 @@ def morning(
     #   - latest price/return snapshots
     # ---------------------------------------------------------
 
-    indicator_build_mode = str(
-        indicator_build_mode
-    ).strip().lower()
+    indicator_build_mode = str(indicator_build_mode).strip().lower()
 
     if indicator_build_mode not in {"full", "incremental"}:
-        raise typer.BadParameter(
-            "--indicator-build-mode must be full or incremental."
-        )
+        raise typer.BadParameter("--indicator-build-mode must be full or incremental.")
 
     if indicator_lookback_calendar_days < 1:
-        raise typer.BadParameter(
-            "--indicator-lookback-calendar-days must be >= 1."
-        )
+        raise typer.BadParameter("--indicator-lookback-calendar-days must be >= 1.")
 
     if indicator_replacement_calendar_days < 0:
-        raise typer.BadParameter(
-            "--indicator-replacement-calendar-days must be >= 0."
-        )
+        raise typer.BadParameter("--indicator-replacement-calendar-days must be >= 0.")
 
-    if (
-        indicator_replacement_calendar_days
-        > indicator_lookback_calendar_days
-    ):
+    if indicator_replacement_calendar_days > indicator_lookback_calendar_days:
         raise typer.BadParameter(
-            "--indicator-replacement-calendar-days cannot exceed "
-            "--indicator-lookback-calendar-days."
+            "--indicator-replacement-calendar-days cannot exceed --indicator-lookback-calendar-days."
         )
 
     cache_build_mode = str(cache_build_mode).strip().lower()
 
     if cache_build_mode not in {"full", "incremental"}:
-        raise typer.BadParameter(
-            "--cache-build-mode must be full or incremental."
-        )
+        raise typer.BadParameter("--cache-build-mode must be full or incremental.")
 
     if cache_replacement_calendar_days < 0:
-        raise typer.BadParameter(
-            "--cache-replacement-calendar-days must be >= 0."
-        )
+        raise typer.BadParameter("--cache-replacement-calendar-days must be >= 0.")
 
     if cache_max_new_assets_full_build < 0:
-        raise typer.BadParameter(
-            "--cache-max-new-assets-full-build must be >= 0."
-        )
+        raise typer.BadParameter("--cache-max-new-assets-full-build must be >= 0.")
 
     ingest_args: list[str | int | float | Path | None] = [
         "--env",
@@ -446,9 +409,7 @@ def morning(
     # The indicator script uses --dry-run rather than --no-write.
     # ---------------------------------------------------------
     if not skip_indicators:
-        indicator_args: list[
-            str | int | float | Path | None
-        ] = [
+        indicator_args: list[str | int | float | Path | None] = [
             "--env",
             env,
             "--universe-csv",
@@ -583,9 +544,8 @@ def morning(
         )
 
         if transition_equity0 is None and not (transition_skip_local and transition_skip_shadow):
-            raise typer.BadParameter(
-                "--transition-equity0 is required when --run-transition runs "
-                "local or shadow transition evaluation."
+            print(
+                "[equity] --transition-equity0 not supplied; child jobs will resolve current equity from ledger + latest prices."
             )
 
         if not transition_skip_local:
@@ -593,8 +553,7 @@ def morning(
                 "--env",
                 env,
                 *_opt("--as-of", transition_as_of),
-                "--equity0",
-                transition_equity0,
+                *_opt("--equity0", transition_equity0),
                 *_opt("--notional", transition_notional),
                 "--goals",
                 transition_goals,
@@ -621,8 +580,7 @@ def morning(
                 "--env",
                 env,
                 *_opt("--as-of", transition_as_of),
-                "--equity0",
-                transition_equity0,
+                *_opt("--equity0", transition_equity0),
                 *_opt("--notional", transition_notional),
                 "--goals",
                 transition_goals,
@@ -663,7 +621,7 @@ def morning(
         )
     else:
         print("\n[SKIP] portfolio transition routine")
-        
+
     print("\n[DONE] pipeline morning\n")
 
 
@@ -679,7 +637,8 @@ def close(
     print("\n=== PIPELINE: close ===")
 
     daily_report_args: list[str | int | float | Path | None] = [
-        "--env", env,
+        "--env",
+        env,
         *_opt("--as-of", as_of),
         *_flag("--no-write", no_write),
         *_flag("--confirm-prod-write", confirm_prod_write),
@@ -691,9 +650,11 @@ def close(
     )
 
     quarantine_args: list[str | int | float | Path | None] = [
-        "--env", env,
+        "--env",
+        env,
         *_opt("--as-of", as_of),
-        "--lookback-days", quarantine_lookback_days,
+        "--lookback-days",
+        quarantine_lookback_days,
         *_flag("--no-write", no_write),
         *_flag("--confirm-prod-write", confirm_prod_write),
     ]
@@ -712,7 +673,12 @@ def search(
     as_of: str | None = typer.Option(None, "--as-of", help="Market as-of date YYYY-MM-DD."),
     run_dt: str | None = typer.Option(None, "--run-dt", help="Run partition date YYYY-MM-DD."),
     universe_csv: str | None = typer.Option(None, "--universe-csv", help="Universe CSV path."),
-    equity0: float = typer.Option(5155.45, "--equity0"),
+    equity0: float | None = typer.Option(
+        None,
+        "--equity0",
+        "--equity-override",
+        help="Equity override. If omitted, child job resolves current equity from ledger + latest prices.",
+    ),
     goals: str = typer.Option("10000,12500,15000", "--goals"),
     main_goal: float = typer.Option(10000.0, "--main-goal"),
     override_target_leverage: float | None = typer.Option(None, "--override-target-leverage"),
@@ -733,26 +699,37 @@ def search(
     print("\n=== PIPELINE: search ===")
 
     args: list[str | int | float | Path | None] = [
-        "--env", env,
+        "--env",
+        env,
         *_opt("--as-of", as_of),
         *_opt("--run-dt", run_dt),
         *_opt("--universe-csv", universe_csv),
-        "--equity0", equity0,
-        "--goals", goals,
-        "--main-goal", main_goal,
+        *_opt("--equity0", equity0),
+        "--goals",
+        goals,
+        "--main-goal",
+        main_goal,
         *_opt("--override-target-leverage", override_target_leverage),
         *_flag("--no-market-hmm", no_market_hmm),
         *_flag("--no-write", no_write),
         *_flag("--confirm-prod-write", confirm_prod_write),
-        "--pop-size", pop_size,
-        "--generations", generations,
-        "--n-paths-init", n_paths_init,
-        "--n-paths-final", n_paths_final,
+        "--pop-size",
+        pop_size,
+        "--generations",
+        generations,
+        "--n-paths-init",
+        n_paths_init,
+        "--n-paths-final",
+        n_paths_final,
         *_flag("--skip-stability-rerank", skip_stability_rerank),
-        "--anneal-steps", anneal_steps,
-        "--anneal-n-paths-init", anneal_n_paths_init,
-        "--anneal-n-paths-final", anneal_n_paths_final,
-        "--min-universe-size", min_universe_size,
+        "--anneal-steps",
+        anneal_steps,
+        "--anneal-n-paths-init",
+        anneal_n_paths_init,
+        "--anneal-n-paths-final",
+        anneal_n_paths_final,
+        "--min-universe-size",
+        min_universe_size,
     ]
 
     _run(
@@ -782,15 +759,22 @@ def dev_smoke(
         _python_module(
             "alpha_edge.market.ingest_market_data",
             [
-                "--env", "dev",
-                "--universe-path", universe_csv,
-                "--start", "2015-01-01",
-                "--end", "2024-02-05",
+                "--env",
+                "dev",
+                "--universe-path",
+                universe_csv,
+                "--start",
+                "2015-01-01",
+                "--end",
+                "2024-02-05",
                 "--ignore-existing-state",
                 "--no-triage",
-                "--max-workers", 2,
-                "--yahoo-max-concurrency", 1,
-                "--yahoo-rate-per-sec", 0.8,
+                "--max-workers",
+                2,
+                "--yahoo-max-concurrency",
+                1,
+                "--yahoo-rate-per-sec",
+                0.8,
             ],
         ),
         dry_run=dry_run,
@@ -800,8 +784,10 @@ def dev_smoke(
         _python_module(
             "alpha_edge.market.build_returns_wide_cache",
             [
-                "--env", "dev",
-                "--min-years", 5,
+                "--env",
+                "dev",
+                "--min-years",
+                5,
                 "--force",
             ],
         ),
@@ -812,7 +798,8 @@ def dev_smoke(
         _python_module(
             "alpha_edge.market.compute_market_regime",
             [
-                "--env", "dev",
+                "--env",
+                "dev",
             ],
         ),
         dry_run=dry_run,
@@ -822,11 +809,16 @@ def dev_smoke(
         _python_module(
             "alpha_edge.jobs.rebuild_ledger",
             [
-                "--env", "dev",
-                "--as-of", as_of,
-                "--end", as_of,
-                "--account-id", "main",
-                "--prices-mode", "asof",
+                "--env",
+                "dev",
+                "--as-of",
+                as_of,
+                "--end",
+                as_of,
+                "--account-id",
+                "main",
+                "--prices-mode",
+                "asof",
             ],
         ),
         dry_run=dry_run,
@@ -836,9 +828,12 @@ def dev_smoke(
         _python_module(
             "alpha_edge.warehouse.build_warehouse",
             [
-                "--env", "dev",
-                "--dt", as_of,
-                "--account-id", "main",
+                "--env",
+                "dev",
+                "--dt",
+                as_of,
+                "--account-id",
+                "main",
             ],
         ),
         dry_run=dry_run,
@@ -848,8 +843,10 @@ def dev_smoke(
         _python_module(
             "alpha_edge.jobs.run_daily_report",
             [
-                "--env", "dev",
-                "--as-of", as_of,
+                "--env",
+                "dev",
+                "--as-of",
+                as_of,
             ],
         ),
         dry_run=dry_run,
@@ -859,23 +856,39 @@ def dev_smoke(
         _python_module(
             "alpha_edge.jobs.run_portfolio_search",
             [
-                "--env", "dev",
-                "--as-of", as_of,
-                "--run-dt", as_of,
-                "--equity0", equity0,
-                "--goals", "1200,1500,2000",
-                "--main-goal", "1500",
-                "--override-target-leverage", "1.0",
-                "--universe-csv", universe_csv,
-                "--pop-size", "20",
-                "--generations", "5",
-                "--n-paths-init", "500",
-                "--n-paths-final", "1000",
+                "--env",
+                "dev",
+                "--as-of",
+                as_of,
+                "--run-dt",
+                as_of,
+                "--equity0",
+                equity0,
+                "--goals",
+                "1200,1500,2000",
+                "--main-goal",
+                "1500",
+                "--override-target-leverage",
+                "1.0",
+                "--universe-csv",
+                universe_csv,
+                "--pop-size",
+                "20",
+                "--generations",
+                "5",
+                "--n-paths-init",
+                "500",
+                "--n-paths-final",
+                "1000",
                 "--skip-stability-rerank",
-                "--anneal-steps", "20",
-                "--anneal-n-paths-init", "500",
-                "--anneal-n-paths-final", "1000",
-                "--min-universe-size", "5",
+                "--anneal-steps",
+                "20",
+                "--anneal-n-paths-init",
+                "500",
+                "--anneal-n-paths-final",
+                "1000",
+                "--min-universe-size",
+                "5",
             ],
         ),
         dry_run=dry_run,
@@ -885,9 +898,12 @@ def dev_smoke(
         _python_module(
             "alpha_edge.jobs.run_quarantine_analysis",
             [
-                "--env", "dev",
-                "--as-of", as_of,
-                "--lookback-days", "10",
+                "--env",
+                "dev",
+                "--as-of",
+                as_of,
+                "--lookback-days",
+                "10",
             ],
         ),
         dry_run=dry_run,

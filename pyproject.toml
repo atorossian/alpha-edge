@@ -32,7 +32,6 @@ dependencies = [
   "pytest-cov (>=6.0,<8.0)",
   "moto[s3] (>=5.0,<6.0)",
   "pre-commit (>=4.0,<5.0)",
-  "ruff (>=0.9.6,<0.10.0)",
   "pandas-market-calendars (>=5.4.0,<6.0.0)",
 ]
 

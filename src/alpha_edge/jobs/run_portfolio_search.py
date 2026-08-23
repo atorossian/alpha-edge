@@ -38,6 +38,7 @@ from alpha_edge.risk.actuarial.portfolio_search_output import (
 )
 from alpha_edge.core.market_store import MarketStore
 from alpha_edge.core.runtime import load_runtime_config, require_prod_confirmation
+from alpha_edge.portfolio.equity_valuation import resolve_current_equity, print_equity_valuation_result
 from alpha_edge.core.schemas import RuntimeConfig, ScoreConfig, StabilityEnergyConfig, StabilityReport
 from alpha_edge.market.build_returns_wide_cache import CacheConfig, build_returns_wide_cache
 from alpha_edge.market.regime_filter import RegimeFilterState
@@ -49,6 +50,7 @@ from alpha_edge.portfolio.optimizer_engine import (
     evaluate_portfolio_candidate_with_paths,
 )
 from alpha_edge.portfolio.portfolio_search import evolve_portfolios_ga, refine_portfolio_annealing
+from alpha_edge.portfolio.evaluation_service import compute_portfolio_health_score as canonical_compute_portfolio_health_score
 from alpha_edge.universe.universe import Asset
 
 
@@ -961,111 +963,30 @@ def compute_portfolio_health_score(
     max_dropped_weight: float,
     max_weight_drift_l1: float,
 ) -> dict:
+    """Compatibility wrapper around the canonical health scorer.
+
+    Keep this function name for existing search/quarantine call sites, but do
+    not maintain a separate scoring formula here. The single source of truth is
+    alpha_edge.portfolio.evaluation_service.compute_portfolio_health_score().
     """
-    Human-facing 0-100 portfolio health score.
-
-    This is intentionally separate from final_metrics.score:
-      - final_metrics.score is the raw optimizer objective and may be negative
-        after lambda tuning.
-      - health_score is normalized for validation/reporting and should be
-        comparable across score-config scale changes.
-    """
-    p_main = _metric_p_main(final_metrics, goals, main_goal)
-
-    ruin_cap = float(getattr(score_cfg, "ruin_cap", 0.10))
-    cvar_cap = float(getattr(score_cfg, "cvar_cap", 0.03))
-    path_mdd_cap = float(getattr(score_cfg, "path_mdd_mean_cap", 0.30))
-    p_dd_breach_cap = float(getattr(score_cfg, "p_dd_breach_cap", 0.25))
-    underwater_cap = float(getattr(score_cfg, "underwater_mean_cap", 1.00))
-    ttr_cap = float(getattr(score_cfg, "ttr_cap_days", 252.0))
-
-    final_ruin = float(getattr(final_metrics, "ruin_prob_1y", np.nan))
-    final_mdd = abs(float(getattr(final_metrics, "max_drawdown", np.nan)))
-    final_cvar = abs(float(getattr(final_metrics, "cvar_95", np.nan)))
-    final_stability = float(getattr(final_metrics, "stability_energy", np.nan))
-    final_path_mdd = float(getattr(final_metrics, "path_mdd_mean", np.nan))
-    final_cdar = float(getattr(final_metrics, "cdar_95", np.nan))
-    final_p_breach = float(getattr(final_metrics, "p_dd_breach", np.nan))
-    final_underwater = float(getattr(final_metrics, "underwater_mean", np.nan))
-    final_ttr = float(getattr(final_metrics, "ttr_mean_days", np.nan))
-
-    components = {
-        "goal_probability": _clamp01(p_main),
-        "ruin": _safe_ratio_good(final_ruin, ruin_cap),
-        "max_drawdown": _safe_ratio_good(final_mdd, max_executable_mdd),
-        "cvar_95": _safe_ratio_good(final_cvar, cvar_cap),
-        "stability_energy": _safe_ratio_good(final_stability, max_stability_energy),
-        "path_mdd_mean": _safe_ratio_good(final_path_mdd, path_mdd_cap),
-        "cdar_95": _safe_ratio_good(final_cdar, max_executable_cdar_95),
-        "p_dd_breach": _safe_ratio_good(final_p_breach, p_dd_breach_cap),
-        "underwater_mean": _safe_ratio_good(final_underwater, underwater_cap),
-        "ttr_mean_days": _safe_ratio_good(final_ttr, ttr_cap),
-        "deployment": _clamp01(
-            float(execution_quality.get("deployment_ratio", np.nan)) / float(min_deployment_ratio)
-            if float(min_deployment_ratio) > 0
-            else 0.0
-        ),
-        "cash": _safe_ratio_good(float(execution_quality.get("cash_weight", np.nan)), max_cash_weight),
-        "weight_drift": _safe_ratio_good(float(execution_quality.get("weight_drift_l1", np.nan)), max_weight_drift_l1),
-        "dropped_weight": _safe_ratio_good(float(execution_quality.get("dropped_theoretical_weight", np.nan)), max_dropped_weight),
-    }
-
-    risk_component = float(np.mean([components["ruin"], components["max_drawdown"], components["cvar_95"]]))
-    stability_component = float(
-        np.mean(
-            [
-                components["stability_energy"],
-                components["path_mdd_mean"],
-                components["cdar_95"],
-                components["p_dd_breach"],
-                components["underwater_mean"],
-                components["ttr_mean_days"],
-            ]
-        )
-    )
-    execution_component = float(
-        np.mean([components["deployment"], components["cash"], components["weight_drift"], components["dropped_weight"]])
-    )
-
-    weights = {
-        "goal_probability": 0.30,
-        "risk": 0.30,
-        "stability": 0.30,
-        "execution": 0.10,
-    }
-    health_score = 100.0 * (
-        weights["goal_probability"] * components["goal_probability"]
-        + weights["risk"] * risk_component
-        + weights["stability"] * stability_component
-        + weights["execution"] * execution_component
-    )
-
-    if health_score >= 80:
-        grade = "A"
-    elif health_score >= 70:
-        grade = "B"
-    elif health_score >= 60:
-        grade = "C"
-    elif health_score >= 50:
-        grade = "D"
-    else:
-        grade = "F"
-
-    return {
-        "schema_version": "portfolio_health_score_v1",
-        "health_score": float(health_score),
-        "health_grade": grade,
-        "raw_optimizer_score": float(getattr(final_metrics, "score", np.nan)),
-        "components": {
-            "goal_probability": float(components["goal_probability"]),
-            "risk": risk_component,
-            "stability": stability_component,
-            "execution": execution_component,
+    return canonical_compute_portfolio_health_score(
+        final_metrics=final_metrics,
+        execution_quality=execution_quality,
+        score_cfg=score_cfg,
+        goals=goals,
+        main_goal=float(main_goal),
+        max_cash_weight=float(max_cash_weight),
+        min_deployment_ratio=float(min_deployment_ratio),
+        max_executable_mdd=float(max_executable_mdd),
+        max_executable_cdar_95=float(max_executable_cdar_95),
+        max_stability_energy=float(max_stability_energy),
+        max_dropped_weight=float(max_dropped_weight),
+        max_weight_drift_l1=float(max_weight_drift_l1),
+        metadata={
+            "producer": "run_portfolio_search.py",
+            "consumer": "portfolio_search_or_quarantine_validation",
         },
-        "component_details": {k: float(v) for k, v in components.items()},
-        "weights": {k: float(v) for k, v in weights.items()},
-        "note": "health_score is for validation/reporting; raw_optimizer_score is for candidate ranking only.",
-    }
+    )
 
 
 def validate_final_executable(
@@ -2852,7 +2773,7 @@ def parse_args() -> argparse.Namespace:
     ap.add_argument("--as-of", default=None, help="Market as-of date YYYY-MM-DD. Default: today.")
     ap.add_argument("--run-dt", default=None, help="Run partition date YYYY-MM-DD. Default: today.")
 
-    ap.add_argument("--equity0", type=float)
+    ap.add_argument("--equity0", "--equity-override", dest="equity0", type=float, default=None, help="Initial/current equity. If omitted, resolved from ledger + latest prices.")
     ap.add_argument(
         "--goals",
         default="10000,12500,15000",
@@ -2960,9 +2881,12 @@ def main():
     )
     as_of = args.as_of or run_dt.strftime("%Y-%m-%d")
 
+    equity_result = resolve_current_equity(cfg=cfg, as_of=as_of, equity_override=args.equity0)
+    print_equity_valuation_result(equity_result)
+
     run_portfolio_search_asof(
         as_of=as_of,
-        equity0=float(args.equity0),
+        equity0=float(equity_result.equity),
         goals=_parse_goals(args.goals),
         main_goal=float(args.main_goal),
         universe_csv=args.universe_csv,

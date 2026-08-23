@@ -1,3 +1,1 @@
 ticker,yahoo_ticker,lock_yahoo_ticker,exclude,exclude_reason,expected_name,note
-USD-BRL,BRL=X.DE,1,0,,fx,auto-suggest from failures(empty); base=BRL=X; region=nan
-AUD-USD,AUDUSD=X.DE,1,0,,Australian Dollar US Dollar,auto-suggest from failures(empty); base=AUDUSD=X; region=Forex

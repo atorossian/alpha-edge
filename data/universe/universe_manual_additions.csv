@@ -32,3 +32,5 @@ VXQ4,VXQ4,1,CBOE Volatility Index (VIX) August 2024,derivative,futures,NYMEX
 VXH6,VXH6,1,CBOE Volatility Index (VIX) March 2026,derivative,futures,NYMEX
 VXM6,VXM6,1,CBOE Volatility Index (VIX) June 2026,derivative,futures,NYMEX
 AUD-USD,AUD-USD,1,Australian Dollar US Dollar,fx,fx_pair,Forex
+DRAM,DRAM,1,Roundhill Memory ETF,equity,etf,NASDAQ
+NLR,NLR,1,VanEck Uranium and Nuclear ETF,equity,etf,NYSE

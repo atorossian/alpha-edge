@@ -292,7 +292,34 @@ def morning(
         "--dry-run",
         help="Print child commands only; do not execute them.",
     ),
+<<<<<<< Updated upstream
         run_transition: bool = typer.Option(
+=======
+    run_barrier_monitor: bool = typer.Option(
+        False,
+        "--run-barrier-monitor",
+        help=(
+            "Run Milestone 21 open-position barrier monitor after market data/indicators and before transition checks. "
+            "The child job reads the latest/dt ledger positions and open_lot_trace outputs."
+        ),
+    ),
+    barrier_as_of: str | None = typer.Option(
+        None,
+        "--barrier-as-of",
+        help="Barrier monitor as-of date YYYY-MM-DD. Defaults to --transition-as-of, --end, or child script default.",
+    ),
+    barrier_conservative: bool = typer.Option(
+        True,
+        "--barrier-conservative/--barrier-aggressive",
+        help="Keep Milestone 21 v1 conservative advisory behavior enabled by default.",
+    ),
+    barrier_disable_throttle: bool = typer.Option(
+        False,
+        "--barrier-disable-throttle",
+        help="Disable the barrier monitor daily liquidation throttle.",
+    ),
+    run_transition: bool = typer.Option(
+>>>>>>> Stashed changes
         False,
         "--run-transition",
         help=(
@@ -545,7 +572,43 @@ def morning(
         dry_run=dry_run,
     )
     # ---------------------------------------------------------
-    # 5. Portfolio transition routine, optional
+    # 5. Open-position barrier monitor, optional
+    #
+    # Depends on:
+    #   - ledger positions/latest.json or dated positions.json
+    #   - ledger open_lot_trace/latest.json or dated open_lot_trace.json
+    #   - latest prices, OHLCV, and latest indicators
+    #
+    # Writes when not in --no-write mode:
+    #   - open_position_barriers/dt=.../barriers.json
+    #   - open_position_barriers/latest.json
+    #   - lot/position parquet outputs, triggered actions, and state
+    # ---------------------------------------------------------
+    if run_barrier_monitor:
+        print("\n=== PIPELINE: morning / open-position barriers ===")
+        resolved_barrier_as_of = barrier_as_of or transition_as_of or end
+        barrier_args: list[str | int | float | Path | None] = [
+            "--env",
+            env,
+            *_opt("--as-of", resolved_barrier_as_of),
+            *_flag("--write", not no_write),
+            *_flag("--dry-run", no_write),
+            *_flag("--confirm-prod-write", confirm_prod_write),
+            *_flag("--disable-conservative-advisory-mode", not barrier_conservative),
+            *_flag("--disable-liquidation-throttle", barrier_disable_throttle),
+        ]
+        _run(
+            _python_module(
+                "alpha_edge.jobs.run_open_position_barrier_monitor",
+                barrier_args,
+            ),
+            dry_run=dry_run,
+        )
+    else:
+        print("\n[SKIP] open-position barrier monitor")
+
+    # ---------------------------------------------------------
+    # 6. Portfolio transition routine, optional
     #
     # Depends on:
     #   - daily health/latest.json

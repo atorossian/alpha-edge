@@ -1,0 +1,7 @@
+{
+  "prices_s3_prefix": "s3://alpha-edge-algo/market/ohlcv_usd/v1/",
+  "assets_requested": 40,
+  "assets_extracted": 40,
+  "out_dir": "data\\quality\\returns\\price_extract\\sample40_full_history",
+  "windows_used": false
+}

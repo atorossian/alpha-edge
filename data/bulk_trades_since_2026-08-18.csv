@@ -1,0 +1,2 @@
+as_of,ticker,side,action_tag,quantity,price,value,currency,ts_utc,quantity_unit,reported_pnl,trade_id,asset_id,asset_class,note
+2026-09-01,VXU6,BUY,open,,17.25,1000.00,USD,2026-09-01T22:50:26Z,derivative,,20260901-6d8c8b979bc390ec,,futures,Quantfury trade history 2026-09-04; new since 2026-08-18 export

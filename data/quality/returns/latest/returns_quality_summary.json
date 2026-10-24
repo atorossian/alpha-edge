@@ -1,0 +1,29 @@
+{
+  "config": {
+    "max_abs_return_warn": 0.2,
+    "max_abs_return_block": 0.5,
+    "max_daily_return_block": 1.0,
+    "min_daily_return_block": -1.0,
+    "max_bad_cells_per_date_warn": 10,
+    "max_bad_cells_per_date_block": 50,
+    "max_bad_cells_per_asset_warn": 3,
+    "max_bad_cells_per_asset_block": 10,
+    "min_obs_per_asset": 252
+  },
+  "summary": {
+    "rows": 5610,
+    "assets": 1953,
+    "duplicate_dates": 0,
+    "bad_row_lengths": 0,
+    "total_observations": 10956330,
+    "missing_observations": 0,
+    "abs_gt_warn": 14916,
+    "abs_gt_block": 6667,
+    "gt_100pct": 2882,
+    "le_minus_100pct": 2539,
+    "dates_with_block_clusters": 28,
+    "assets_with_block_cells": 854,
+    "assets_with_impossible_returns": 644,
+    "critical": true
+  }
+}

@@ -156,7 +156,10 @@ class MarketStore:
             raise ValueError("Replacement has changed historical coverage")
         before = original.set_index("date").sort_index()
         after = replacement.set_index("date").sort_index()
-        changed = before["close"].astype(float).ne(after["close"].astype(float))
+        original_close = pd.to_numeric(before["close"], errors="coerce")
+        repaired_close = pd.to_numeric(after["close"], errors="coerce")
+        # pandas NaN != NaN; missing prices preserved on both sides are unchanged.
+        changed = original_close.ne(repaired_close) & ~(original_close.isna() & repaired_close.isna())
         if int(changed.sum()) != int(expected_patched_dates):
             differences = pd.DataFrame({
                 "original_close": before.loc[changed, "close"].astype(float),

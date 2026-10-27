@@ -1837,6 +1837,202 @@ def publish_validated_fx_from_local(*, input_dir: str, run_id: str, store: Marke
     return dest
 
 
+
+def repair_full_histories(*, cfg, bad_cells: str, fx_parquet: str, universe_path: str,
+                          start: str, end: str | None, max_assets: int | None,
+                          confirm_prod_write: bool) -> None:
+    """AEA-87 direct full-history replacement, with per-asset manifest rollback.
+
+    This is intentionally separate from the ordinary append-only ingestion loop.
+    No missing Yahoo dates or missing FX dates are invented. Successful assets
+    are committed individually; failures are listed in a local CSV.
+    """
+    import hashlib
+    import json
+    import io
+    import uuid
+    from datetime import datetime, timezone
+
+    require_prod_confirmation(cfg, bool(confirm_prod_write))
+    if not confirm_prod_write:
+        raise ValueError("Historical repair requires --confirm-prod-write")
+    if str(getattr(cfg, "env", "")).lower() != "prod":
+        raise ValueError("Historical repair requires --env prod")
+
+    store = _make_market_store(
+        bucket=_cfg_bucket(cfg), region=_cfg_region(cfg),
+        market_root=_cfg_market_root(cfg),
+    )
+    bad = pd.read_csv(bad_cells, usecols=["asset_id"])
+    requested = set(bad["asset_id"].dropna().astype(str).str.strip())
+    universe = pd.read_csv(universe_path)
+    if "include" in universe:
+        universe = universe.loc[universe["include"].fillna(1).astype(int).eq(1)]
+    universe["asset_id"] = universe["asset_id"].astype(str).str.strip()
+    universe = universe.loc[universe["asset_id"].isin(requested)].copy()
+    if universe["asset_id"].duplicated().any():
+        raise ValueError("Multiple universe rows for the same asset_id")
+    missing = requested - set(universe["asset_id"])
+    if missing:
+        print(f"[repair] excluded/unmapped assets: {len(missing)}")
+    if max_assets:
+        universe = universe.head(max_assets)
+    if universe.empty:
+        raise ValueError("No assets selected for historical repair")
+    fx = pd.read_parquet(fx_parquet)
+    fx["date"] = pd.to_datetime(fx["date"], utc=True).dt.normalize()
+    fx["currency"] = fx["currency"].astype(str).str.upper()
+    fx = fx.loc[fx["validation_status"].isin(["VALID", "VALID_AFTER_GAP"])].copy()
+    if fx.duplicated(["currency", "date"]).any():
+        raise ValueError("Duplicate validated FX dates")
+    fx_lookup = {c: g.set_index("date")["fx_to_usd"] for c, g in fx.groupby("currency")}
+
+    report = []
+    run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "_" + uuid.uuid4().hex[:8]
+    report_file = paths.ensure_dir(paths.local_outputs_dir() / "aea87_repair") / f"full_history_{run_id}.csv"
+    total = len(universe)
+    for seq, (_, asset) in enumerate(universe.iterrows(), 1):
+        aid = str(asset["asset_id"]).strip()
+        yahoo = _normalize_crypto_symbol_to_yahoo(_normalize_fx_symbol_to_yahoo(
+            str(asset.get("yahoo_ticker") or asset.get("ticker")).strip().upper()
+        ))
+        ticker = str(asset.get("ticker") or yahoo)
+        currency = _clean_ccy(asset.get("currency"))
+        if aid.startswith("CRYPTO:") or _is_fx_pair_like_symbol(yahoo):
+            currency = "USD"
+        if not currency:
+            report.append({"asset_id": aid, "status": "SKIPPED_UNRESOLVED_CURRENCY"})
+            continue
+        print(f"[repair] {seq}/{total} {aid} ({yahoo})")
+        updated = []
+        try:
+            downloaded = download_ohlcv(yahoo, start=start, end=end,
+                                        interval="1d", allow_cache=False)
+            if downloaded.empty:
+                raise ValueError("Fresh Yahoo history is empty")
+            downloaded["date"] = pd.to_datetime(downloaded["date"], utc=True).dt.normalize()
+            downloaded = downloaded.dropna(subset=["date"]).sort_values("date")
+            if downloaded["date"].duplicated().any():
+                raise ValueError("Duplicate dates in fresh Yahoo history")
+            for col in ["open", "high", "low", "close", "adj_close", "volume"]:
+                if col not in downloaded:
+                    raise ValueError(f"Missing downloaded column {col}")
+            if currency == "USD":
+                downloaded["fx_to_usd"] = 1.0
+            else:
+                if currency not in fx_lookup:
+                    raise ValueError(f"Validated FX missing currency {currency}")
+                new_dates = pd.DatetimeIndex(downloaded["date"])
+                rate = fx_lookup[currency].reindex(new_dates)
+                if rate.isna().any():
+                    raise ValueError(f"Validated FX absent on {int(rate.isna().sum())} dates")
+                downloaded["fx_to_usd"] = rate.to_numpy()
+            for col in ["open", "high", "low", "close", "adj_close", "volume", "fx_to_usd"]:
+                downloaded[col] = pd.to_numeric(downloaded[col], errors="coerce")
+            if downloaded["close"].isna().all() or downloaded["adj_close"].isna().all():
+                raise ValueError("Downloaded source closes missing")
+            downloaded["asset_id"] = aid
+            downloaded["ticker"] = ticker
+            downloaded["yahoo_ticker"] = yahoo
+            downloaded["currency"] = currency
+            downloaded["close_raw_usd"] = downloaded["close"] * downloaded["fx_to_usd"]
+            downloaded["close_adjusted_usd"] = downloaded["adj_close"] * downloaded["fx_to_usd"]
+            downloaded["close_usd"] = downloaded["close_raw_usd"]
+            downloaded["adj_close_usd"] = downloaded["close_adjusted_usd"]
+            cols = ["date", "asset_id", "ticker", "yahoo_ticker", "open", "high",
+                    "low", "close", "adj_close", "volume", "currency", "fx_to_usd",
+                    "close_raw_usd", "close_adjusted_usd", "close_usd", "adj_close_usd"]
+            prices = downloaded[cols].copy()
+            px = prices[["date", "close_adjusted_usd"]].dropna()
+            px = px.loc[px["close_adjusted_usd"].gt(0)].copy()
+            px["ret_log_close_adjusted_usd"] = np.log(
+                px["close_adjusted_usd"] / px["close_adjusted_usd"].shift(1)
+            )
+            px = px.replace([np.inf, -np.inf], np.nan).dropna(subset=["ret_log_close_adjusted_usd"])
+            returns = pd.DataFrame({"date": px["date"], "asset_id": aid, "ticker": ticker,
+                                    "ret_log_close_adjusted_usd": px["ret_log_close_adjusted_usd"]})
+            returns["ret_close_adjusted_usd"] = np.expm1(returns["ret_log_close_adjusted_usd"])
+            returns["ret_adj_close_usd"] = returns["ret_close_adjusted_usd"]
+
+            # Prepare all historical partitions before modifying active manifests.
+            pending = []
+            for table, frame in (("ohlcv_usd", prices), ("returns_usd", returns)):
+                for year, g in frame.groupby(frame["date"].dt.year):
+                    y = int(year)
+                    key = store._manifest_key(table=table, asset_id=aid, year=y)
+                    old = None
+                    try:
+                        old = store._get_bytes(key)
+                    except store._client().exceptions.NoSuchKey:
+                        pass
+                    if old is not None:
+                        prior = json.loads(old)
+                        old_dates = set(prior.get("dates") or [])
+                        fresh_dates = set(g["date"].dt.strftime("%Y-%m-%d"))
+                        if not old_dates.issubset(fresh_dates):
+                            raise ValueError(
+                                f"{table} {y}: fresh source omits {len(old_dates - fresh_dates)} existing dates"
+                            )
+                    data = io.BytesIO()
+                    g.to_parquet(data, index=False)
+                    pending.append((table, y, key, old, g, data.getvalue()))
+
+            # Back up all manifests before switching any references.
+            for table, year, key, old, g, payload in pending:
+                if old is not None:
+                    backup = f"{store.base_prefix}/repairs/aea87/{run_id}/asset_id={aid}/{table}/{year}/old_manifest.json"
+                    store._put_bytes(backup, old, "application/json")
+                    if store._get_bytes(backup) != old:
+                        raise IOError("Manifest backup verification failed")
+
+            staged = []
+            for table, year, key, old, g, payload in pending:
+                prefix = store.ohlcv_prefix if table == "ohlcv_usd" else store.returns_prefix
+                part = store._part_key(prefix, aid, year)
+                store._put_bytes(part, payload)
+                if hashlib.sha256(store._get_bytes(part)).digest() != hashlib.sha256(payload).digest():
+                    raise IOError("Staged partition checksum mismatch")
+                manifest = {
+                    "asset_id": aid, "year": year,
+                    "dates": sorted(g["date"].dt.strftime("%Y-%m-%d").unique().tolist()),
+                    "parts": [part], "repair_run_id": run_id,
+                }
+                staged.append((key, old, manifest))
+
+            for key, old, manifest in staged:
+                if old is not None and store._get_bytes(key) != old:
+                    raise RuntimeError("Manifest was changed concurrently")
+                store._put_bytes(key, json.dumps(manifest, indent=2).encode(), "application/json")
+                updated.append((key, old))
+
+            report.append({"asset_id": aid, "status": "REPLACED", "price_rows": len(prices),
+                           "return_rows": len(returns), "manifests": len(staged)})
+        except Exception as exc:
+            rollback_failed = False
+            for key, old in reversed(updated):
+                try:
+                    if old is None:
+                        store._client().delete_object(Bucket=store.bucket, Key=key)
+                    else:
+                        store._put_bytes(key, old, "application/json")
+                except Exception:
+                    rollback_failed = True
+            report.append({"asset_id": aid,
+                           "status": "ROLLBACK_FAILED" if rollback_failed else "FAILED_OR_ROLLED_BACK",
+                           "error": str(exc)})
+            print(f"[repair][error] {aid}: {exc}")
+            if rollback_failed:
+                pd.DataFrame(report).to_csv(report_file, index=False)
+                raise RuntimeError(f"Repair rollback failed for {aid}; manual recovery needed") from exc
+        finally:
+            pd.DataFrame(report).to_csv(report_file, index=False)
+    print(f"[repair] campaign complete; report={report_file}")
+    counts = pd.Series([r["status"] for r in report]).value_counts().to_dict()
+    print("[repair] results:", counts)
+    if any(r["status"] != "REPLACED" for r in report) or missing:
+        raise RuntimeError("Repair incomplete: inspect campaign report before rebuilding returns cache")
+
+
 def parse_args() -> argparse.Namespace:
     ap = argparse.ArgumentParser(description="Ingest Alpha Edge market data into S3.")
 
@@ -1871,6 +2067,14 @@ def _main_impl() -> None:
     args = parse_args()
 
     cfg = load_runtime_config(args.env)
+    if args.repair_bad_cells:
+        repair_full_histories(cfg=cfg, bad_cells=args.repair_bad_cells,
+                              fx_parquet=args.repair_fx_parquet,
+                              universe_path=args.universe_path,
+                              start=args.start, end=args.end,
+                              max_assets=args.max_assets,
+                              confirm_prod_write=args.confirm_prod_write)
+        return
     if args.fx_input_dir:
         if args.fx_upload:
             require_prod_confirmation(cfg, bool(args.confirm_prod_write))

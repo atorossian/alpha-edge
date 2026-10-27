@@ -1798,6 +1798,8 @@ def _main_impl() -> None:
 
     cfg = load_runtime_config(args.env)
     if args.fx_input_dir:
+        if args.fx_upload:
+            require_prod_confirmation(cfg, bool(args.confirm_prod_write))
         if not args.fx_run_id:
             raise ValueError("--fx-run-id required with --fx-input-dir")
         store = _make_market_store(
@@ -1840,6 +1842,8 @@ def _main_impl() -> None:
 # Audit/logging entrypoint wrapper
 # ----------------------------
 def _tier1_audit_is_dry_run(args: argparse.Namespace) -> bool:
+    if getattr(args, "fx_input_dir", None):
+        return not bool(getattr(args, "fx_upload", False))
     return bool(getattr(args, "dry_run", False) or getattr(args, "no_write", False))
 
 

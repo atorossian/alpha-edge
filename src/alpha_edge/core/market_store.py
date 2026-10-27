@@ -42,6 +42,59 @@ class MarketStore:
             self._tls.s3 = c
         return c
 
+
+    def write_fx_snapshot_staging(self, frame: pd.DataFrame, report: dict, *, run_id: str, upload: bool = False) -> str:
+        """AEA-87: publish validated FX observations to immutable staging, never live OHLCV."""
+        import hashlib
+        import re
+        from datetime import datetime, timezone
+
+        if not re.fullmatch(r"[A-Za-z0-9_-]{6,80}", run_id):
+            raise ValueError("Unsafe FX run ID")
+        prefix = f"{self.base_prefix}/fx_usd/staging/aea87/{run_id}"
+        for col in ("currency", "date", "fx_to_usd", "validation_status", "direct_quote", "inverse_quote"):
+            if col not in frame:
+                raise ValueError(f"FX snapshot missing {col}")
+        if frame.empty:
+            raise ValueError("Empty FX snapshot")
+        data = frame.copy()
+        data["date"] = pd.to_datetime(data["date"], utc=True, errors="coerce")
+        if data["date"].isna().any() or data.duplicated(["currency", "date"]).any():
+            raise ValueError("Invalid FX dates or duplicate currency/date")
+        valid = data["validation_status"].eq("VALID")
+        if not valid.any() or data.loc[valid, "fx_to_usd"].isna().any() or (data.loc[valid, "fx_to_usd"] <= 0).any():
+            raise ValueError("Invalid VALID FX observations")
+        if data.loc[valid, "fx_to_usd"].map(lambda x: not __import__("math").isfinite(float(x))).any():
+            raise ValueError("Nonfinite FX observation")
+        if (data.loc[~valid, "fx_to_usd"].notna()).any():
+            raise ValueError("Unvalidated FX values must be null")
+        if data["validation_status"].isin(["QUOTE_DISAGREEMENT", "LARGE_FX_CHANGE"]).any():
+            raise ValueError("Unresolved critical FX discrepancies")
+        import io as _io
+        buf = _io.BytesIO()
+        data.to_parquet(buf, index=False)
+        payload = buf.getvalue()
+        key = prefix + "/fx_history_all.parquet"
+        manifest_key = prefix + "/manifest.json"
+        if upload:
+            if self._key_exists(key) or self._key_exists(manifest_key):
+                raise FileExistsError("FX staging run ID already exists in S3")
+            self._put_bytes(key, payload)
+            observed = self._get_bytes(key)
+            if hashlib.sha256(observed).digest() != hashlib.sha256(payload).digest():
+                raise IOError("FX S3 read-back checksum mismatch")
+            manifest = {
+                "schema": "aea87_fx_staging_v1",
+                "status": "STAGING_ONLY",
+                "created_at_utc": datetime.now(timezone.utc).isoformat(),
+                "rows": len(data),
+                "currencies": sorted(data["currency"].astype(str).unique().tolist()),
+                "sha256": hashlib.sha256(payload).hexdigest(),
+                "validation_report": report,
+            }
+            self._put_bytes(manifest_key, json.dumps(manifest, indent=2).encode(), "application/json")
+        return f"s3://{self.bucket}/{prefix}/"
+
     # -------------------------
     # Low-level S3 helpers
     # -------------------------

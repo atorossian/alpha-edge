@@ -36,6 +36,7 @@ def main():
     store = MarketStore(bucket=args.bucket, region=args.region)
     details = []
     summaries = []
+    staged_bars = []
     for requested in wanted:
         aliases = {requested, requested.replace("-", ""), requested.replace("/", "-")}
         rows = universe.loc[symbol.isin(aliases) | ticker.isin(aliases)].copy()
@@ -76,6 +77,42 @@ def main():
         both = joined["_merge"].eq("both")
         different = both & joined["relative_error"].gt(0.01)
         details.append(joined)
+        # Stage complete replacement OHLCV bars locally, never just a close
+        # price patch. Rebuilding from entire bars preserves OHLC invariants.
+        if different.any():
+            fields = {"Open": "open", "High": "high", "Low": "low",
+                      "Close": "close", "Adj Close": "adj_close", "Volume": "volume"}
+            raw_bars = pd.DataFrame(index=raw.index)
+            for yf_field, target in fields.items():
+                source = raw[yf_field] if yf_field in raw.columns.get_level_values(0) else None
+                if isinstance(source, pd.DataFrame):
+                    if sym not in source.columns:
+                        raise ValueError(f"{sym}: downloaded OHLCV symbol mismatch")
+                    source = source[sym]
+                if source is None:
+                    raise ValueError(f"{sym}: missing {yf_field} for staged repair")
+                raw_bars[target] = source
+            raw_bars.index = pd.to_datetime(raw_bars.index, utc=True).tz_convert(None).normalize()
+            raw_bars.index.name = "date"
+            raw_bars = raw_bars.reset_index()
+            repair_dates = set(joined.loc[different, "date"])
+            patches = raw_bars.loc[raw_bars["date"].isin(repair_dates)].copy()
+            if len(patches) != int(different.sum()):
+                raise ValueError(f"{sym}: staged OHLCV row count does not match discrepancy dates")
+            numeric = patches[["open", "high", "low", "close", "adj_close"]].apply(pd.to_numeric, errors="coerce")
+            if not np.isfinite(numeric.to_numpy(dtype=float)).all() or (numeric <= 0).any().any():
+                raise ValueError(f"{sym}: invalid staged Yahoo OHLCV bars")
+            if (numeric["high"] < numeric[["open", "close", "low"]].max(axis=1)).any() or (numeric["low"] > numeric[["open", "close", "high"]].min(axis=1)).any():
+                raise ValueError(f"{sym}: inconsistent staged OHLC values")
+            patches["asset_id"] = aid
+            patches["yahoo_ticker"] = sym
+            patches["currency"] = "USD"
+            patches["fx_to_usd"] = 1.0
+            patches["close_raw_usd"] = patches["close"]
+            patches["close_adjusted_usd"] = patches["adj_close"]
+            patches["close_usd"] = patches["close"]
+            patches["adj_close_usd"] = patches["adj_close"]
+            staged_bars.append(patches)
         summaries.append({
             "requested": requested, "asset_id": aid, "yahoo_ticker": sym, "status": "COMPARED",
             "s3_rows": int(len(stored)), "fresh_rows": int(len(fresh)),
@@ -104,6 +141,12 @@ def main():
         bad["action"] = "REVIEW_ONLY_NO_S3_WRITE"
         bad.to_csv(out / "replacement_candidates.csv", index=False)
         print(f"Staged {len(bad)} read-only source-price replacement candidates")
+    if staged_bars:
+        patch = pd.concat(staged_bars, ignore_index=True)
+        if patch.duplicated(["asset_id", "date"]).any():
+            raise ValueError("Duplicate asset/date in local repair patches")
+        patch.to_parquet(out / "replacement_ohlcv_bars_STAGING_ONLY.parquet", index=False)
+        print(f"Staged {len(patch)} complete replacement OHLCV bars LOCALLY; no S3 writes")
     print("READ-ONLY comparison saved to", out.resolve())
 
 

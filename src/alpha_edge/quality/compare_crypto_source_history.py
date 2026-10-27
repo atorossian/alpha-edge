@@ -88,7 +88,22 @@ def main():
         print(summaries[-1])
     pd.DataFrame(summaries).to_csv(out / "summary.csv", index=False)
     if details:
-        pd.concat(details, ignore_index=True).to_csv(out / "date_comparison.csv", index=False)
+        all_dates = pd.concat(details, ignore_index=True)
+        all_dates.to_csv(out / "date_comparison.csv", index=False)
+        # Stage price-level replacements as a LOCAL REVIEW PLAN, never as a write.
+        # Only overlapping observations with a >1% discrepancy are candidates.
+        bad = all_dates.loc[
+            all_dates["_merge"].eq("both")
+            & all_dates["relative_error"].gt(0.01)
+            & all_dates["fresh_close"].notna()
+            & np.isfinite(all_dates["fresh_close"])
+            & all_dates["fresh_close"].gt(0),
+            ["asset_id", "requested", "date", "stored_close", "fresh_close", "relative_error"]
+        ].copy()
+        bad = bad.rename(columns={"stored_close": "old_close", "fresh_close": "proposed_close"})
+        bad["action"] = "REVIEW_ONLY_NO_S3_WRITE"
+        bad.to_csv(out / "replacement_candidates.csv", index=False)
+        print(f"Staged {len(bad)} read-only source-price replacement candidates")
     print("READ-ONLY comparison saved to", out.resolve())
 
 

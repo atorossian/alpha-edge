@@ -479,6 +479,7 @@ def download_ohlcv(
     end: str | None = None,
     interval: str = "1d",
     session=None,
+    allow_cache: bool = True,
 ) -> pd.DataFrame:
     """
     Download OHLCV via yfinance with:
@@ -490,10 +491,11 @@ def download_ohlcv(
     """
     cache_key = _hash_key("ohlcv", ticker, start, end, interval, "auto_adjust_false_v4_utc")
 
-    with _CACHE_LOCK:
-        cached = _cache_read_df("ohlcv", cache_key)
-    if cached is not None and not cached.empty:
-        return cached
+    if allow_cache:
+        with _CACHE_LOCK:
+            cached = _cache_read_df("ohlcv", cache_key)
+        if cached is not None and not cached.empty:
+            return cached
 
     def _normalize_df(df: pd.DataFrame) -> pd.DataFrame:
         if df is None or df.empty:
@@ -603,7 +605,7 @@ def download_ohlcv(
         except Exception:
             return pd.DataFrame()
 
-    if not df.empty:
+    if not df.empty and allow_cache:
         with _CACHE_LOCK:
             _cache_write_df("ohlcv", cache_key, df)
 
@@ -973,6 +975,8 @@ def ingest(
     run_triage: bool = True,
     env_name: str = "dev",
     allow_large_dev_universe: bool = False,
+    repair_bad_cells: str | None = None,
+    repair_fx_parquet: str | None = None,
 ) -> None:
     import time
 
@@ -1041,6 +1045,31 @@ def ingest(
     else:
         u["currency"] = None
 
+    repair_assets: set[str] = set()
+    validated_fx = None
+    if repair_bad_cells:
+        bad = pd.read_csv(repair_bad_cells, usecols=["asset_id"])
+        repair_assets = set(bad["asset_id"].dropna().astype(str).str.strip())
+        missing = repair_assets - set(u["asset_id"])
+        if missing:
+            print(f"[repair] {len(missing)} anomaly asset IDs absent from included universe; NOT repaired")
+        if not repair_fx_parquet:
+            raise ValueError("--repair-fx-parquet required for full-history repair")
+        validated_fx = pd.read_parquet(repair_fx_parquet)
+        needed = {"currency", "date", "fx_to_usd", "validation_status"}
+        if not needed.issubset(validated_fx.columns):
+            raise ValueError("Validated FX table missing required columns")
+        validated_fx = validated_fx.loc[
+            validated_fx["validation_status"].isin(["VALID", "VALID_AFTER_GAP"])
+        ].copy()
+        validated_fx["date"] = pd.to_datetime(validated_fx["date"], utc=True).dt.normalize()
+        validated_fx["currency"] = validated_fx["currency"].astype(str).str.upper()
+        if validated_fx.duplicated(["currency", "date"]).any():
+            raise ValueError("Duplicate validated FX date/currency")
+        print(f"[repair] selected {len(repair_assets)} anomalous asset IDs for full-history replacement")
+        u = u.loc[u["asset_id"].isin(repair_assets)].copy()
+        if u.empty:
+            raise ValueError("No eligible repair assets in universe")
     triples = list(
         zip(
             u["asset_id"].tolist(),
@@ -1072,7 +1101,9 @@ def ingest(
         except Exception:
             force_refresh = set()
 
-    if ignore_existing_state:
+    if repair_bad_cells:
+        force_refresh = repair_assets
+    if ignore_existing_state or repair_bad_cells:
         last_state = {}
         provider_state = {}
     else:
@@ -1144,6 +1175,11 @@ def ingest(
         last_flush_ts = now
 
     def get_fx_locked_local(ccy: str, dates: pd.DatetimeIndex) -> pd.Series:
+        if validated_fx is not None:
+            data = validated_fx.loc[validated_fx["currency"].eq(ccy), ["date", "fx_to_usd"]]
+            rates = data.set_index("date")["fx_to_usd"]
+            normalized = pd.to_datetime(dates, utc=True).normalize()
+            return pd.Series(rates.reindex(normalized).to_numpy(), index=dates)
         with fx_lock:
             return get_fx_to_usd_for_dates(
                 ccy=ccy,
@@ -1218,7 +1254,7 @@ def ingest(
 
         try:
             df = call_yf_with_retries(
-                lambda: download_ohlcv(yahoo_sym, start=start, end=end, interval=interval, session=None),
+                lambda: download_ohlcv(yahoo_sym, start=start, end=end, interval=interval, session=None, allow_cache=not bool(repair_bad_cells)),
                 sem=yf_sem,
                 limiter=limiter,
             )
@@ -1287,6 +1323,8 @@ def ingest(
                         }
                     df["fx_to_usd"] = fx_s.values
                     if df["fx_to_usd"].isna().any():
+                        if repair_bad_cells:
+                            return {"status":"repair_missing_validated_fx", "asset_id":asset_id, "error":f"{ccy}: no validated rate for historical dates"}
                         df = df.dropna(subset=["fx_to_usd"])
                         if df.empty:
                             return {
@@ -1350,22 +1388,33 @@ def ingest(
                 have_dates = set(man.get("dates", []))
                 have_parts = set(man.get("parts", []))
 
-                to_write = g[~g["date_str"].isin(have_dates)].copy()
+                to_write = (g.copy() if repair_bad_cells else g[~g["date_str"].isin(have_dates)].copy())
                 if to_write.empty:
                     continue
-
+                if repair_bad_cells and have_dates and not have_dates.issubset(set(to_write["date_str"])):
+                    return {"status":"repair_incomplete_source", "asset_id":asset_id,
+                            "error":f"{year}: fresh source missing {len(have_dates - set(to_write['date_str']))} existing dates; original preserved"}
+                if repair_bad_cells:
+                    # Preserve old objects. Publish new immutable part first, then switch
+                    # active manifest references. Back up the old manifest for rollback.
+                    import json as _json
+                    backup_key = f"{store.base_prefix}/repairs/aea87/full_history/asset_id={asset_id}/year={year}/ohlcv_manifest.json"
+                    manifest_key = store._manifest_key(table="ohlcv_usd", asset_id=asset_id, year=int(year))
+                    try:
+                        original_manifest = store._get_bytes(manifest_key)
+                        if store._key_exists(backup_key):
+                            return {"status":"repair_backup_exists", "asset_id":asset_id, "error":backup_key}
+                        store._put_bytes(backup_key, original_manifest, "application/json")
+                    except Exception as exc:
+                        return {"status":"repair_backup_failed", "asset_id":asset_id, "error":str(exc)}
                 written_parts = store.write_ohlcv_usd_partitioned(to_write.drop(columns=["date_str"]))
                 rows_written += int(to_write.shape[0])
-
                 new_dates = sorted(set(to_write["date_str"].tolist()))
                 newly_written_dates.update(new_dates)
-
                 store.write_asset_year_manifest(
-                    table="ohlcv_usd",
-                    asset_id=asset_id,
-                    year=int(year),
-                    dates=list(have_dates.union(new_dates)),
-                    parts=list(have_parts.union(written_parts)),
+                    table="ohlcv_usd", asset_id=asset_id, year=int(year),
+                    dates=(new_dates if repair_bad_cells else list(have_dates.union(new_dates))),
+                    parts=(written_parts if repair_bad_cells else list(have_parts.union(written_parts))),
                 )
 
             if rows_written == 0:
@@ -1431,10 +1480,21 @@ def ingest(
                         have_dates = set(rman.get("dates", []))
                         have_parts = set(rman.get("parts", []))
 
-                        r_to_write = rg[~rg["date_str"].isin(have_dates)].copy()
+                        r_to_write = (rg.copy() if repair_bad_cells else rg[~rg["date_str"].isin(have_dates)].copy())
                         if r_to_write.empty:
                             continue
 
+                        if repair_bad_cells:
+                            import json as _json
+                            rkey = store._manifest_key(table="returns_usd", asset_id=asset_id, year=int(year))
+                            backup = f"{store.base_prefix}/repairs/aea87/full_history/asset_id={asset_id}/year={year}/returns_manifest.json"
+                            try:
+                                prior = store._get_bytes(rkey)
+                                if store._key_exists(backup):
+                                    return {"status":"repair_backup_exists", "asset_id":asset_id, "error":backup}
+                                store._put_bytes(backup, prior, "application/json")
+                            except Exception as exc:
+                                return {"status":"repair_returns_backup_failed", "asset_id":asset_id, "error":str(exc)}
                         written_parts = store.write_returns_usd_partitioned(r_to_write.drop(columns=["date_str"]))
                         returns_written += int(r_to_write.shape[0])
 
@@ -1443,8 +1503,8 @@ def ingest(
                             table="returns_usd",
                             asset_id=asset_id,
                             year=int(year),
-                            dates=list(have_dates.union(new_dates)),
-                            parts=list(have_parts.union(written_parts)),
+                            dates=(new_dates if repair_bad_cells else list(have_dates.union(new_dates))),
+                            parts=(written_parts if repair_bad_cells else list(have_parts.union(written_parts))),
                         )
 
                     if returns_written > 0:
@@ -1798,6 +1858,8 @@ def parse_args() -> argparse.Namespace:
     ap.add_argument("--yahoo-max-concurrency", type=int, default=2)
     ap.add_argument("--yahoo-rate-per-sec", type=float, default=1.5)
 
+    ap.add_argument("--repair-bad-cells", help="AEA-87: CSV of anomalous asset IDs for full-history replacement")
+    ap.add_argument("--repair-fx-parquet", help="AEA-87: validated local eight-currency FX Parquet")
     ap.add_argument("--ignore-existing-state", action="store_true")
     ap.add_argument("--no-triage", action="store_true")
     ap.add_argument("--allow-large-dev-universe", action="store_true")
@@ -1844,6 +1906,8 @@ def _main_impl() -> None:
         yahoo_max_concurrency=int(args.yahoo_max_concurrency),
         yahoo_rate_per_sec=float(args.yahoo_rate_per_sec),
         ignore_existing_state=bool(args.ignore_existing_state),
+        repair_bad_cells=args.repair_bad_cells,
+        repair_fx_parquet=args.repair_fx_parquet,
         run_triage=(not bool(args.no_triage)),
         env_name=str(getattr(cfg, "env", args.env or "dev")),
         allow_large_dev_universe=bool(args.allow_large_dev_universe),

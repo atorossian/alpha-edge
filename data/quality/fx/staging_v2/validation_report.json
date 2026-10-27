@@ -1,0 +1,65 @@
+{
+  "start": "2000-01-01",
+  "end": null,
+  "currencies": [
+    {
+      "currency": "AUD",
+      "rows": 5319,
+      "statuses": {
+        "VALID": 5319
+      }
+    },
+    {
+      "currency": "BRL",
+      "rows": 5525,
+      "statuses": {
+        "VALID": 5523,
+        "VALID_AFTER_GAP": 2
+      }
+    },
+    {
+      "currency": "CAD",
+      "rows": 6011,
+      "statuses": {
+        "VALID": 6011
+      }
+    },
+    {
+      "currency": "CHF",
+      "rows": 6009,
+      "statuses": {
+        "VALID": 6009
+      }
+    },
+    {
+      "currency": "EUR",
+      "rows": 5943,
+      "statuses": {
+        "VALID": 5941,
+        "VALID_AFTER_GAP": 2
+      }
+    },
+    {
+      "currency": "GBP",
+      "rows": 5955,
+      "statuses": {
+        "VALID": 5955
+      }
+    },
+    {
+      "currency": "JPY",
+      "rows": 6963,
+      "statuses": {
+        "VALID": 6961,
+        "VALID_AFTER_GAP": 2
+      }
+    },
+    {
+      "currency": "MXN",
+      "rows": 5964,
+      "statuses": {
+        "VALID": 5964
+      }
+    }
+  ]
+}

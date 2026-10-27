@@ -54,8 +54,25 @@ def refresh(currency: str, start: str, end: str | None, tolerance: float, max_da
     result["fx_to_usd"] = ((d + i) / 2).where(agreement)
     result["validation_status"] = np.where(~both, "MISSING_QUOTE", np.where(agreement, "VALID", "QUOTE_DISAGREEMENT"))
     valid = result["fx_to_usd"].dropna()
-    # Check adjacent FX quote dates, not the gap between non-trading days.
-    jumps = valid.pct_change().abs() > max_daily_change
+
+    # Compare movements only across reasonably adjacent FX observations.
+    previous_dates = pd.Series(valid.index, index=valid.index).shift(1)
+    gap_days = (pd.Series(valid.index, index=valid.index) - previous_dates).dt.days
+
+    large_gap = gap_days > 7
+    large_move = valid.pct_change().abs() > max_daily_change
+
+    # A large movement spanning a substantial missing period is not
+    # necessarily an abnormal daily FX return.
+    result["gap_days"] = gap_days.reindex(result.index).values
+
+    result.loc[
+        valid.index[large_gap.fillna(False)],
+        "validation_status"
+    ] = "VALID_AFTER_GAP"
+
+    jumps = large_move & ~large_gap
+
     if jumps.any():
         result.loc[valid.index[jumps], "validation_status"] = "LARGE_FX_CHANGE"
         result.loc[valid.index[jumps], "fx_to_usd"] = np.nan

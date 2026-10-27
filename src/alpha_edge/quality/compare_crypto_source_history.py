@@ -147,6 +147,57 @@ def main():
             raise ValueError("Duplicate asset/date in local repair patches")
         patch.to_parquet(out / "replacement_ohlcv_bars_STAGING_ONLY.parquet", index=False)
         print(f"Staged {len(patch)} complete replacement OHLCV bars LOCALLY; no S3 writes")
+        # Build full asset-year replacements rather than writing individual
+        # affected dates: the canonical store writes one Parquet per asset-year.
+        import hashlib
+        import json
+        year_reports = []
+        for (asset_id, year), group in patch.groupby(["asset_id", patch["date"].dt.year]):
+            year_start = f"{int(year)}-01-01"
+            year_end = f"{int(year)}-12-31"
+            original = store.read_ohlcv_usd([asset_id], start=year_start, end=year_end).copy()
+            if original.empty:
+                raise ValueError(f"{asset_id} {year}: S3 base year is empty")
+            original["date"] = pd.to_datetime(original["date"], utc=True).dt.tz_convert(None).dt.normalize()
+            if original.duplicated(["asset_id", "date"]).any():
+                raise ValueError(f"{asset_id} {year}: duplicate historical dates; cannot safely patch")
+            if not set(group["date"]).issubset(set(original["date"])):
+                raise ValueError(f"{asset_id} {year}: patch contains dates absent from historical year")
+            patched = original.set_index("date", drop=False)
+            for _, bar in group.iterrows():
+                date = bar["date"]
+                old = patched.loc[date]
+                if str(old["asset_id"]) != asset_id or str(old["currency"]).upper() != "USD":
+                    raise ValueError(f"{asset_id} {date}: asset or currency mismatch")
+                for col in ["open", "high", "low", "close", "adj_close", "volume",
+                            "fx_to_usd", "close_raw_usd", "close_adjusted_usd",
+                            "close_usd", "adj_close_usd"]:
+                    if col in patched.columns:
+                        patched.at[date, col] = bar[col]
+            repaired = patched.reset_index(drop=True).sort_values("date")
+            if len(repaired) != len(original) or repaired.duplicated(["asset_id", "date"]).any():
+                raise ValueError(f"{asset_id} {year}: full-year preservation failed")
+            unchanged = ~repaired["date"].isin(set(group["date"]))
+            before = original.set_index("date").sort_index()
+            after = repaired.set_index("date").sort_index()
+            if not before.loc[~before.index.isin(group["date"])].equals(
+                after.loc[~after.index.isin(group["date"])]
+            ):
+                raise ValueError(f"{asset_id} {year}: unrelated rows were changed")
+            local_name = asset_id.replace(":", "_").replace("/", "_") + f"_{int(year)}.parquet"
+            local_file = out / "full_year_replacements" / local_name
+            local_file.parent.mkdir(parents=True, exist_ok=True)
+            repaired.to_parquet(local_file, index=False)
+            digest = hashlib.sha256(local_file.read_bytes()).hexdigest()
+            year_reports.append({"asset_id": asset_id, "year": int(year),
+                                 "source_rows": len(original), "output_rows": len(repaired),
+                                 "patched_dates": len(group), "filename": str(local_file),
+                                 "sha256": digest, "status": "LOCAL_STAGING_ONLY"})
+        (out / "full_year_replacement_manifest.json").write_text(
+            json.dumps(year_reports, indent=2, default=str), encoding="utf-8"
+        )
+        print(f"Prepared {len(year_reports)} complete asset-year replacement files locally")
+
     print("READ-ONLY comparison saved to", out.resolve())
 
 

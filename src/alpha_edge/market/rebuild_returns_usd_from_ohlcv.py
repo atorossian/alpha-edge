@@ -131,8 +131,8 @@ def _compute_log_returns_from_ohlcv(ohlcv: pd.DataFrame) -> pd.DataFrame:
     df["ret_log_close_adjusted_usd"] = df["ret_log_close_adjusted_usd"].replace([np.inf, -np.inf], np.nan)
 
     # Backward-compatible aliases. These are now log returns.
-    df["ret_close_adjusted_usd"] = df["ret_log_close_adjusted_usd"]
-    df["ret_adj_close_usd"] = df["ret_log_close_adjusted_usd"]
+    df["ret_close_adjusted_usd"] = np.expm1(df["ret_log_close_adjusted_usd"])
+    df["ret_adj_close_usd"] = df["ret_close_adjusted_usd"]
 
     df = df.dropna(subset=["ret_log_close_adjusted_usd"])
 

@@ -881,8 +881,8 @@ def compute_returns_per_ticker(ohlcv_usd: pd.DataFrame) -> pd.DataFrame:
     ret_log = ret_log.replace([np.inf, -np.inf], np.nan)
 
     df["ret_log_close_adjusted_usd"] = ret_log
-    df["ret_close_adjusted_usd"] = df["ret_log_close_adjusted_usd"]
-    df["ret_adj_close_usd"] = df["ret_log_close_adjusted_usd"]
+    df["ret_close_adjusted_usd"] = np.expm1(df["ret_log_close_adjusted_usd"])
+    df["ret_adj_close_usd"] = df["ret_close_adjusted_usd"]
 
     df = df.dropna(subset=["ret_log_close_adjusted_usd"])
 
@@ -1383,8 +1383,8 @@ def ingest(
             px["ret_log_close_adjusted_usd"] = px["ret_log_close_adjusted_usd"].replace([np.inf, -np.inf], np.nan)
 
             # Backward-compatible aliases. These are now log returns.
-            px["ret_close_adjusted_usd"] = px["ret_log_close_adjusted_usd"]
-            px["ret_adj_close_usd"] = px["ret_log_close_adjusted_usd"]
+            px["ret_close_adjusted_usd"] = np.expm1(px["ret_log_close_adjusted_usd"])
+            px["ret_adj_close_usd"] = px["ret_close_adjusted_usd"]
 
             px = px.dropna(subset=["ret_log_close_adjusted_usd"])
 
@@ -1406,8 +1406,8 @@ def ingest(
                     )
 
                     # Backward-compatible aliases. These are now log returns.
-                    returns["ret_close_adjusted_usd"] = returns["ret_log_close_adjusted_usd"]
-                    returns["ret_adj_close_usd"] = returns["ret_log_close_adjusted_usd"]
+                    returns["ret_close_adjusted_usd"] = np.expm1(returns["ret_log_close_adjusted_usd"])
+                    returns["ret_adj_close_usd"] = returns["ret_close_adjusted_usd"]
                     returns["date"] = pd.to_datetime(returns["date"], errors="coerce", utc=True).dt.normalize()
                     returns["year"] = returns["date"].dt.year.astype(int)
 

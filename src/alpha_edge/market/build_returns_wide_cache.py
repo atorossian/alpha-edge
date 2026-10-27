@@ -292,7 +292,13 @@ def _extract_return_series(
             "'ret_log_close_adjusted_usd'."
         )
 
-    if values_simple_adj is not None:
+    # AEA-87 compatibility guard: canonical log column wins when present.
+    # Existing partitions can contain log values mislabeled as simple aliases.
+    # Rebuild all historical partitions after fixing upstream semantics.
+    if values_log is not None:
+        values = np.expm1(values_log)
+        return_source = "canonical_log_converted_to_simple_expm1"
+    elif values_simple_adj is not None:
         values = values_simple_adj.copy()
         return_source = "simple_ret_adj_close_usd"
 
@@ -823,7 +829,11 @@ def build_returns_wide_cache(
     # Forward-filling returns would incorrectly repeat the previous trading day's
     # return over weekends/holidays. A non-trading day should contribute zero return
     # for assets that did not trade.
-    wide = wide.fillna(0.0)
+    # AEA-87: do not silently turn source gaps/pre-inception into flat prices.
+    # Consumers must explicitly handle missing returns and eligible asset dates.
+    # Validate BEFORE any write to production cache.
+    from alpha_edge.quality.returns_contract import assert_no_critical
+    quality_report = assert_no_critical(wide)
 
     wide = wide.astype(cfg.dtype)
 
@@ -873,6 +883,7 @@ def build_returns_wide_cache(
         ),
         "n_days": int(wide.shape[0]),
         "n_assets": int(wide.shape[1]),
+        "quality": quality_report,
         "dtype": cfg.dtype,
         "first_date": str(
             pd.Timestamp(wide.index.min()).date()

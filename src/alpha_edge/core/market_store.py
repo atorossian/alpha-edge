@@ -158,7 +158,19 @@ class MarketStore:
         after = replacement.set_index("date").sort_index()
         changed = before["close"].astype(float).ne(after["close"].astype(float))
         if int(changed.sum()) != int(expected_patched_dates):
-            raise ValueError(f"Expected {expected_patched_dates} changed closes, observed {changed.sum()}")
+            differences = pd.DataFrame({
+                "original_close": before.loc[changed, "close"].astype(float),
+                "replacement_close": after.loc[changed, "close"].astype(float),
+            })
+            differences["relative_change"] = (
+                differences["replacement_close"] / differences["original_close"] - 1
+            )
+            differences.index = differences.index.strftime("%Y-%m-%d")
+            raise ValueError(
+                f"{asset_id} {year}: expected {expected_patched_dates} changed closes, "
+                f"observed {int(changed.sum())}. Exact differing dates/values:\\n"
+                f"{differences.to_string()}"
+            )
         for col in ("asset_id", "ticker", "yahoo_ticker", "currency"):
             if col in before and col in after:
                 if not before[col].astype(str).equals(after[col].astype(str)):

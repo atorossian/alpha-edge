@@ -16,6 +16,8 @@ from alpha_edge.core.market_store import MarketStore
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--validate-local-replacements", action="store_true", help="Validate existing full-year files against S3 manifests without Yahoo downloads")
+    ap.add_argument("--repair-run-id", default="aea87_crypto_20261027")
     ap.add_argument("--universe", default="../data/universe/universe.csv")
     ap.add_argument("--tickers", default="DOGE-USD,HYPE-USD,FIL-USD,SOL-USD,ADA-USD")
     ap.add_argument("--start", default="2026-07-01")
@@ -25,6 +27,24 @@ def main():
     ap.add_argument("--out", default="../data/quality/returns/crypto_source_comparison")
     args = ap.parse_args()
 
+    if args.validate_local_replacements:
+        import json
+        manifest = Path(args.out) / "full_year_replacement_manifest.json"
+        entries = json.loads(manifest.read_text(encoding="utf-8"))
+        store = MarketStore(bucket=args.bucket, region=args.region)
+        for entry in entries:
+            candidate = Path(entry["filename"])
+            if not candidate.exists():
+                candidate = Path(args.out) / "full_year_replacements" / Path(entry["filename"].replace("\\\\", "/")).name
+            report = store.promote_ohlcv_year_repair(
+                asset_id=entry["asset_id"], year=int(entry["year"]),
+                local_path=str(candidate), expected_sha256=entry["sha256"],
+                expected_patched_dates=int(entry["patched_dates"]),
+                run_id=args.repair_run_id, execute=False,
+            )
+            print(report)
+        print("VALIDATION PASSED — NO S3 WRITES")
+        return
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     universe = pd.read_csv(args.universe).fillna("")

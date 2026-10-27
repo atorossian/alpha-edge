@@ -1722,10 +1722,56 @@ def ingest(
     print(f"[cache] dir={_CACHE_DIR}")
 
 
+
+def publish_validated_fx_from_local(*, input_dir: str, run_id: str, store: MarketStore, upload: bool) -> str:
+    """AEA-87: reuse MarketStore; reject partial historical FX downloads."""
+    import json
+    from pathlib import Path
+    import pandas as pd
+    root = Path(input_dir)
+    report_path = root / "validation_report.json"
+    data_path = root / "fx_history_all.parquet"
+    if not report_path.is_file() or not data_path.is_file():
+        raise FileNotFoundError("Expected validation_report.json and fx_history_all.parquet in --fx-input-dir")
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    entries = report.get("currencies", [])
+    if not entries or any("error" in e or int(e.get("rows", 0)) == 0 for e in entries):
+        raise ValueError("FX refresh incomplete: one or more currency downloads failed")
+    if any(e.get("statuses", {}).get(k, 0) for e in entries for k in ("QUOTE_DISAGREEMENT", "LARGE_FX_CHANGE")):
+        raise ValueError("FX refresh has unresolved critical quote disagreements or large changes")
+    frame = pd.read_parquet(data_path)
+    wanted = {e["currency"] for e in entries}
+    if set(frame["currency"].dropna().unique()) != wanted:
+        raise ValueError("Currency coverage mismatch between report and combined parquet")
+    if len(frame) != sum(int(e["rows"]) for e in entries):
+        raise ValueError("FX report rows differ from combined parquet")
+    for entry in entries:
+        ccy = entry["currency"]
+        part = frame[frame["currency"] == ccy]
+        if part["validation_status"].value_counts().to_dict() != entry.get("statuses", {}):
+            raise ValueError(f"FX validation status counts differ: {ccy}")
+        individual = root / f"{ccy}_fx_history.parquet"
+        if not individual.is_file():
+            raise FileNotFoundError(f"Missing per-currency FX file: {individual}")
+        other = pd.read_parquet(individual)
+        cols = ["date", "currency", "fx_to_usd", "validation_status", "direct_quote", "inverse_quote"]
+        if not set(cols).issubset(other.columns):
+            raise ValueError(f"Missing FX columns in {individual}")
+        left = part[cols].sort_values(["date"]).reset_index(drop=True)
+        right = other[cols].sort_values(["date"]).reset_index(drop=True)
+        pd.testing.assert_frame_equal(left, right, check_dtype=False)
+    dest = store.write_fx_snapshot_staging(frame, report, run_id=run_id, upload=upload)
+    print(("UPLOADED " if upload else "DRY RUN verified; destination would be ") + dest)
+    return dest
+
+
 def parse_args() -> argparse.Namespace:
     ap = argparse.ArgumentParser(description="Ingest Alpha Edge market data into S3.")
 
     ap.add_argument("--env", default=None, choices=["dev", "staging", "prod"])
+    ap.add_argument("--fx-input-dir", default=None, help="AEA-87 validated local FX staging directory; FX-only mode")
+    ap.add_argument("--fx-run-id", default=None, help="Immutable S3 FX staging snapshot ID")
+    ap.add_argument("--fx-upload", action="store_true", help="Explicitly upload FX to versioned S3 staging")
     ap.add_argument("--confirm-prod-write", action="store_true")
 
     ap.add_argument("--universe-path", default=str(paths.universe_dir() / "universe.csv"))
@@ -1751,6 +1797,23 @@ def _main_impl() -> None:
     args = parse_args()
 
     cfg = load_runtime_config(args.env)
+    if args.fx_input_dir:
+        if not args.fx_run_id:
+            raise ValueError("--fx-run-id required with --fx-input-dir")
+        store = _make_market_store(
+            bucket=_cfg_bucket(cfg),
+            region=_cfg_region(cfg),
+            market_root=_cfg_market_root(cfg),
+        )
+        publish_validated_fx_from_local(
+            input_dir=args.fx_input_dir,
+            run_id=args.fx_run_id,
+            store=store,
+            upload=bool(args.fx_upload),
+        )
+        return
+    if args.fx_upload:
+        raise ValueError("--fx-upload requires --fx-input-dir")
     require_prod_confirmation(cfg, bool(args.confirm_prod_write))
 
     ingest(

@@ -522,6 +522,18 @@ def download_ohlcv(
                     best_score = score
                     best_level = level
 
+            # Do not silently discard the symbol level. A Yahoo response for
+            # another instrument must never be attributed to this asset_id.
+            if best_score <= 0:
+                raise ValueError(f"OHLCV[{ticker}]: unrecognized MultiIndex price columns")
+            for level in range(df.columns.nlevels):
+                if level == best_level:
+                    continue
+                symbols = {str(x).strip().upper() for x in df.columns.get_level_values(level)}
+                if symbols != {str(ticker).strip().upper()}:
+                    raise ValueError(
+                        f"OHLCV[{ticker}]: unexpected symbol level {level}: {sorted(symbols)}"
+                    )
             df.columns = df.columns.get_level_values(best_level)
 
         df.columns = [str(c).strip().replace(" ", "_").lower() for c in df.columns]

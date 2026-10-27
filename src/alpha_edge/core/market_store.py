@@ -107,6 +107,89 @@ class MarketStore:
             self._put_bytes(manifest_key, json.dumps(manifest, indent=2).encode(), "application/json")
         return f"s3://{self.bucket}/{prefix}/"
 
+    def promote_ohlcv_year_repair(
+        self, *, asset_id: str, year: int, local_path: str, expected_sha256: str,
+        expected_patched_dates: int, run_id: str, execute: bool = False,
+    ) -> dict:
+        """AEA-87: validate replacement and switch one asset/year manifest.
+
+        Original S3 part objects remain available. Execute uploads a new part,
+        archives the original manifest and switches its active part list last.
+        Stop on any exception; recover using the archived manifest.
+        """
+        import hashlib
+        import re
+        from pathlib import Path
+        import io as _io
+        import uuid as _uuid
+        if not re.fullmatch(r"[A-Za-z0-9_-]{6,80}", run_id):
+            raise ValueError("Invalid repair run_id")
+        if not asset_id.startswith("CRYPTO:"):
+            raise ValueError("This initial repair is restricted to crypto assets")
+        payload = Path(local_path).read_bytes()
+        digest = hashlib.sha256(payload).hexdigest()
+        if digest != expected_sha256:
+            raise ValueError(f"{asset_id}: local checksum does not match approved manifest")
+        replacement = pd.read_parquet(_io.BytesIO(payload))
+        replacement["date"] = pd.to_datetime(replacement["date"], utc=True).dt.tz_convert(None).dt.normalize()
+        if (replacement["asset_id"].astype(str) != asset_id).any():
+            raise ValueError("Replacement asset_id mismatch")
+        if (replacement["date"].dt.year != int(year)).any() or replacement.duplicated(["asset_id", "date"]).any():
+            raise ValueError("Replacement has wrong/duplicate dates")
+        if replacement["currency"].astype(str).str.upper().ne("USD").any():
+            raise ValueError("Unexpected currency for crypto repair")
+        manifest_key = self._manifest_key(table="ohlcv_usd", asset_id=asset_id, year=year)
+        original_manifest_raw = self._get_bytes(manifest_key)  # fail closed if missing
+        original_manifest = json.loads(original_manifest_raw)
+        original_parts = original_manifest.get("parts", [])
+        if not original_parts:
+            raise ValueError("Cannot promote without explicit original manifest parts")
+        if any(not str(k).startswith(f"{self.ohlcv_prefix}/asset_id={asset_id}/year={year}/") for k in original_parts):
+            raise ValueError("Manifest references foreign asset/year parts")
+        # Read exact manifest parts, not a fallback listing; fail if any part is unavailable.
+        frames = [pd.read_parquet(_io.BytesIO(self._get_bytes(k))) for k in original_parts]
+        original = pd.concat(frames, ignore_index=True)
+        original["date"] = pd.to_datetime(original["date"], utc=True).dt.tz_convert(None).dt.normalize()
+        if original.duplicated(["asset_id", "date"]).any():
+            raise ValueError("Original manifest contains overlapping dates; requires manual repair")
+        if len(original) != len(replacement) or set(original["date"]) != set(replacement["date"]):
+            raise ValueError("Replacement has changed historical coverage")
+        before = original.set_index("date").sort_index()
+        after = replacement.set_index("date").sort_index()
+        changed = before["close"].astype(float).ne(after["close"].astype(float))
+        if int(changed.sum()) != int(expected_patched_dates):
+            raise ValueError(f"Expected {expected_patched_dates} changed closes, observed {changed.sum()}")
+        for col in ("asset_id", "ticker", "yahoo_ticker", "currency"):
+            if col in before and col in after:
+                if not before[col].astype(str).equals(after[col].astype(str)):
+                    raise ValueError(f"Asset identity changed in replacement: {col}")
+        result = dict(asset_id=asset_id, year=year, rows=len(replacement),
+                      changed_closes=int(changed.sum()), sha256=digest,
+                      status="VALIDATED_NOT_PUBLISHED")
+        if not execute:
+            return result
+        staging_prefix = f"{self.base_prefix}/repairs/aea87/{run_id}/asset_id={asset_id}/year={year}"
+        backup_key = staging_prefix + "/original_manifest.json"
+        if self._key_exists(backup_key):
+            raise FileExistsError("Repair run ID already used for this asset/year")
+        new_key = self._part_key(self.ohlcv_prefix, asset_id, year)
+        # The backup is written first, and the original parts are never deleted.
+        self._put_bytes(backup_key, original_manifest_raw, "application/json")
+        self._put_bytes(new_key, payload)
+        if hashlib.sha256(self._get_bytes(new_key)).hexdigest() != digest:
+            raise IOError("Uploaded replacement checksum mismatch; active manifest untouched")
+        # Fail closed if another writer changed the manifest after validation.
+        if self._get_bytes(manifest_key) != original_manifest_raw:
+            raise RuntimeError("Live manifest changed during repair; active manifest untouched")
+        updated = dict(original_manifest)
+        updated["parts"] = [new_key]
+        updated["dates"] = sorted(replacement["date"].dt.strftime("%Y-%m-%d").tolist())
+        updated["repair_run_id"] = run_id
+        updated["repair_original_manifest_key"] = backup_key
+        self._put_bytes(manifest_key, json.dumps(updated, sort_keys=True, indent=2).encode(), "application/json")
+        result.update(status="PROMOTED_OHLCV_ONLY", new_part=new_key, backup_manifest=backup_key)
+        return result
+
     # -------------------------
     # Low-level S3 helpers
     # -------------------------

@@ -61,15 +61,27 @@ class MarketStore:
         data["date"] = pd.to_datetime(data["date"], utc=True, errors="coerce")
         if data["date"].isna().any() or data.duplicated(["currency", "date"]).any():
             raise ValueError("Invalid FX dates or duplicate currency/date")
-        valid = data["validation_status"].eq("VALID")
-        if not valid.any() or data.loc[valid, "fx_to_usd"].isna().any() or (data.loc[valid, "fx_to_usd"] <= 0).any():
-            raise ValueError("Invalid VALID FX observations")
-        if data.loc[valid, "fx_to_usd"].map(lambda x: not __import__("math").isfinite(float(x))).any():
-            raise ValueError("Nonfinite FX observation")
-        if (data.loc[~valid, "fx_to_usd"].notna()).any():
-            raise ValueError("Unvalidated FX values must be null")
-        if data["validation_status"].isin(["QUOTE_DISAGREEMENT", "LARGE_FX_CHANGE"]).any():
-            raise ValueError("Unresolved critical FX discrepancies")
+        import numpy as np
+        statuses = data["validation_status"].astype(str)
+        allowed = {"VALID", "VALID_AFTER_GAP"}
+        if not statuses.isin(allowed).all():
+            counts = statuses[~statuses.isin(allowed)].value_counts().to_dict()
+            raise ValueError(f"Unapproved FX validation statuses: {counts}")
+        values = pd.to_numeric(data["fx_to_usd"], errors="coerce")
+        if values.isna().any() or not np.isfinite(values).all() or (values <= 0).any():
+            raise ValueError("Nonpositive, missing, or nonfinite approved FX rates")
+        gap_rows = statuses.eq("VALID_AFTER_GAP")
+        if gap_rows.any():
+            if "gap_days" not in data:
+                raise ValueError("VALID_AFTER_GAP requires gap_days provenance")
+            days = pd.to_numeric(data.loc[gap_rows, "gap_days"], errors="coerce")
+            if days.isna().any() or (days <= 7).any():
+                raise ValueError("VALID_AFTER_GAP must document a gap exceeding 7 days")
+            direct = pd.to_numeric(data.loc[gap_rows, "direct_quote"], errors="coerce")
+            inverse = pd.to_numeric(data.loc[gap_rows, "inverse_quote"], errors="coerce")
+            diff = (direct - inverse).abs() / ((direct + inverse) / 2)
+            if direct.isna().any() or inverse.isna().any() or (direct <= 0).any() or (inverse <= 0).any() or (diff > 0.02).any():
+                raise ValueError("Gap-start reciprocal FX quotes must be positive and agree within 2%")
         import io as _io
         buf = _io.BytesIO()
         data.to_parquet(buf, index=False)

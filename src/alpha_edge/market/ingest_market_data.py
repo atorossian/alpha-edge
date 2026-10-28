@@ -1863,7 +1863,12 @@ def repair_full_histories(*, cfg, bad_cells: str, fx_parquet: str, universe_path
         bucket=_cfg_bucket(cfg), region=_cfg_region(cfg),
         market_root=_cfg_market_root(cfg),
     )
-    bad = pd.read_csv(bad_cells, usecols=["asset_id"])
+    bad = pd.read_csv(bad_cells)
+    if "asset_id" not in bad.columns:
+        raise ValueError("Anomaly CSV missing asset_id")
+    bad["asset_id"] = bad["asset_id"].astype(str).str.strip()
+    if "date" in bad.columns:
+        bad["date"] = pd.to_datetime(bad["date"], errors="coerce", utc=True).dt.normalize()
     requested = set(bad["asset_id"].dropna().astype(str).str.strip())
     universe = pd.read_csv(universe_path)
     if "include" in universe:
@@ -2099,7 +2104,10 @@ def repair_full_histories(*, cfg, bad_cells: str, fx_parquet: str, universe_path
     print(f"[repair] campaign complete; report={report_file}")
     counts = pd.Series([r["status"] for r in report]).value_counts().to_dict()
     print("[repair] results:", counts)
-    if any(r["status"] != "REPLACED" for r in report) or missing:
+    unresolved_count = sum(int(r.get("unrefreshed_flagged_dates") or 0) for r in report)
+    if unresolved_count:
+        print(f"[repair][warning] {unresolved_count} previously flagged dates were preserved from old S3; NOT considered repaired")
+    if any(r["status"] != "REPLACED" for r in report) or missing or unresolved_count:
         raise RuntimeError("Repair incomplete: inspect campaign report; wide cache not rebuilt")
     # Rebuild derived wide returns cache only after all targeted assets are committed.
     import subprocess

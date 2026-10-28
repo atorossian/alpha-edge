@@ -1888,6 +1888,27 @@ def repair_full_histories(*, cfg, bad_cells: str, fx_parquet: str, universe_path
     fx_lookup = {c: g.set_index("date")["fx_to_usd"] for c, g in fx.groupby("currency")}
 
     report = []
+    # Preserve all active historical years even when Yahoo no longer serves them.
+    def existing_history(aid: str) -> pd.DataFrame:
+        prefix = f"{store.manifests_prefix}/ohlcv_usd/asset_id={aid}/"
+        frames = []
+        for key in store._list_keys(prefix):
+            if not key.endswith("/manifest.json"):
+                continue
+            man = json.loads(store._get_bytes(key))
+            parts = man.get("parts") or []
+            if not parts:
+                raise ValueError(f"{aid}: active year manifest has no part references")
+            for part in parts:
+                frames.append(pd.read_parquet(io.BytesIO(store._get_bytes(part))))
+        if not frames:
+            return pd.DataFrame()
+        old = pd.concat(frames, ignore_index=True)
+        old["date"] = pd.to_datetime(old["date"], utc=True).dt.normalize()
+        if old.duplicated(["asset_id", "date"]).any():
+            raise ValueError(f"{aid}: duplicate active historical dates")
+        return old
+
     run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "_" + uuid.uuid4().hex[:8]
     report_file = paths.ensure_dir(paths.local_outputs_dir() / "aea87_repair") / f"full_history_{run_id}.csv"
     total = len(universe)
@@ -1917,6 +1938,7 @@ def repair_full_histories(*, cfg, bad_cells: str, fx_parquet: str, universe_path
             for col in ["open", "high", "low", "close", "adj_close", "volume"]:
                 if col not in downloaded:
                     raise ValueError(f"Missing downloaded column {col}")
+            historical = existing_history(aid)
             if currency == "USD":
                 downloaded["fx_to_usd"] = 1.0
             else:
@@ -1924,9 +1946,11 @@ def repair_full_histories(*, cfg, bad_cells: str, fx_parquet: str, universe_path
                     raise ValueError(f"Validated FX missing currency {currency}")
                 new_dates = pd.DatetimeIndex(downloaded["date"])
                 rate = fx_lookup[currency].reindex(new_dates)
-                if rate.isna().any():
-                    raise ValueError(f"Validated FX absent on {int(rate.isna().sum())} dates")
                 downloaded["fx_to_usd"] = rate.to_numpy()
+                # Missing FX does not authorize an invented conversion rate.
+                # Prefer the original bar at these dates and flag it as retained.
+                if rate.isna().any():
+                    print(f"[repair][coverage] {aid}: {int(rate.isna().sum())} downloaded rows lack validated FX; retaining old where present")
             for col in ["open", "high", "low", "close", "adj_close", "volume", "fx_to_usd"]:
                 downloaded[col] = pd.to_numeric(downloaded[col], errors="coerce")
             if downloaded["close"].isna().all() or downloaded["adj_close"].isna().all():
@@ -1943,6 +1967,42 @@ def repair_full_histories(*, cfg, bad_cells: str, fx_parquet: str, universe_path
                     "low", "close", "adj_close", "volume", "currency", "fx_to_usd",
                     "close_raw_usd", "close_adjusted_usd", "close_usd", "adj_close_usd"]
             prices = downloaded[cols].copy()
+            prices = prices.loc[prices["close"].notna() & prices["adj_close"].notna()
+                                & prices["fx_to_usd"].notna()
+                                & prices["close"].gt(0) & prices["adj_close"].gt(0)]
+            replaced_count = len(prices)
+            if not historical.empty:
+                historical = historical.copy()
+                historical["date"] = pd.to_datetime(historical["date"], utc=True).dt.normalize()
+                original_dates = set(historical["date"])
+                refreshed_dates = set(prices["date"])
+                retained = historical.loc[~historical["date"].isin(refreshed_dates)].copy()
+                for col in cols:
+                    if col not in retained.columns:
+                        retained[col] = pd.NA
+                retained = retained[cols]
+                # Reconvert retained non-USD observations only where a validated
+                # currency/date rate exists. Otherwise keep and report old FX.
+                if currency != "USD" and not retained.empty and currency in fx_lookup:
+                    historical_rate = fx_lookup[currency].reindex(pd.DatetimeIndex(retained["date"]))
+                    reconvert = historical_rate.notna().to_numpy()
+                    retained.loc[reconvert, "fx_to_usd"] = historical_rate.to_numpy()[reconvert]
+                    for raw_col, usd_col in (("close", "close_raw_usd"), ("adj_close", "close_adjusted_usd"),
+                                             ("close", "close_usd"), ("adj_close", "adj_close_usd")):
+                        retained.loc[reconvert, usd_col] = (
+                            pd.to_numeric(retained.loc[reconvert, raw_col], errors="coerce")
+                            * pd.to_numeric(retained.loc[reconvert, "fx_to_usd"], errors="coerce")
+                        )
+                prices = pd.concat([retained, prices], ignore_index=True)
+            else:
+                original_dates = set()
+                refreshed_dates = set(prices["date"])
+            prices = prices.sort_values("date")
+            if prices.duplicated(["asset_id", "date"]).any():
+                raise ValueError("Merged history contains duplicated dates")
+            preserved_count = len(prices) - replaced_count
+            if replaced_count == 0:
+                raise ValueError("No valid refreshed observations, refusing replacement")
             px = prices[["date", "close_adjusted_usd"]].dropna()
             px = px.loc[px["close_adjusted_usd"].gt(0)].copy()
             px["ret_log_close_adjusted_usd"] = np.log(
@@ -1969,13 +2029,19 @@ def repair_full_histories(*, cfg, bad_cells: str, fx_parquet: str, universe_path
                         prior = json.loads(old)
                         old_dates = set(prior.get("dates") or [])
                         fresh_dates = set(g["date"].dt.strftime("%Y-%m-%d"))
-                        if not old_dates.issubset(fresh_dates):
-                            raise ValueError(
-                                f"{table} {y}: fresh source omits {len(old_dates - fresh_dates)} existing dates"
-                            )
+                        if table == "ohlcv_usd" and not old_dates.issubset(fresh_dates):
+                            raise ValueError(f"{table} {y}: merged history missing previously active dates")
                     data = io.BytesIO()
                     g.to_parquet(data, index=False)
                     pending.append((table, y, key, old, g, data.getvalue()))
+
+            # A merged rebuild must also cover each existing OHLCV manifest year.
+            covered_years = set(prices["date"].dt.year.astype(int))
+            for key in store._list_keys(f"{store.manifests_prefix}/ohlcv_usd/asset_id={aid}/"):
+                if key.endswith("/manifest.json"):
+                    y = int(key.split("/year=")[1].split("/")[0])
+                    if y not in covered_years:
+                        raise ValueError(f"Active year {y} absent from merged history")
 
             # Back up all manifests before switching any references.
             for table, year, key, old, g, payload in pending:
@@ -2006,6 +2072,10 @@ def repair_full_histories(*, cfg, bad_cells: str, fx_parquet: str, universe_path
                 updated.append((key, old))
 
             report.append({"asset_id": aid, "status": "REPLACED", "price_rows": len(prices),
+                           "refreshed_rows": replaced_count, "preserved_rows": preserved_count,
+                           "unrefreshed_flagged_dates": len(set(pd.to_datetime(
+                               bad.loc[bad["asset_id"].eq(aid), "date"], utc=True
+                           ).dt.normalize()) & (original_dates - refreshed_dates)) if "date" in bad else None,
                            "return_rows": len(returns), "manifests": len(staged)})
         except Exception as exc:
             rollback_failed = False
@@ -2030,7 +2100,15 @@ def repair_full_histories(*, cfg, bad_cells: str, fx_parquet: str, universe_path
     counts = pd.Series([r["status"] for r in report]).value_counts().to_dict()
     print("[repair] results:", counts)
     if any(r["status"] != "REPLACED" for r in report) or missing:
-        raise RuntimeError("Repair incomplete: inspect campaign report before rebuilding returns cache")
+        raise RuntimeError("Repair incomplete: inspect campaign report; wide cache not rebuilt")
+    # Rebuild derived wide returns cache only after all targeted assets are committed.
+    import subprocess
+    import sys
+    cmd = [sys.executable, "-m", "alpha_edge.market.build_returns_wide_cache",
+           "--env", "prod", "--confirm-prod-write", "--force"]
+    print("[repair] rebuilding wide returns cache:", " ".join(cmd))
+    subprocess.run(cmd, check=True)
+    print("[repair] OHLCV, returns and wide-cache repair completed")
 
 
 def parse_args() -> argparse.Namespace:

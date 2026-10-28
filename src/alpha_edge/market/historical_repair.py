@@ -169,10 +169,18 @@ def _prepare(store, aid, prices, returns, old_manifests, root):
                       "dates": sorted(group["date"].dt.strftime("%Y-%m-%d").unique().tolist()),
                       "sha256": hashlib.sha256(data).hexdigest(),
                       "new_part": store._part_key(base, aid, year)}
-            path = root / "parts" / aid.replace(":", "_").replace("/", "_") / table / f"{year}.parquet"
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_bytes(data)
-            record["local_part"] = str(path)
+            stage_key = (
+                f"{store.base_prefix}/repairs/aea87/staging/{root.name}/"
+                f"asset_id={aid}/{table}/year={year}/part.parquet"
+            )
+            if store._key_exists(stage_key):
+                if hashlib.sha256(store._get_bytes(stage_key)).hexdigest() != record["sha256"]:
+                    raise FileExistsError(f"Staging key already has different content: {stage_key}")
+            else:
+                store._put_bytes(stage_key, data)
+                if hashlib.sha256(store._get_bytes(stage_key)).hexdigest() != record["sha256"]:
+                    raise IOError(f"S3 staged partition checksum mismatch: {stage_key}")
+            record["staged_part"] = stage_key
             records.append(record)
     return records
 
@@ -201,12 +209,16 @@ def _promote(store, aid, records, root, run_id):
             if store._get_bytes(backup) != originals[key]:
                 raise IOError(f"Manifest backup failed: {key}")
             journal["backups"][key] = backup
-        data = Path(item["local_part"]).read_bytes()
+        data = store._get_bytes(item["staged_part"])
         if hashlib.sha256(data).hexdigest() != item["sha256"]:
-            raise ValueError(f"Local staged partition changed: {key}")
-        store._put_bytes(item["new_part"], data)
+            raise ValueError(f"S3 staged partition changed: {key}")
+        store._client().copy_object(
+            Bucket=store.bucket,
+            CopySource={"Bucket": store.bucket, "Key": item["staged_part"]},
+            Key=item["new_part"],
+        )
         if hashlib.sha256(store._get_bytes(item["new_part"])).hexdigest() != item["sha256"]:
-            raise IOError(f"Uploaded part checksum mismatch: {key}")
+            raise IOError(f"Promoted part checksum mismatch: {key}")
     journal["state"] = "READY"
     store._put_bytes(journal_key, _dump_json(journal), "application/json")
     try:
@@ -281,14 +293,12 @@ def run(*, cfg, bad_cells, fx_parquet, universe_path, start, end,
     # Promotion consumes the exact local immutable preparation manifest.
     # Never re-download Yahoo data during publication.
     if mode == "promote":
-        manifest_path = root / "prepared_campaign.json"
-        if not manifest_path.exists():
-            raise FileNotFoundError(f"Missing prepared campaign: {manifest_path}")
-        campaign = json.loads(manifest_path.read_text(encoding="utf-8"))
-        if campaign.get("run_id") != run_id:
-            raise ValueError("Prepared campaign run ID mismatch")
         store = _make_market_store(bucket=_cfg_bucket(cfg), region=_cfg_region(cfg),
                                    market_root=_cfg_market_root(cfg))
+        campaign_key = f"{store.base_prefix}/repairs/aea87/staging/{run_id}/prepared_campaign.json"
+        campaign = _json(store._get_bytes(campaign_key))
+        if campaign.get("run_id") != run_id:
+            raise ValueError("Prepared S3 campaign run ID mismatch")
         report = list(campaign["report"])
         for item in campaign["prepared"]:
             aid = item["asset_id"]
@@ -368,9 +378,13 @@ def run(*, cfg, bad_cells, fx_parquet, universe_path, start, end,
             {"asset_id": aid, "records": records, "flagged_retained": flagged}
             for aid, records, flagged in prepared
         ]}
-        manifest_file = root / "prepared_campaign.json"
-        manifest_file.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
-        print(f"PREPARED_ONLY {len(prepared)} assets; {len(unmapped)} unmapped; manifest={manifest_file}")
+        campaign_key = f"{store.base_prefix}/repairs/aea87/staging/{run_id}/prepared_campaign.json"
+        if store._key_exists(campaign_key):
+            raise FileExistsError(f"Campaign manifest already exists: {campaign_key}")
+        store._put_bytes(campaign_key, _dump_json(manifest), "application/json")
+        if _json(store._get_bytes(campaign_key)) != manifest:
+            raise IOError("S3 campaign manifest readback mismatch")
+        print(f"PREPARED_TO_S3 {len(prepared)} assets; {len(unmapped)} unmapped; manifest=s3://{store.bucket}/{campaign_key}")
         return
     for aid, records, flagged_preserved in prepared:
         if flagged_preserved:

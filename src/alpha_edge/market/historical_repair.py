@@ -268,13 +268,24 @@ def _repair_assets_from_universe(frame, selected):
 
 
 def run(*, cfg, bad_cells, fx_parquet, universe_path, start, end,
-        max_assets, confirm_prod_write, mode="prepare", run_id=None):
+        max_assets, confirm_prod_write, mode="prepare", run_id=None, repair_asset_ids=None):
     from alpha_edge.market.ingest_market_data import (
         download_ohlcv, _clean_ccy, _normalize_crypto_symbol_to_yahoo,
         _normalize_fx_symbol_to_yahoo, _is_fx_pair_like_symbol, _make_market_store,
         _cfg_bucket, _cfg_region, _cfg_market_root,
     )
 
+    if repair_asset_ids is not None:
+        if mode != "prepare":
+            raise ValueError("--repair-asset-ids is only supported in prepare mode")
+        if max_assets is not None:
+            raise ValueError("--repair-asset-ids cannot be combined with --max-assets")
+        requested_ids = [v.strip() for v in str(repair_asset_ids).split(",")]
+        if not requested_ids or any(not v for v in requested_ids) or len(set(requested_ids)) != len(requested_ids):
+            raise ValueError("--repair-asset-ids needs unique, nonempty asset IDs")
+        requested_ids = set(requested_ids)
+    else:
+        requested_ids = None
     if mode not in ("prepare", "promote"):
         raise ValueError("Repair mode must be prepare or promote")
     if mode == "promote":
@@ -347,9 +358,18 @@ def run(*, cfg, bad_cells, fx_parquet, universe_path, start, end,
     bad["asset_id"] = bad["asset_id"].astype(str).str.strip()
     bad["date"] = pd.to_datetime(bad["date"], utc=True, errors="coerce").dt.normalize()
     selected = set(bad["asset_id"].dropna())
+    if requested_ids is not None:
+        missing_requested = requested_ids - selected
+        if missing_requested:
+            raise ValueError(f"Requested asset IDs absent from anomaly CSV: {sorted(missing_requested)}")
+        selected = requested_ids
+        bad = bad[bad["asset_id"].isin(selected)].copy()
+        print(f"[repair] explicit asset selection: {len(selected)} assets: {sorted(selected)}")
     universe_frame = read_s3_csv(universe_path, "Universe CSV")
     u = _repair_assets_from_universe(universe_frame, selected)
     unmapped = sorted(selected - set(u["asset_id"]))
+    if requested_ids is not None and unmapped:
+        raise ValueError(f"Requested asset IDs absent from universe CSV: {unmapped}")
     if max_assets:
         u = u.head(max_assets)
     if not str(fx_parquet).startswith("s3://"):

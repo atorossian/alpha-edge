@@ -288,7 +288,7 @@ def run(*, cfg, bad_cells, fx_parquet, universe_path, start, end,
         run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "_" + uuid.uuid4().hex[:8]
     if not re.fullmatch(r"[A-Za-z0-9_-]{6,80}", run_id):
         raise ValueError("Invalid repair run ID")
-    root = Path("../data/quality/returns/aea87_campaign") / run_id
+    root = Path(run_id)  # run identifier only; no local campaign data
     # Promotion consumes the exact local immutable preparation manifest.
     # Never re-download Yahoo data during publication.
     if mode == "promote":

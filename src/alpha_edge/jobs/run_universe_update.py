@@ -953,6 +953,21 @@ def _main_impl() -> None:
         affected_tickers = set()
         affected_tickers |= _diff_overrides(prev_over, overrides)
         affected_tickers |= _diff_exclusions(prev_exc, exclusions)
+
+        # A prior patch may have already snapshotted the override changes while
+        # Yahoo enrichment failed. Retry active rows with incomplete metadata
+        # even when the override/exclusion files no longer differ.
+        current = ensure_columns(existing.copy())
+        active = pd.to_numeric(current.get("include", 1), errors="coerce").fillna(1).eq(1)
+        metadata_fields = ["currency", "yahoo_ok"]
+        needs_refresh = active & (
+            current["currency"].isna()
+            | current["currency"].astype(str).str.strip().str.lower().isin(["", "nan", "none"])
+            | current["yahoo_ok"].astype(str).str.strip().str.lower().isin(["false", "nan", "none", ""])
+        )
+        retry_tickers = set(current.loc[needs_refresh, "ticker"].dropna().astype(str).str.upper())
+        affected_tickers |= retry_tickers
+        print(f"[patch] metadata_retry_tickers={len(retry_tickers)}")
         affected_tickers = {t for t in affected_tickers if t and t.lower() != "nan"}
 
         print(f"[patch] affected_tickers={len(affected_tickers)}")

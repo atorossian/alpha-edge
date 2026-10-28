@@ -2140,6 +2140,8 @@ def parse_args() -> argparse.Namespace:
     ap.add_argument("--yahoo-max-concurrency", type=int, default=2)
     ap.add_argument("--yahoo-rate-per-sec", type=float, default=1.5)
 
+    ap.add_argument("--repair-mode", choices=["prepare", "promote"], default="prepare")
+    ap.add_argument("--repair-run-id", default=None)
     ap.add_argument("--repair-bad-cells", help="AEA-87: CSV of anomalous asset IDs for full-history replacement")
     ap.add_argument("--repair-fx-parquet", help="AEA-87: validated local eight-currency FX Parquet")
     ap.add_argument("--ignore-existing-state", action="store_true")
@@ -2154,12 +2156,14 @@ def _main_impl() -> None:
 
     cfg = load_runtime_config(args.env)
     if args.repair_bad_cells:
-        repair_full_histories(cfg=cfg, bad_cells=args.repair_bad_cells,
+        from alpha_edge.market.historical_repair import run as run_historical_repair
+        run_historical_repair(cfg=cfg, bad_cells=args.repair_bad_cells,
                               fx_parquet=args.repair_fx_parquet,
                               universe_path=args.universe_path,
                               start=args.start, end=args.end,
                               max_assets=args.max_assets,
-                              confirm_prod_write=args.confirm_prod_write)
+                              confirm_prod_write=args.confirm_prod_write,
+                              mode=args.repair_mode, run_id=args.repair_run_id)
         return
     if args.fx_input_dir:
         if args.fx_upload:
@@ -2208,6 +2212,8 @@ def _main_impl() -> None:
 # Audit/logging entrypoint wrapper
 # ----------------------------
 def _tier1_audit_is_dry_run(args: argparse.Namespace) -> bool:
+    if getattr(args, "repair_bad_cells", None):
+        return getattr(args, "repair_mode", "prepare") != "promote"
     if getattr(args, "fx_input_dir", None):
         return not bool(getattr(args, "fx_upload", False))
     return bool(getattr(args, "dry_run", False) or getattr(args, "no_write", False))

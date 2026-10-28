@@ -266,10 +266,12 @@ def run(*, cfg, bad_cells, fx_parquet, universe_path, start, end,
     if mode not in ("prepare", "promote"):
         raise ValueError("Repair mode must be prepare or promote")
     if mode == "promote":
-        from alpha_edge.core.runtime_config import require_prod_confirmation
+        from alpha_edge.core.runtime import require_prod_confirmation
         require_prod_confirmation(cfg, bool(confirm_prod_write))
         if not confirm_prod_write or str(getattr(cfg, "env", "")) != "prod":
             raise ValueError("Production promotion requires --env prod --confirm-prod-write")
+    if mode == "promote" and not run_id:
+        raise ValueError("--repair-run-id is required to promote the same prepared campaign")
     if not run_id:
         run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "_" + uuid.uuid4().hex[:8]
     if not re.fullmatch(r"[A-Za-z0-9_-]{6,80}", run_id):

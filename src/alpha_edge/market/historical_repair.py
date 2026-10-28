@@ -278,6 +278,40 @@ def run(*, cfg, bad_cells, fx_parquet, universe_path, start, end,
         raise ValueError("Invalid repair run ID")
     root = Path("../data/quality/returns/aea87_campaign") / run_id
     root.mkdir(parents=True, exist_ok=True)
+    # Promotion consumes the exact local immutable preparation manifest.
+    # Never re-download Yahoo data during publication.
+    if mode == "promote":
+        manifest_path = root / "prepared_campaign.json"
+        if not manifest_path.exists():
+            raise FileNotFoundError(f"Missing prepared campaign: {manifest_path}")
+        campaign = json.loads(manifest_path.read_text(encoding="utf-8"))
+        if campaign.get("run_id") != run_id:
+            raise ValueError("Prepared campaign run ID mismatch")
+        store = _make_market_store(bucket=_cfg_bucket(cfg), region=_cfg_region(cfg),
+                                   market_root=_cfg_market_root(cfg))
+        report = list(campaign["report"])
+        for item in campaign["prepared"]:
+            aid = item["asset_id"]
+            if item["flagged_retained"]:
+                continue
+            try:
+                _promote(store, aid, item["records"], root, run_id)
+                status, error = "COMMITTED", ""
+            except Exception as exc:
+                status, error = "FAILED_OR_ROLLED_BACK", str(exc)
+            for row in report:
+                if row["asset_id"] == aid:
+                    row.update(status=status, error=error)
+            pd.DataFrame(report).to_csv(root / "campaign.csv", index=False)
+        print(f"Promotion result: {pd.Series([x['status'] for x in report]).value_counts().to_dict()}")
+        if any(x["status"] != "COMMITTED" for x in report):
+            print("PARTIAL_CAMPAIGN: trusted cache publication deferred")
+            return
+        cmd = [sys.executable, "-m", "alpha_edge.market.build_returns_wide_cache",
+               "--env", "prod", "--confirm-prod-write", "--mode", "full", "--force"]
+        subprocess.run(cmd, check=True)
+        print(f"COMMITTED_AND_CACHE_REBUILT; report={root / 'campaign.csv'}")
+        return
     bad = pd.read_csv(bad_cells)
     if not {"asset_id", "date"}.issubset(bad.columns):
         raise ValueError("Anomaly CSV needs asset_id and date")
@@ -330,7 +364,13 @@ def run(*, cfg, bad_cells, fx_parquet, universe_path, start, end,
                            "error": str(exc)})
         pd.DataFrame(report).to_csv(root / "campaign.csv", index=False)
     if mode == "prepare":
-        print(f"PREPARED_ONLY {len(prepared)} assets; {len(unmapped)} unmapped; {root}")
+        manifest = {"run_id": run_id, "report": report, "prepared": [
+            {"asset_id": aid, "records": records, "flagged_retained": flagged}
+            for aid, records, flagged in prepared
+        ]}
+        manifest_file = root / "prepared_campaign.json"
+        manifest_file.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+        print(f"PREPARED_ONLY {len(prepared)} assets; {len(unmapped)} unmapped; manifest={manifest_file}")
         return
     for aid, records, flagged_preserved in prepared:
         if flagged_preserved:

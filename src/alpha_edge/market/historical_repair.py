@@ -312,7 +312,8 @@ def run(*, cfg, bad_cells, fx_parquet, universe_path, start, end,
             for row in report:
                 if row["asset_id"] == aid:
                     row.update(status=status, error=error)
-            pd.DataFrame(report).to_csv(root / "campaign.csv", index=False)
+            report_key = f"{store.base_prefix}/repairs/aea87/staging/{run_id}/campaign_report.json"
+        store._put_bytes(report_key, _dump_json(report), "application/json")
         print(f"Promotion result: {pd.Series([x['status'] for x in report]).value_counts().to_dict()}")
         if any(x["status"] != "COMMITTED" for x in report):
             print("PARTIAL_CAMPAIGN: trusted cache publication deferred")
@@ -320,7 +321,7 @@ def run(*, cfg, bad_cells, fx_parquet, universe_path, start, end,
         cmd = [sys.executable, "-m", "alpha_edge.market.build_returns_wide_cache",
                "--env", "prod", "--confirm-prod-write", "--mode", "full", "--force"]
         subprocess.run(cmd, check=True)
-        print(f"COMMITTED_AND_CACHE_REBUILT; report={root / 'campaign.csv'}")
+        print(f"COMMITTED_AND_CACHE_REBUILT; report={f's3://{store.bucket}/{report_key}'}")
         return
     bad = pd.read_csv(bad_cells)
     if not {"asset_id", "date"}.issubset(bad.columns):
@@ -332,7 +333,25 @@ def run(*, cfg, bad_cells, fx_parquet, universe_path, start, end,
     unmapped = sorted(selected - set(u["asset_id"]))
     if max_assets:
         u = u.head(max_assets)
-    fx_df = _dates(pd.read_parquet(fx_parquet))
+    if not str(fx_parquet).startswith("s3://"):
+        raise ValueError("AEA-87 requires an S3 FX snapshot URI; local FX Parquet paths are not accepted")
+    from urllib.parse import urlparse
+    store = _make_market_store(bucket=_cfg_bucket(cfg), region=_cfg_region(cfg),
+                               market_root=_cfg_market_root(cfg))
+    fx_uri = urlparse(str(fx_parquet))
+    fx_bucket, fx_key = fx_uri.netloc, fx_uri.path.lstrip("/")
+    if fx_bucket != store.bucket:
+        raise ValueError("FX snapshot must be in the configured market S3 bucket")
+    if not fx_key.endswith("/fx_history_all.parquet"):
+        raise ValueError("FX URI must refer to a versioned fx_history_all.parquet")
+    manifest_key = fx_key.rsplit("/", 1)[0] + "/manifest.json"
+    fx_manifest = _json(store._get_bytes(manifest_key))
+    if fx_manifest.get("status") != "STAGING_ONLY":
+        raise ValueError("Unrecognized FX snapshot manifest status")
+    fx_payload = store._get_bytes(fx_key)
+    if hashlib.sha256(fx_payload).hexdigest() != fx_manifest.get("sha256"):
+        raise ValueError("FX snapshot S3 checksum differs from published manifest")
+    fx_df = _dates(_parquet(fx_payload))
     allowed = {"VALID", "VALID_AFTER_GAP"}
     if not set(fx_df["validation_status"]).issubset(allowed):
         raise ValueError("Unapproved FX records present")
@@ -340,8 +359,6 @@ def run(*, cfg, bad_cells, fx_parquet, universe_path, start, end,
     if fx_df.duplicated(["currency", "date"]).any():
         raise ValueError("Duplicate FX date/currency")
     fx = {ccy: g.set_index("date")["fx_to_usd"] for ccy, g in fx_df.groupby("currency")}
-    store = _make_market_store(bucket=_cfg_bucket(cfg), region=_cfg_region(cfg),
-                               market_root=_cfg_market_root(cfg))
     report = [{"asset_id": aid, "status": "UNMAPPED"} for aid in unmapped]
     prepared = []
     for _, row in u.iterrows():
@@ -372,7 +389,8 @@ def run(*, cfg, bad_cells, fx_parquet, universe_path, start, end,
         except Exception as exc:
             report.append({"asset_id": aid, "status": "SOURCE_UNAVAILABLE_OR_FAILED",
                            "error": str(exc)})
-        pd.DataFrame(report).to_csv(root / "campaign.csv", index=False)
+        report_key = f"{store.base_prefix}/repairs/aea87/staging/{run_id}/campaign_report.json"
+    store._put_bytes(report_key, _dump_json(report), "application/json")
     if mode == "prepare":
         manifest = {"run_id": run_id, "report": report, "prepared": [
             {"asset_id": aid, "records": records, "flagged_retained": flagged}

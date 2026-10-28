@@ -256,8 +256,8 @@ def _promote(store, aid, records, root, run_id):
         raise
 
 
-def _repair_assets_from_universe(csv, selected):
-    u = pd.read_csv(csv)
+def _repair_assets_from_universe(frame, selected):
+    u = frame.copy()
     if "asset_id" not in u:
         raise ValueError("Universe CSV missing asset_id")
     u["asset_id"] = u["asset_id"].astype(str).str.strip()
@@ -289,7 +289,7 @@ def run(*, cfg, bad_cells, fx_parquet, universe_path, start, end,
     if not re.fullmatch(r"[A-Za-z0-9_-]{6,80}", run_id):
         raise ValueError("Invalid repair run ID")
     root = Path(run_id)  # run identifier only; no local campaign data
-    # Promotion consumes the exact local immutable preparation manifest.
+    # Promotion consumes the exact S3 preparation manifest.
     # Never re-download Yahoo data during publication.
     if mode == "promote":
         store = _make_market_store(bucket=_cfg_bucket(cfg), region=_cfg_region(cfg),
@@ -299,6 +299,16 @@ def run(*, cfg, bad_cells, fx_parquet, universe_path, start, end,
         if campaign.get("run_id") != run_id:
             raise ValueError("Prepared S3 campaign run ID mismatch")
         report = list(campaign["report"])
+        # Quarantine is not yet enforced across every live analytics consumer.
+        # Fail closed rather than exposing partial repairs as trusted data.
+        if any(x.get("status") != "PREPARED" or x.get("flagged_retained", 0) for x in report):
+            raise RuntimeError("Promotion blocked: campaign contains unresolved/unmapped assets")
+        if len(campaign["prepared"]) != len(report):
+            raise RuntimeError("Promotion blocked: campaign coverage is incomplete")
+        raise RuntimeError(
+            "Production promotion is disabled until quarantine, checkpoint/snapshot "
+            "publication, and crash-recovery integration tests pass"
+        )
         for item in campaign["prepared"]:
             aid = item["asset_id"]
             if item["flagged_retained"]:
@@ -322,21 +332,28 @@ def run(*, cfg, bad_cells, fx_parquet, universe_path, start, end,
         subprocess.run(cmd, check=True)
         print(f"COMMITTED_AND_CACHE_REBUILT; report={f's3://{store.bucket}/{report_key}'}")
         return
-    bad = pd.read_csv(bad_cells)
+    from urllib.parse import urlparse
+    store = _make_market_store(bucket=_cfg_bucket(cfg), region=_cfg_region(cfg),
+                               market_root=_cfg_market_root(cfg))
+    def read_s3_csv(uri, label):
+        parsed = urlparse(str(uri))
+        if parsed.scheme != "s3" or parsed.netloc != store.bucket or not parsed.path.lstrip("/"):
+            raise ValueError(f"{label} must be an s3:// URI inside the configured bucket")
+        return pd.read_csv(io.BytesIO(store._get_bytes(parsed.path.lstrip("/"))))
+
+    bad = read_s3_csv(bad_cells, "Anomaly CSV")
     if not {"asset_id", "date"}.issubset(bad.columns):
         raise ValueError("Anomaly CSV needs asset_id and date")
     bad["asset_id"] = bad["asset_id"].astype(str).str.strip()
     bad["date"] = pd.to_datetime(bad["date"], utc=True, errors="coerce").dt.normalize()
     selected = set(bad["asset_id"].dropna())
-    u = _repair_assets_from_universe(universe_path, selected)
+    universe_frame = read_s3_csv(universe_path, "Universe CSV")
+    u = _repair_assets_from_universe(universe_frame, selected)
     unmapped = sorted(selected - set(u["asset_id"]))
     if max_assets:
         u = u.head(max_assets)
     if not str(fx_parquet).startswith("s3://"):
         raise ValueError("AEA-87 requires an S3 FX snapshot URI; local FX Parquet paths are not accepted")
-    from urllib.parse import urlparse
-    store = _make_market_store(bucket=_cfg_bucket(cfg), region=_cfg_region(cfg),
-                               market_root=_cfg_market_root(cfg))
     fx_uri = urlparse(str(fx_parquet))
     fx_bucket, fx_key = fx_uri.netloc, fx_uri.path.lstrip("/")
     if fx_bucket != store.bucket:

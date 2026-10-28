@@ -289,7 +289,6 @@ def run(*, cfg, bad_cells, fx_parquet, universe_path, start, end,
     if not re.fullmatch(r"[A-Za-z0-9_-]{6,80}", run_id):
         raise ValueError("Invalid repair run ID")
     root = Path("../data/quality/returns/aea87_campaign") / run_id
-    root.mkdir(parents=True, exist_ok=True)
     # Promotion consumes the exact local immutable preparation manifest.
     # Never re-download Yahoo data during publication.
     if mode == "promote":
@@ -313,7 +312,7 @@ def run(*, cfg, bad_cells, fx_parquet, universe_path, start, end,
                 if row["asset_id"] == aid:
                     row.update(status=status, error=error)
             report_key = f"{store.base_prefix}/repairs/aea87/staging/{run_id}/campaign_report.json"
-        store._put_bytes(report_key, _dump_json(report), "application/json")
+            store._put_bytes(report_key, _dump_json(report), "application/json")
         print(f"Promotion result: {pd.Series([x['status'] for x in report]).value_counts().to_dict()}")
         if any(x["status"] != "COMMITTED" for x in report):
             print("PARTIAL_CAMPAIGN: trusted cache publication deferred")
@@ -404,28 +403,3 @@ def run(*, cfg, bad_cells, fx_parquet, universe_path, start, end,
             raise IOError("S3 campaign manifest readback mismatch")
         print(f"PREPARED_TO_S3 {len(prepared)} assets; {len(unmapped)} unmapped; manifest=s3://{store.bucket}/{campaign_key}")
         return
-    for aid, records, flagged_preserved in prepared:
-        if flagged_preserved:
-            # Unresolved anomaly dates cannot enter trusted active data.
-            for entry in report:
-                if entry["asset_id"] == aid:
-                    entry["status"] = "QUARANTINED_UNREFRESHED"
-            continue
-        try:
-            _promote(store, aid, records, root, run_id)
-            for entry in report:
-                if entry["asset_id"] == aid:
-                    entry["status"] = "COMMITTED"
-        except Exception as exc:
-            for entry in report:
-                if entry["asset_id"] == aid:
-                    entry.update(status="FAILED_OR_ROLLED_BACK", error=str(exc))
-        pd.DataFrame(report).to_csv(root / "campaign.csv", index=False)
-    pd.DataFrame(report).to_csv(root / "campaign.csv", index=False)
-    if any(r["status"] != "COMMITTED" for r in report):
-        print("PARTIAL_CAMPAIGN: unresolved assets remain excluded from cache rebuild")
-        return
-    cmd = [sys.executable, "-m", "alpha_edge.market.build_returns_wide_cache",
-           "--env", "prod", "--confirm-prod-write", "--mode", "full", "--force"]
-    subprocess.run(cmd, check=True)
-    print(f"COMMITTED_AND_CACHE_REBUILT {len(prepared)} assets; report={root / 'campaign.csv'}")

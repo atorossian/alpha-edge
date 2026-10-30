@@ -2143,6 +2143,7 @@ def parse_args() -> argparse.Namespace:
     ap.add_argument("--repair-mode", choices=["prepare", "promote"], default="prepare")
     ap.add_argument("--repair-run-id", default=None)
     ap.add_argument("--repair-asset-ids", default=None, help="Comma-separated canonical asset_ids; prepare only these anomalous assets")
+    ap.add_argument("--repair-reset-asset-ids", default=None, help="Comma-separated IDs to replace with fresh history only (must be selected)")
     ap.add_argument("--repair-bad-cells", help="AEA-87: CSV of anomalous asset IDs for full-history replacement")
     ap.add_argument("--repair-fx-parquet", help="AEA-87: validated local eight-currency FX Parquet")
     ap.add_argument("--ignore-existing-state", action="store_true")
@@ -2156,6 +2157,8 @@ def _main_impl() -> None:
     args = parse_args()
 
     cfg = load_runtime_config(args.env)
+    if args.repair_reset_asset_ids and (not args.repair_asset_ids or args.repair_mode != "prepare"):
+        raise ValueError("--repair-reset-asset-ids requires --repair-asset-ids and prepare mode")
     if args.repair_asset_ids and (not args.repair_bad_cells or args.repair_mode != "prepare"):
         raise ValueError("--repair-asset-ids requires --repair-bad-cells and --repair-mode prepare")
     if args.repair_bad_cells:
@@ -2167,7 +2170,8 @@ def _main_impl() -> None:
                               max_assets=args.max_assets,
                               confirm_prod_write=args.confirm_prod_write,
                               mode=args.repair_mode, run_id=args.repair_run_id,
-                              repair_asset_ids=args.repair_asset_ids)
+                              repair_asset_ids=args.repair_asset_ids,
+                              reset_asset_ids=args.repair_reset_asset_ids)
         return
     if args.fx_input_dir:
         if args.fx_upload:

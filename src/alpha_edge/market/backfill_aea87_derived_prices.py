@@ -61,25 +61,42 @@ def repair_derived_prices(store, source_run_id: str, new_run_id: str, *,
             if not to_fix.any():
                 report.append({"asset_id": aid, "status": "UNCHANGED", "invalid_derived_rows": 0})
                 continue
-            eligible = np.isfinite(local) & (local > 0) & np.isfinite(raw_local) & (raw_local > 0) & np.isfinite(fx) & (fx > 0)
-            unresolved = to_fix & ~eligible
-            if unresolved.any():
-                report.append({"asset_id": aid, "status": "UNRESOLVED_SOURCE_VALUES",
-                               "invalid_derived_rows": int(to_fix.sum()), "unresolved_rows": int(unresolved.sum()),
-                               "sample_dates": prices.loc[unresolved, "date"].dt.strftime("%Y-%m-%d").head(10).tolist()})
-                continue
-            # Only fill invalid cells; never silently alter existing non-null values.
-            prices.loc[adj_bad, "close_adjusted_usd"] = (local * fx).loc[adj_bad].to_numpy()
-            prices.loc[raw_bad, "close_raw_usd"] = (raw_local * fx).loc[raw_bad].to_numpy()
-            prices.loc[adj_bad, "adj_close_usd"] = prices.loc[adj_bad, "close_adjusted_usd"]
-            prices.loc[raw_bad, "close_usd"] = prices.loc[raw_bad, "close_raw_usd"]
-            adjusted = pd.to_numeric(prices["close_adjusted_usd"], errors="coerce")
-            if not (np.isfinite(adjusted) & (adjusted > 0)).all():
-                raise ValueError("Remaining invalid adjusted USD close after backfill")
+            eligible_adj = np.isfinite(local) & (local > 0) & np.isfinite(fx) & (fx > 0)
+            eligible_raw = np.isfinite(raw_local) & (raw_local > 0) & np.isfinite(fx) & (fx > 0)
+            unresolved = (adj_bad & ~eligible_adj) | (raw_bad & ~eligible_raw)
+            quarantine_dates = prices.loc[unresolved, "date"].dt.strftime("%Y-%m-%d").tolist()
+            quarantine_rows = []
+            for _, row in prices.loc[unresolved].iterrows():
+                quarantine_rows.append({
+                    "asset_id": aid, "date": row["date"].strftime("%Y-%m-%d"),
+                    "reason": "UNRECONSTRUCTABLE_DERIVED_USD_PRICE",
+                    "adj_close": None if pd.isna(row["adj_close"]) else float(row["adj_close"]),
+                    "close": None if pd.isna(row["close"]) else float(row["close"]),
+                    "fx_to_usd": None if pd.isna(row["fx_to_usd"]) else float(row["fx_to_usd"]),
+                })
+            # A new price following an excluded observation must not have a
+            # return calculated across that missing observation.
+            original_dates = prices["date"].reset_index(drop=True)
+            break_dates = original_dates.shift(-1).loc[unresolved.reset_index(drop=True)].dropna()
+            return_break_dates = sorted(set(break_dates.dt.strftime("%Y-%m-%d")))
+            fix_adj = adj_bad & ~unresolved
+            fix_raw = raw_bad & ~unresolved
+            prices.loc[fix_adj, "close_adjusted_usd"] = (local * fx).loc[fix_adj].to_numpy()
+            prices.loc[fix_raw, "close_raw_usd"] = (raw_local * fx).loc[fix_raw].to_numpy()
+            prices.loc[fix_adj, "adj_close_usd"] = prices.loc[fix_adj, "close_adjusted_usd"]
+            prices.loc[fix_raw, "close_usd"] = prices.loc[fix_raw, "close_raw_usd"]
+            # Remove unresolved rows from published staging, but retain an
+            # explicit immutable quarantine record in the campaign manifest.
+            prices = prices.loc[~unresolved].copy()
+            for price_col in ("close_adjusted_usd", "close_raw_usd"):
+                vals = pd.to_numeric(prices[price_col], errors="coerce")
+                if not (np.isfinite(vals) & (vals > 0)).all():
+                    raise ValueError(f"Remaining invalid {price_col} after backfill")
             ticker = str(prices["ticker"].iloc[-1])
             returns = _returns(prices, aid, ticker)
-            if len(returns) != len(prices) - 1:
-                raise ValueError("Return coverage unexpected after backfill")
+            returns = returns.loc[~returns["date"].dt.strftime("%Y-%m-%d").isin(return_break_dates)].copy()
+            if not returns["date"].is_unique:
+                raise ValueError("Duplicate return dates")
             # Preserve original expected manifest hashes, not newly read production state.
             original = {"ohlcv_usd": {}, "returns_usd": {}}
             for rec in item["records"]:
@@ -94,9 +111,14 @@ def repair_derived_prices(store, source_run_id: str, new_run_id: str, *,
                     original[rec["table"]][key] = blob
             records = _prepare(store, aid, prices, returns, original, Path(new_run_id))
             prepared.append({"asset_id": aid, "records": records, "flagged_retained": item.get("flagged_retained", 0),
-                             "derived_backfill": True, "source_campaign": source_run_id})
-            report.append({"asset_id": aid, "status": "PREPARED", "invalid_derived_rows": int(to_fix.sum()),
-                           "adjusted_fixed": int(adj_bad.sum()), "raw_fixed": int(raw_bad.sum()),
+                             "derived_backfill": True, "source_campaign": source_run_id,
+                             "quarantine_rows": quarantine_rows,
+                             "return_break_dates": return_break_dates})
+            report.append({"asset_id": aid, "status": "PREPARED_WITH_QUARANTINE" if quarantine_rows else "PREPARED",
+                           "invalid_derived_rows": int(to_fix.sum()),
+                           "adjusted_fixed": int(fix_adj.sum()), "raw_fixed": int(fix_raw.sum()),
+                           "quarantine_rows": len(quarantine_rows),
+                           "quarantine_dates": quarantine_dates, "return_break_dates": return_break_dates,
                            "flagged_retained": item.get("flagged_retained", 0), "partitions": len(records)})
         except Exception as exc:
             report.append({"asset_id": aid, "status": "FAILED", "error": f"{type(exc).__name__}: {exc}"})

@@ -95,6 +95,12 @@ def validate_campaign(s3, bucket: str, run_id: str, *, prefix: str = "market",
             else:
                 theoretical = pd.Series(vals.to_numpy(), index=px["date"]).sort_index()
                 expected = np.log(theoretical / theoretical.shift(1)).dropna()
+                breaks = set(item.get("return_break_dates", []))
+                expected = expected.loc[~expected.index.strftime("%Y-%m-%d").isin(breaks)]
+                quarantine = item.get("quarantine_rows", [])
+                price_dates = set(px["date"].dt.strftime("%Y-%m-%d"))
+                if any(q.get("date") in price_dates for q in quarantine):
+                    errors.append("Quarantined price date remains in staged OHLCV")
                 actual = pd.to_numeric(ret["ret_log_close_adjusted_usd"], errors="coerce")
                 series = pd.Series(actual.to_numpy(), index=ret["date"]).sort_index()
                 if not expected.index.equals(series.index) or not np.allclose(
@@ -107,8 +113,9 @@ def validate_campaign(s3, bucket: str, run_id: str, *, prefix: str = "market",
         needs_reset = aid == "CRYPTO:HYPE-USD" and int(report_by_id.get(aid, {}).get("retained_rows", 0)) > 0
         results.append({
             "asset_id": aid,
-            "status": "INVALID" if errors else ("RESET_REQUIRED" if needs_reset else ("VALID_WITH_QUARANTINE" if flagged else "VALID")),
+            "status": "INVALID" if errors else ("RESET_REQUIRED" if needs_reset else ("VALID_WITH_QUARANTINE" if (flagged or item.get("quarantine_rows")) else "VALID")),
             "flagged_retained": flagged,
+            "quarantine_rows": len(item.get("quarantine_rows", [])),
             "identity_reset_required": needs_reset,
             "records_checked": len(seen),
             "errors": errors,

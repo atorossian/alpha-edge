@@ -432,7 +432,8 @@ def run(*, cfg, bad_cells, fx_parquet, universe_path, start, end,
             report.append({"asset_id": aid, "status": "PREPARED", "fresh_rows": refreshed,
                            "retained_rows": retained, "flagged_retained": flagged_preserved,
                            "partitions": len(records),
-                           "identity_reset": aid in reset_ids})
+                           "identity_reset": aid in reset_ids,
+                           "superseded_manifest_keys": sorted(set(op) | set(or_)) if aid in reset_ids else []})
         except Exception as exc:
             report.append({"asset_id": aid, "status": "SOURCE_UNAVAILABLE_OR_FAILED",
                            "error": str(exc)})

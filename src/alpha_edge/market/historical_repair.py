@@ -268,7 +268,7 @@ def _repair_assets_from_universe(frame, selected):
 
 
 def run(*, cfg, bad_cells, fx_parquet, universe_path, start, end,
-        max_assets, confirm_prod_write, mode="prepare", run_id=None, repair_asset_ids=None):
+        max_assets, confirm_prod_write, mode="prepare", run_id=None, repair_asset_ids=None, reset_asset_ids=None):
     from alpha_edge.market.ingest_market_data import (
         download_ohlcv, _clean_ccy, _normalize_crypto_symbol_to_yahoo,
         _normalize_fx_symbol_to_yahoo, _is_fx_pair_like_symbol, _make_market_store,
@@ -286,6 +286,14 @@ def run(*, cfg, bad_cells, fx_parquet, universe_path, start, end,
         requested_ids = set(requested_ids)
     else:
         requested_ids = None
+    reset_ids = set()
+    if reset_asset_ids is not None:
+        reset_values = [v.strip() for v in str(reset_asset_ids).split(",")]
+        if not reset_values or any(not v for v in reset_values) or len(reset_values) != len(set(reset_values)):
+            raise ValueError("--repair-reset-asset-ids needs unique, nonempty asset IDs")
+        reset_ids = set(reset_values)
+        if requested_ids is None or not reset_ids.issubset(requested_ids) or mode != "prepare":
+            raise ValueError("Reset IDs must be explicitly selected in prepare mode")
     if mode not in ("prepare", "promote"):
         raise ValueError("Repair mode must be prepare or promote")
     if mode == "promote":
@@ -413,7 +421,8 @@ def run(*, cfg, bad_cells, fx_parquet, universe_path, start, end,
             if downloaded.empty:
                 raise ValueError("Source history unavailable")
             prices, refreshed, retained, retained_dates = _merge_prices(
-                downloaded, old_prices, aid, str(row.get("ticker") or sym), sym, ccy, fx)
+                downloaded, old_prices.iloc[0:0] if aid in reset_ids else old_prices,
+                aid, str(row.get("ticker") or sym), sym, ccy, fx)
             returns = _returns(prices, aid, str(row.get("ticker") or sym))
             flagged_preserved = int(bad.loc[bad["asset_id"].eq(aid), "date"].isin(retained_dates).sum())
             records = _prepare(store, aid, prices, returns,
@@ -421,7 +430,8 @@ def run(*, cfg, bad_cells, fx_parquet, universe_path, start, end,
             prepared.append((aid, records, flagged_preserved))
             report.append({"asset_id": aid, "status": "PREPARED", "fresh_rows": refreshed,
                            "retained_rows": retained, "flagged_retained": flagged_preserved,
-                           "partitions": len(records)})
+                           "partitions": len(records),
+                           "identity_reset": aid in reset_ids})
         except Exception as exc:
             report.append({"asset_id": aid, "status": "SOURCE_UNAVAILABLE_OR_FAILED",
                            "error": str(exc)})
@@ -429,7 +439,8 @@ def run(*, cfg, bad_cells, fx_parquet, universe_path, start, end,
     store._put_bytes(report_key, _dump_json(report), "application/json")
     if mode == "prepare":
         manifest = {"run_id": run_id, "report": report, "prepared": [
-            {"asset_id": aid, "records": records, "flagged_retained": flagged}
+            {"asset_id": aid, "records": records, "flagged_retained": flagged,
+             "identity_reset": aid in reset_ids}
             for aid, records, flagged in prepared
         ]}
         campaign_key = f"{store.base_prefix}/repairs/aea87/staging/{run_id}/prepared_campaign.json"

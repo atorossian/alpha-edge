@@ -43,13 +43,11 @@ def _validated(s3, bucket, root, run_id, report_key):
     if not report_key.startswith(expected_prefix) or not report_key.endswith("/report.json"):
         raise ValueError(f"Invalid validation evidence location: {report_key}")
     report, sha = _read_json(s3, bucket, report_key)
-    if report.get("run_id") != run_id or report.get("assets_invalid") or report.get("assets_reset_required"):
-        raise ValueError(f"Validation evidence failed or wrong campaign: {run_id}")
+    if report.get("run_id") != run_id:
+        raise ValueError(f"Validation evidence wrong campaign: {run_id}")
     entries = _index(report["assets"])
     if len(entries) != report["assets_checked"]:
         raise ValueError("Validation asset count mismatch")
-    if any(x["status"] not in ("VALID", "VALID_WITH_QUARANTINE") or x.get("errors") for x in entries.values()):
-        raise ValueError("Validation contains invalid assets")
     return entries, sha
 
 
@@ -97,8 +95,8 @@ def reconcile(s3, bucket, market_prefix, original, backfill, supplemental,
         role = "backfill" if aid in corrected else "original"
         item = sources[role]["assets"][aid]
         valid = evidence[role]["assets"].get(aid)
-        if not valid:
-            raise ValueError(f"No validation evidence for selected {role} asset {aid}")
+        if not valid or valid["status"] not in ("VALID", "VALID_WITH_QUARANTINE") or valid.get("errors"):
+            raise ValueError(f"Selected {role} asset {aid} lacks passing validation evidence")
         chosen[aid] = {"asset_id": aid, "campaign": sources[role]["id"],
                        "status": valid["status"], "record_count": len(item["records"]),
                        "quarantine_rows": item.get("quarantine_rows", []),
@@ -106,8 +104,8 @@ def reconcile(s3, bucket, market_prefix, original, backfill, supplemental,
                        "return_break_dates": item.get("return_break_dates", [])}
     for aid in sorted(OVERRIDES):
         valid = evidence["supplemental"]["assets"].get(aid)
-        if valid is None:
-            raise ValueError(f"Supplemental {aid} lacks validation evidence")
+        if valid is None or valid["status"] not in ("VALID", "VALID_WITH_QUARANTINE") or valid.get("errors"):
+            raise ValueError(f"Supplemental {aid} lacks passing validation evidence")
         item = extra[aid]
         chosen[aid] = {"asset_id": aid, "campaign": supplemental, "status": valid["status"],
                        "record_count": len(item["records"]),

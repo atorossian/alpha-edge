@@ -104,10 +104,12 @@ def validate_campaign(s3, bucket: str, run_id: str, *, prefix: str = "market",
         flagged = int(report_by_id.get(aid, {}).get("flagged_retained", item.get("flagged_retained", 0)))
         if flagged != int(item.get("flagged_retained", 0)):
             errors.append("Quarantine count differs from campaign manifest")
+        needs_reset = aid == "CRYPTO:HYPE-USD" and int(report_by_id.get(aid, {}).get("retained_rows", 0)) > 0
         results.append({
             "asset_id": aid,
-            "status": "INVALID" if errors else ("VALID_WITH_QUARANTINE" if flagged else "VALID"),
+            "status": "INVALID" if errors else ("RESET_REQUIRED" if needs_reset else ("VALID_WITH_QUARANTINE" if flagged else "VALID")),
             "flagged_retained": flagged,
+            "identity_reset_required": needs_reset,
             "records_checked": len(seen),
             "errors": errors,
         })
@@ -120,6 +122,7 @@ def validate_campaign(s3, bucket: str, run_id: str, *, prefix: str = "market",
         "assets_valid": sum(x["status"] == "VALID" for x in results),
         "assets_with_quarantine": sum(x["status"] == "VALID_WITH_QUARANTINE" for x in results),
         "assets_invalid": sum(x["status"] == "INVALID" for x in results),
+        "assets_reset_required": sum(x["status"] == "RESET_REQUIRED" for x in results),
         "flagged_retained": sum(x["flagged_retained"] for x in results),
         "campaign_failures": failures,
         "assets": results,
@@ -162,7 +165,7 @@ def main():
             raise FileExistsError(f"Validation report already exists: s3://{args.bucket}/{key}")
         s3.put_object(Bucket=args.bucket, Key=key, Body=data, ContentType="application/json")
         print(f"VALIDATION_REPORT s3://{args.bucket}/{key}")
-    if result["assets_invalid"]:
+    if result["assets_invalid"] or result["assets_reset_required"]:
         raise SystemExit(2)
 
 

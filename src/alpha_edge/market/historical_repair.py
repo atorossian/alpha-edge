@@ -147,14 +147,14 @@ def _returns(prices, aid, ticker):
     return out
 
 
-def _prepare(store, aid, prices, returns, old_manifests, root):
+def _prepare(store, aid, prices, returns, old_manifests, root, *, identity_reset=False):
     records = []
     for table, frame in (("ohlcv_usd", prices), ("returns_usd", returns)):
         base = store.ohlcv_prefix if table == "ohlcv_usd" else store.returns_prefix
         previous = old_manifests[table]
         years = set(frame["date"].dt.year.astype(int))
         existing_years = {int(k.split("/year=")[1].split("/")[0]) for k in previous}
-        if table == "ohlcv_usd" and not existing_years.issubset(years):
+        if table == "ohlcv_usd" and not identity_reset and not existing_years.issubset(years):
             raise ValueError("Merged history has lost existing OHLCV years")
         for year, group in frame.groupby(frame["date"].dt.year):
             year = int(year)
@@ -426,7 +426,8 @@ def run(*, cfg, bad_cells, fx_parquet, universe_path, start, end,
             returns = _returns(prices, aid, str(row.get("ticker") or sym))
             flagged_preserved = int(bad.loc[bad["asset_id"].eq(aid), "date"].isin(retained_dates).sum())
             records = _prepare(store, aid, prices, returns,
-                               {"ohlcv_usd": op, "returns_usd": or_}, root)
+                               {"ohlcv_usd": op, "returns_usd": or_}, root,
+                               identity_reset=aid in reset_ids)
             prepared.append((aid, records, flagged_preserved))
             report.append({"asset_id": aid, "status": "PREPARED", "fresh_rows": refreshed,
                            "retained_rows": retained, "flagged_retained": flagged_preserved,

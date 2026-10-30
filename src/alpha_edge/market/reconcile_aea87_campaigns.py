@@ -76,7 +76,7 @@ def latest_validation(s3, bucket, root, run_id):
 
 def reconcile(s3, bucket, market_prefix, original, backfill, supplemental,
               original_evidence, backfill_evidence, supplemental_evidence,
-              output_id, lkft_repair=None, lkft_evidence=None):
+              output_id, lkft_repair=None, lkft_evidence=None, hype_reset=None, hype_evidence=None):
     root = f"{market_prefix.strip('/')}/repairs/aea87/staging/"
     if not re.fullmatch(r"[A-Za-z0-9_-]{6,80}", output_id):
         raise ValueError("Invalid reconciliation ID")
@@ -102,6 +102,27 @@ def reconcile(s3, bucket, market_prefix, original, backfill, supplemental,
             raise ValueError("LKFT repair must contain exactly LKFT")
         sources["lkft_repair"] = {"id": lkft_repair, "key": key, "sha256": sha,
                                   "manifest": manifest, "assets": entries}
+    if hype_reset:
+        if hype_reset in {v["id"] for v in sources.values()}:
+            raise ValueError("HYPE reset campaign must be distinct")
+        key = root + hype_reset + "/prepared_campaign.json"
+        manifest, sha = _read_json(s3, bucket, key)
+        entries = _index(manifest["prepared"])
+        reports = _index(manifest["report"])
+        if manifest.get("run_id") != hype_reset or set(entries) != {HYPE} or set(reports) != {HYPE}:
+            raise ValueError("HYPE reset must contain exactly one HYPE asset")
+        item, row = entries[HYPE], reports[HYPE]
+        if (item.get("identity_reset") is not True or row.get("identity_reset") is not True
+                or row.get("status") != "PREPARED" or int(row.get("retained_rows", -1)) != 0
+                or int(row.get("flagged_retained", -1)) != 0
+                or int(item.get("flagged_retained", -1)) != 0):
+            raise ValueError("HYPE reset did not prove fresh-only clean history")
+        if len(item["records"]) != int(row.get("partitions", -1)):
+            raise ValueError("HYPE reset partition count differs from report")
+        if not row.get("superseded_manifest_keys"):
+            raise ValueError("HYPE reset lacks retirement inventory for old manifests")
+        sources["hype_reset"] = {"id": hype_reset, "key": key, "sha256": sha,
+                                 "manifest": manifest, "assets": entries}
     orig = sources["original"]["assets"]
     corrected = sources["backfill"]["assets"]
     extra = sources["supplemental"]["assets"]
@@ -135,6 +156,13 @@ def reconcile(s3, bucket, market_prefix, original, backfill, supplemental,
         if set(entries) != {LKFT}:
             raise ValueError("LKFT correction validation does not cover exactly LKFT")
         evidence["lkft_repair"] = {"key": lkft_evidence, "sha256": sha, "assets": entries}
+    if hype_reset:
+        if not hype_evidence:
+            raise ValueError("HYPE reset validation evidence is required")
+        entries, sha = _validated(s3, bucket, root, hype_reset, hype_evidence)
+        if set(entries) != {HYPE} or entries[HYPE]["status"] != "VALID" or entries[HYPE].get("errors"):
+            raise ValueError("HYPE reset must pass clean validation")
+        evidence["hype_reset"] = {"key": hype_evidence, "sha256": sha, "assets": entries}
     chosen = {}
     decisions = []
     for aid in sorted(orig):
@@ -159,15 +187,18 @@ def reconcile(s3, bucket, market_prefix, original, backfill, supplemental,
                        "quarantine_rows": item.get("quarantine_rows", []),
                        "flagged_retained": item.get("flagged_retained", 0),
                        "return_break_dates": item.get("return_break_dates", [])}
-    # The existing HYPE campaign contains retained prices from the wrong
-    # instrument. Never select it in the combined data.
-    decisions.extend([
-        {"asset_id": HYPE, "status": "IDENTITY_RESET_REQUIRED",
-         "reason": "Existing supplemental HYPE history may be mixed with a different instrument"},
-        {"asset_id": EXCLUDED, "status": "EXCLUDED",
-         "reason": "APLS delisted/acquired; not a trusted repair candidate"},
-    ])
-    if set(chosen) & {HYPE, EXCLUDED}:
+    if hype_reset:
+        item = sources["hype_reset"]["assets"][HYPE]
+        chosen[HYPE] = {"asset_id": HYPE, "campaign": hype_reset, "status": "VALID",
+                        "identity_reset": True, "record_count": len(item["records"]),
+                        "quarantine_rows": [], "flagged_retained": 0, "return_break_dates": [],
+                        "superseded_manifest_keys": sources["hype_reset"]["manifest"]["report"][0]["superseded_manifest_keys"]}
+    else:
+        decisions.append({"asset_id": HYPE, "status": "IDENTITY_RESET_REQUIRED",
+                          "reason": "Old HYPE history may be associated with the wrong instrument"})
+    decisions.append({"asset_id": EXCLUDED, "status": "EXCLUDED",
+                      "reason": "APLS delisted/acquired; not a trusted repair candidate"})
+    if EXCLUDED in chosen or (HYPE in chosen and not hype_reset):
         raise ValueError("Blocked HYPE/APLS was selected")
     for aid, entry in chosen.items():
         if entry["status"] not in ("VALID", "VALID_WITH_QUARANTINE"):
@@ -189,9 +220,8 @@ def reconcile(s3, bucket, market_prefix, original, backfill, supplemental,
         "assets": [chosen[a] for a in sorted(chosen)],
         "decisions": decisions,
         "production_promotion_allowed": False,
-        "blockers": ["HYPE_REQUIRES_FRESH_ONLY_RESET",
-                     "UNRESOLVED_QUARANTINE",
-                     "PRODUCTION_PUBLICATION_AND_ROLLBACK_UNTESTED"],
+        "blockers": ([] if hype_reset else ["HYPE_REQUIRES_FRESH_ONLY_RESET"]) +
+                    ["UNRESOLVED_QUARANTINE", "PRODUCTION_PUBLICATION_AND_ROLLBACK_UNTESTED"],
     }
     key = root + output_id + "/reconciliation.json"
     data = json.dumps(result, sort_keys=True, indent=2, default=str).encode()
@@ -215,6 +245,8 @@ def main():
     p.add_argument("--supplemental", default=SUPPLEMENTAL)
     p.add_argument("--lkft-repair", help="Validated LKFT-only derived-price backfill campaign ID")
     p.add_argument("--lkft-validation", help="Optional validation report key for LKFT correction")
+    p.add_argument("--hype-reset", help="Validated HYPE-only fresh-history reset campaign ID")
+    p.add_argument("--hype-validation", help="Optional validation report key for HYPE reset")
     p.add_argument("--bucket", default="alpha-edge-algo")
     p.add_argument("--region", default="eu-west-1")
     p.add_argument("--market-prefix", default="market")
@@ -232,11 +264,20 @@ def main():
     ]
     if args.lkft_repair:
         reports.append(args.lkft_validation or latest_validation(s3, args.bucket, root, args.lkft_repair))
-    for label, path in zip(("original", "backfill", "supplemental", "lkft_repair"), reports):
+    if args.hype_reset:
+        reports.append(args.hype_validation or latest_validation(s3, args.bucket, root, args.hype_reset))
+    labels = ["original", "backfill", "supplemental"]
+    if args.lkft_repair:
+        labels.append("lkft_repair")
+    if args.hype_reset:
+        labels.append("hype_reset")
+    for label, path in zip(labels, reports):
         print(f"[stage5] {label} validation: s3://{args.bucket}/{path}", flush=True)
     reconcile(s3, args.bucket, args.market_prefix, args.original, args.backfill, args.supplemental,
               *reports[:3], rid, lkft_repair=args.lkft_repair,
-              lkft_evidence=reports[3] if args.lkft_repair else None)
+              lkft_evidence=reports[3] if args.lkft_repair else None,
+              hype_reset=args.hype_reset,
+              hype_evidence=reports[-1] if args.hype_reset else None)
 
 
 if __name__ == "__main__":

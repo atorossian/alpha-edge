@@ -20,7 +20,9 @@ BACKFILL = "20261030T120920Z_d48daac4"
 SUPPLEMENTAL = "20261028T200842Z_e3cdf5d3"
 EXCLUDED = "EQH57f251f2d5f83e9b"
 HYPE = "CRYPTO:HYPE-USD"
-OVERRIDES = {"EQH01e3d9d4c84963e1", "EQH273a4d84ac70f156"}
+PPLI = "EQH01e3d9d4c84963e1"
+LKFT = "EQH273a4d84ac70f156"
+OVERRIDES = {PPLI, LKFT}
 
 
 def _read_json(s3, bucket, key):
@@ -74,7 +76,7 @@ def latest_validation(s3, bucket, root, run_id):
 
 def reconcile(s3, bucket, market_prefix, original, backfill, supplemental,
               original_evidence, backfill_evidence, supplemental_evidence,
-              output_id):
+              output_id, lkft_repair=None, lkft_evidence=None):
     root = f"{market_prefix.strip('/')}/repairs/aea87/staging/"
     if not re.fullmatch(r"[A-Za-z0-9_-]{6,80}", output_id):
         raise ValueError("Invalid reconciliation ID")
@@ -88,6 +90,18 @@ def reconcile(s3, bucket, market_prefix, original, backfill, supplemental,
             raise ValueError("Source manifest run ID mismatch")
         sources[role] = {"id": rid, "key": key, "sha256": sha,
                          "manifest": manifest, "assets": _index(manifest["prepared"])}
+    if lkft_repair:
+        if lkft_repair in (original, backfill, supplemental):
+            raise ValueError("LKFT correction run must be distinct from all source campaigns")
+        key = root + lkft_repair + "/prepared_campaign.json"
+        manifest, sha = _read_json(s3, bucket, key)
+        if manifest.get("run_id") != lkft_repair or manifest.get("source_campaign") != supplemental:
+            raise ValueError("LKFT repair must derive from supplemental campaign")
+        entries = _index(manifest["prepared"])
+        if set(entries) != {LKFT}:
+            raise ValueError("LKFT repair must contain exactly LKFT")
+        sources["lkft_repair"] = {"id": lkft_repair, "key": key, "sha256": sha,
+                                  "manifest": manifest, "assets": entries}
     orig = sources["original"]["assets"]
     corrected = sources["backfill"]["assets"]
     extra = sources["supplemental"]["assets"]
@@ -114,6 +128,13 @@ def reconcile(s3, bucket, market_prefix, original, backfill, supplemental,
             raise ValueError(f"{role} validation does not cover all prepared assets")
         evidence[role] = {"key": path, "sha256": sha, "assets": entries}
 
+    if lkft_repair:
+        if not lkft_evidence:
+            raise ValueError("LKFT repair validation report is required")
+        entries, sha = _validated(s3, bucket, root, lkft_repair, lkft_evidence)
+        if set(entries) != {LKFT}:
+            raise ValueError("LKFT correction validation does not cover exactly LKFT")
+        evidence["lkft_repair"] = {"key": lkft_evidence, "sha256": sha, "assets": entries}
     chosen = {}
     decisions = []
     for aid in sorted(orig):
@@ -128,11 +149,12 @@ def reconcile(s3, bucket, market_prefix, original, backfill, supplemental,
                        "flagged_retained": item.get("flagged_retained", 0),
                        "return_break_dates": item.get("return_break_dates", [])}
     for aid in sorted(OVERRIDES):
-        valid = evidence["supplemental"]["assets"].get(aid)
+        role = "lkft_repair" if aid == LKFT and lkft_repair else "supplemental"
+        valid = evidence[role]["assets"].get(aid)
         if valid is None or valid["status"] not in ("VALID", "VALID_WITH_QUARANTINE") or valid.get("errors"):
-            raise ValueError(f"Supplemental {aid} lacks passing validation evidence")
-        item = extra[aid]
-        chosen[aid] = {"asset_id": aid, "campaign": supplemental, "status": valid["status"],
+            raise ValueError(f"Selected {role} {aid} lacks passing validation evidence")
+        item = sources[role]["assets"][aid]
+        chosen[aid] = {"asset_id": aid, "campaign": sources[role]["id"], "status": valid["status"],
                        "record_count": len(item["records"]),
                        "quarantine_rows": item.get("quarantine_rows", []),
                        "flagged_retained": item.get("flagged_retained", 0),
@@ -191,6 +213,8 @@ def main():
     p.add_argument("--original", default=ORIGINAL)
     p.add_argument("--backfill", default=BACKFILL)
     p.add_argument("--supplemental", default=SUPPLEMENTAL)
+    p.add_argument("--lkft-repair", help="Validated LKFT-only derived-price backfill campaign ID")
+    p.add_argument("--lkft-validation", help="Optional validation report key for LKFT correction")
     p.add_argument("--bucket", default="alpha-edge-algo")
     p.add_argument("--region", default="eu-west-1")
     p.add_argument("--market-prefix", default="market")
@@ -206,10 +230,13 @@ def main():
             (args.supplemental_validation, args.supplemental),
         )
     ]
-    for label, path in zip(("original", "backfill", "supplemental"), reports):
+    if args.lkft_repair:
+        reports.append(args.lkft_validation or latest_validation(s3, args.bucket, root, args.lkft_repair))
+    for label, path in zip(("original", "backfill", "supplemental", "lkft_repair"), reports):
         print(f"[stage5] {label} validation: s3://{args.bucket}/{path}", flush=True)
     reconcile(s3, args.bucket, args.market_prefix, args.original, args.backfill, args.supplemental,
-              *reports, rid)
+              *reports[:3], rid, lkft_repair=args.lkft_repair,
+              lkft_evidence=reports[3] if args.lkft_repair else None)
 
 
 if __name__ == "__main__":

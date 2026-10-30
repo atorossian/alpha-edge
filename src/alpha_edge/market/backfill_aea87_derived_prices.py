@@ -76,9 +76,15 @@ def repair_derived_prices(store, source_run_id: str, new_run_id: str, *,
                 })
             # A new price following an excluded observation must not have a
             # return calculated across that missing observation.
-            original_dates = prices["date"].reset_index(drop=True)
-            break_dates = original_dates.shift(-1).loc[unresolved.reset_index(drop=True)].dropna()
-            return_break_dates = sorted(set(break_dates.dt.strftime("%Y-%m-%d")))
+            # A contiguous quarantine block needs one break at the first *retained*
+            # observation following it. Breaks on excluded dates do nothing.
+            kept_dates = prices.loc[~unresolved, "date"].sort_values()
+            excluded_dates = prices.loc[unresolved, "date"].sort_values()
+            following = kept_dates.searchsorted(excluded_dates, side="right")
+            return_break_dates = sorted({
+                kept_dates.iloc[int(pos)].strftime("%Y-%m-%d")
+                for pos in following if int(pos) < len(kept_dates)
+            })
             fix_adj = adj_bad & ~unresolved
             fix_raw = raw_bad & ~unresolved
             prices.loc[fix_adj, "close_adjusted_usd"] = (local * fx).loc[fix_adj].to_numpy()

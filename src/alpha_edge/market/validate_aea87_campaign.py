@@ -15,6 +15,8 @@ import boto3
 import numpy as np
 import pandas as pd
 
+from alpha_edge.market.aea87_return_gaps import expected_return_break_dates
+
 
 def validate_campaign(s3, bucket: str, run_id: str, *, prefix: str = "market",
                       asset_ids: set[str] | None = None) -> dict:
@@ -34,6 +36,16 @@ def validate_campaign(s3, bucket: str, run_id: str, *, prefix: str = "market",
             raise ValueError(f"Requested assets not prepared in this campaign: {sorted(missing)}")
         items = [x for x in items if x["asset_id"] in asset_ids]
     report_by_id = {x["asset_id"]: x for x in report}
+    source_items = {}
+    if campaign.get("kind") == "DERIVED_USD_BACKFILL":
+        source_run_id = campaign.get("source_campaign")
+        if not source_run_id or source_run_id == run_id:
+            raise ValueError("Backfill must reference a distinct source campaign")
+        source_key = f"{prefix}/repairs/aea87/staging/{source_run_id}/prepared_campaign.json"
+        source_manifest = json.loads(s3.get_object(Bucket=bucket, Key=source_key)["Body"].read())
+        if source_manifest.get("run_id") != source_run_id:
+            raise ValueError("Source campaign ID mismatch")
+        source_items = {x["asset_id"]: x for x in source_manifest["prepared"]}
     results = []
     for item in items:
         aid = item["asset_id"]
@@ -96,6 +108,28 @@ def validate_campaign(s3, bucket: str, run_id: str, *, prefix: str = "market",
                 theoretical = pd.Series(vals.to_numpy(), index=px["date"]).sort_index()
                 expected = np.log(theoretical / theoretical.shift(1)).dropna()
                 breaks = set(item.get("return_break_dates", []))
+                quarantine = item.get("quarantine_rows", [])
+                if aid in source_items:
+                    source_records = source_items[aid]["records"]
+                    source_dates = [d for r in source_records if r["table"] == "ohlcv_usd" for d in r["dates"]]
+                    excluded_dates = [q["date"] for q in quarantine]
+                    try:
+                        independently_required = expected_return_break_dates(source_dates, excluded_dates)
+                        if sorted(breaks) != independently_required:
+                            errors.append(
+                                f"Return breaks disagree with original timeline: "
+                                f"declared={sorted(breaks)} required={independently_required}"
+                            )
+                        expected_price_dates = set(source_dates) - set(excluded_dates)
+                        staged_price_dates = set(px["date"].dt.strftime("%Y-%m-%d"))
+                        if expected_price_dates != staged_price_dates:
+                            errors.append("Repaired OHLCV dates differ from source minus quarantined dates")
+                        if len(excluded_dates) != len(set(excluded_dates)):
+                            errors.append("Duplicate quarantine dates")
+                    except (ValueError, KeyError, TypeError) as exc:
+                        errors.append(f"Cannot validate source quarantine timeline: {exc}")
+                elif campaign.get("kind") == "DERIVED_USD_BACKFILL":
+                    errors.append("Missing matching asset in referenced source campaign")
                 expected = expected.loc[~expected.index.strftime("%Y-%m-%d").isin(breaks)]
                 quarantine = item.get("quarantine_rows", [])
                 price_dates = set(px["date"].dt.strftime("%Y-%m-%d"))

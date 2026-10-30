@@ -51,6 +51,27 @@ def _validated(s3, bucket, root, run_id, report_key):
     return entries, sha
 
 
+def latest_validation(s3, bucket, root, run_id):
+    """Discover latest completed full validation, never a selected-subset run."""
+    prefix = root + run_id + "/validations/"
+    paginator = s3.get_paginator("list_objects_v2")
+    keys = []
+    for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
+        keys.extend(obj["Key"] for obj in page.get("Contents", [])
+                    if obj["Key"].endswith("/report.json"))
+    if not keys:
+        raise ValueError(
+            f"No persisted full validation found for {run_id}; run validate_aea87_campaign first"
+        )
+    # New IDs are UTC sortable. Reject stale/incomplete reports instead of
+    # falling back to older, potentially unverified output.
+    key = max(keys)
+    report, _ = _read_json(s3, bucket, key)
+    if report.get("run_id") != run_id:
+        raise ValueError("Validation run ID mismatch")
+    return key
+
+
 def reconcile(s3, bucket, market_prefix, original, backfill, supplemental,
               original_evidence, backfill_evidence, supplemental_evidence,
               output_id):
@@ -74,6 +95,8 @@ def reconcile(s3, bucket, market_prefix, original, backfill, supplemental,
         raise ValueError("Backfill does not point to the original campaign")
     if not set(corrected).issubset(orig):
         raise ValueError("Backfill includes assets absent from original")
+    if set(orig) & OVERRIDES:
+        raise ValueError("Original campaign unexpectedly includes supplemental-only IDs")
     if not OVERRIDES.issubset(extra):
         raise ValueError("Corrected PPLI/LKFT assets missing from supplemental campaign")
     if HYPE not in extra:
@@ -87,6 +110,8 @@ def reconcile(s3, bucket, market_prefix, original, backfill, supplemental,
     for role, path in (("original", original_evidence), ("backfill", backfill_evidence),
                        ("supplemental", supplemental_evidence)):
         entries, sha = _validated(s3, bucket, root, sources[role]["id"], path)
+        if set(entries) != set(sources[role]["assets"]):
+            raise ValueError(f"{role} validation does not cover all prepared assets")
         evidence[role] = {"key": path, "sha256": sha, "assets": entries}
 
     chosen = {}
@@ -160,9 +185,9 @@ def reconcile(s3, bucket, market_prefix, original, backfill, supplemental,
 
 def main():
     p = argparse.ArgumentParser(description="AEA-87 read-only source / staging-only reconciliation")
-    p.add_argument("--original-validation", required=True, help="Original full validation report S3 key")
-    p.add_argument("--backfill-validation", required=True, help="Corrected full validation report S3 key")
-    p.add_argument("--supplemental-validation", required=True, help="Supplemental full validation report S3 key")
+    p.add_argument("--original-validation", help="Original full validation report S3 key")
+    p.add_argument("--backfill-validation", help="Corrected full validation report S3 key")
+    p.add_argument("--supplemental-validation", help="Supplemental full validation report S3 key")
     p.add_argument("--original", default=ORIGINAL)
     p.add_argument("--backfill", default=BACKFILL)
     p.add_argument("--supplemental", default=SUPPLEMENTAL)
@@ -172,8 +197,19 @@ def main():
     args = p.parse_args()
     rid = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "_" + uuid.uuid4().hex[:8]
     s3 = boto3.client("s3", region_name=args.region)
+    root = f"{args.market_prefix.strip('/')}/repairs/aea87/staging/"
+    reports = [
+        explicit or latest_validation(s3, args.bucket, root, source)
+        for explicit, source in (
+            (args.original_validation, args.original),
+            (args.backfill_validation, args.backfill),
+            (args.supplemental_validation, args.supplemental),
+        )
+    ]
+    for label, path in zip(("original", "backfill", "supplemental"), reports):
+        print(f"[stage5] {label} validation: s3://{args.bucket}/{path}", flush=True)
     reconcile(s3, args.bucket, args.market_prefix, args.original, args.backfill, args.supplemental,
-              args.original_validation, args.backfill_validation, args.supplemental_validation, rid)
+              *reports, rid)
 
 
 if __name__ == "__main__":

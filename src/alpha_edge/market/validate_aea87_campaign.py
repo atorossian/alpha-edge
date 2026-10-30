@@ -9,6 +9,7 @@ import argparse
 import hashlib
 import io
 import json
+import uuid
 from datetime import datetime, timezone
 
 import boto3
@@ -178,8 +179,8 @@ def main():
     p.add_argument("--market-prefix", default="market")
     p.add_argument("--repair-run-id", required=True)
     p.add_argument("--asset-ids", help="Comma-separated canonical asset IDs; omit to validate full campaign")
-    p.add_argument("--publish-report", action="store_true",
-                   help="Write validation report ONLY to this campaign's staging prefix")
+    p.add_argument("--no-publish-report", action="store_true",
+                   help="Opt out of automatic immutable S3 validation report publication")
     args = p.parse_args()
     ids = None if not args.asset_ids else set(x.strip() for x in args.asset_ids.split(","))
     if ids is not None and (not ids or "" in ids):
@@ -192,19 +193,18 @@ def main():
     for row in result["assets"]:
         if row["status"] != "VALID":
             print(json.dumps(row))
-    if args.publish_report:
-        suffix = "_selected" if ids is not None else "_full"
+    if not args.no_publish_report:
+        # Every execution gets a distinct immutable evidence artifact.
+        validation_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ") + "_" + uuid.uuid4().hex[:8]
         key = (f"{args.market_prefix.strip('/')}/repairs/aea87/staging/"
-               f"{args.repair_run_id}/validation_report{suffix}.json")
-        data = json.dumps(result, indent=2).encode()
-        try:
-            s3.head_object(Bucket=args.bucket, Key=key)
-        except s3.exceptions.ClientError as exc:
-            if exc.response.get("Error", {}).get("Code") not in {"404", "NoSuchKey", "NotFound"}:
-                raise
-        else:
-            raise FileExistsError(f"Validation report already exists: s3://{args.bucket}/{key}")
-        s3.put_object(Bucket=args.bucket, Key=key, Body=data, ContentType="application/json")
+               f"{args.repair_run_id}/validations/{validation_id}/report.json")
+        result["validation_id"] = validation_id
+        result["validation_report_key"] = key
+        data = json.dumps(result, indent=2, sort_keys=True).encode("utf-8")
+        # Never overwrite another run's evidence, even if a custom ID collides.
+        s3.put_object(Bucket=args.bucket, Key=key, Body=data,
+                      ContentType="application/json",
+                      IfNoneMatch="*")
         print(f"VALIDATION_REPORT s3://{args.bucket}/{key}")
     if result["assets_invalid"] or result["assets_reset_required"]:
         raise SystemExit(2)

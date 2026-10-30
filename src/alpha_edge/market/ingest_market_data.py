@@ -1349,6 +1349,26 @@ def ingest(
             df["close_raw_usd"] = close_s * fx_s
             df["close_adjusted_usd"] = adj_close_s * fx_s
 
+            # Fail closed before persisting OHLCV: derived USD prices must be
+            # finite, positive, and consistent with local price * approved FX.
+            for local_col, usd_col in (("close", "close_raw_usd"), ("adj_close", "close_adjusted_usd")):
+                local = pd.to_numeric(df[local_col], errors="coerce")
+                usd = pd.to_numeric(df[usd_col], errors="coerce")
+                rates = pd.to_numeric(df["fx_to_usd"], errors="coerce")
+                expected = local * rates
+                ok = (
+                    np.isfinite(local) & (local > 0)
+                    & np.isfinite(rates) & (rates > 0)
+                    & np.isfinite(usd) & (usd > 0)
+                    & np.isclose(usd, expected, rtol=1e-10, atol=1e-10)
+                )
+                if not bool(ok.all()):
+                    examples = df.loc[~ok, ["date", "asset_id", local_col, "fx_to_usd", usd_col]].head(5)
+                    raise ValueError(
+                        f"OHLCV derived USD integrity failure: {usd_col}; "
+                        f"invalid_rows={int((~ok).sum())}; examples={examples.to_dict('records')}"
+                    )
+
             # Backward-compatibility aliases
             df["close_usd"] = df["close_raw_usd"]
             df["adj_close_usd"] = df["close_adjusted_usd"]

@@ -142,6 +142,17 @@ def validate_campaign(s3, bucket: str, run_id: str, *, prefix: str = "market",
                     expected.to_numpy(), series.to_numpy(), rtol=1e-9, atol=1e-11, equal_nan=False
                 ):
                     errors.append("Staged returns inconsistent with staged adjusted USD prices")
+        if aid == "CRYPTO:HYPE-USD" and item.get("identity_reset") is True:
+            source_report = report_by_id.get(aid, {})
+            if (source_report.get("identity_reset") is not True
+                    or int(source_report.get("retained_rows", -1)) != 0
+                    or not source_report.get("superseded_manifest_keys")):
+                errors.append("HYPE identity reset has missing fresh-only/retirement evidence")
+            if "ohlcv_usd" in combined:
+                px_identity = combined["ohlcv_usd"]
+                if ("yahoo_ticker" not in px_identity
+                        or not px_identity["yahoo_ticker"].astype(str).eq("HYPE32196-USD").all()):
+                    errors.append("HYPE reset has unexpected Yahoo source identity")
         flagged = int(report_by_id.get(aid, {}).get("flagged_retained", item.get("flagged_retained", 0)))
         if flagged != int(item.get("flagged_retained", 0)):
             errors.append("Quarantine count differs from campaign manifest")

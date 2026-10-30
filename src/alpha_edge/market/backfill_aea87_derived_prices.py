@@ -19,6 +19,7 @@ import pandas as pd
 
 from alpha_edge.market.historical_repair import _dates, _dump_json, _parquet, _prepare, _returns
 from alpha_edge.market.ingest_market_data import _make_market_store
+from alpha_edge.market.aea87_return_gaps import expected_return_break_dates
 
 
 def repair_derived_prices(store, source_run_id: str, new_run_id: str, *,
@@ -78,13 +79,9 @@ def repair_derived_prices(store, source_run_id: str, new_run_id: str, *,
             # return calculated across that missing observation.
             # A contiguous quarantine block needs one break at the first *retained*
             # observation following it. Breaks on excluded dates do nothing.
-            kept_dates = prices.loc[~unresolved, "date"].sort_values()
-            excluded_dates = prices.loc[unresolved, "date"].sort_values()
-            following = kept_dates.searchsorted(excluded_dates, side="right")
-            return_break_dates = sorted({
-                kept_dates.iloc[int(pos)].strftime("%Y-%m-%d")
-                for pos in following if int(pos) < len(kept_dates)
-            })
+            return_break_dates = expected_return_break_dates(
+                prices["date"], prices.loc[unresolved, "date"]
+            )
             fix_adj = adj_bad & ~unresolved
             fix_raw = raw_bad & ~unresolved
             prices.loc[fix_adj, "close_adjusted_usd"] = (local * fx).loc[fix_adj].to_numpy()

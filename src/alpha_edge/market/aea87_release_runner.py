@@ -172,21 +172,21 @@ def stage(s3, bucket, manifest, workers=16, progress_every=200):
     write_event(s3, bucket, root, 1, "READY")
     print("[stage] READY; activate only under exclusive maintenance", flush=True)
 
-def resume(s3,bucket,release_id,action):
+def resume(s3,bucket,release_id,action,workers=16):
     root=f"{ROOT}/{release_id}"
     raw=fetch(s3,bucket,root+"/operations.json")
     if raw is None:
         raise ValueError("Unknown release ID")
     doc=json.loads(raw)
     if action=="rollback":
-        rollback(s3,bucket,root,doc["operations"])
+        rollback(s3,bucket,root,doc["operations"],workers=workers)
     elif action=="activate":
-        switch_manifests(s3,bucket,root,doc["operations"])
+        switch_manifests(s3,bucket,root,doc["operations"],workers=workers)
     elif action=="finalize":
         from alpha_edge.market.aea87_release_finalize import finalize
         return finalize(s3,bucket,root,doc)
     elif action=="verify":
-        bad=[x["manifest_key"] for x in doc["operations"] if checksum(fetch(s3,bucket,x["manifest_key"]))!=x["after_sha"]]
+        from concurrent.futures import ThreadPoolExecutor\n        def mismatch(x):\n            return x["manifest_key"] if checksum(fetch(s3,bucket,x["manifest_key"]))!=x["after_sha"] else None\n        with ThreadPoolExecutor(max_workers=workers) as pool:\n            bad=[key for key in pool.map(mismatch, doc["operations"]) if key]
         return {"mismatches":len(bad),"samples":bad[:10],"journal_state":entries(s3,bucket,root)[-1]["state"]}
     else:
         raise ValueError(action)
@@ -229,7 +229,7 @@ def main():
         stage(s3,a.bucket,doc,workers=a.workers,progress_every=a.progress_every)
         result={"release_id":a.release_id,"state":"READY","operations":len(doc["operations"])}
     else:
-        result=resume(s3,a.bucket,a.release_id,a.action)
+        result=resume(s3,a.bucket,a.release_id,a.action,workers=a.workers)
     print(json.dumps(result,indent=2))
     if a.action=="activate":
         print("READERS MUST REMAIN STOPPED: caches and snapshots have not been rebuilt.")

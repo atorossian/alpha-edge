@@ -68,7 +68,11 @@ def finalize(s3, bucket, root, publication):
         if not original.empty and "asset_id" not in original:
             raise ValueError("Snapshot has no asset_id: " + name)
         retained = original.copy()
-        from concurrent.futures import ThreadPoolExecutor\n        with ThreadPoolExecutor(max_workers=16) as pool:\n            rows = pool.map(lambda aid: _last_for_asset(s3, bucket, ops, aid, table), publication["candidates"])\n            updated = [row for row in rows if row is not None]\n        print(f"[finalize] prepared {name}: {len(updated):,} affected asset rows", flush=True)
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=16) as pool:
+            rows = pool.map(lambda aid: _last_for_asset(s3, bucket, ops, aid, table), publication["candidates"])
+            updated = [row for row in rows if row is not None]
+        print(f"[finalize] prepared {name}: {len(updated):,} affected asset rows", flush=True)
         newer = pd.DataFrame(updated)
         if not newer.empty:
             # Only preserve columns compatible with the destination snapshot.
@@ -77,18 +81,29 @@ def finalize(s3, bucket, root, publication):
                 common = set(original.columns).intersection(newer.columns)
                 if "asset_id" not in common or "date" not in common:
                     raise ValueError("Incompatible snapshot schema: " + name)
-                required = {"close_raw_usd"} if name == "latest_prices_raw" else ({"close_adjusted_usd"} if name == "latest_prices_adjusted" else ({"ret_adj_close_usd"} if name == "latest_returns" else {"close_adjusted_usd"})\n                if not required.issubset(set(newer.columns)):\n                    raise ValueError("Required snapshot values missing: " + name)\n                newer = newer.reindex(columns=original.columns)
+                required = {"close_raw_usd"} if name == "latest_prices_raw" else ({"close_adjusted_usd"} if name == "latest_prices_adjusted" else ({"ret_adj_close_usd"} if name == "latest_returns" else {"close_adjusted_usd"})
+                if not required.issubset(set(newer.columns)):
+                    raise ValueError("Required snapshot values missing: " + name)
+                newer = newer.reindex(columns=original.columns)
             retained = pd.concat([retained, newer], ignore_index=True)
         if retained.empty:
             raise RuntimeError("Empty rebuilt snapshot " + name)
-        retained["date"] = pd.to_datetime(retained["date"], utc=True, errors="coerce")\n        if retained["date"].isna().any():\n            raise ValueError("Snapshot contains invalid dates: " + name)
+        retained["date"] = pd.to_datetime(retained["date"], utc=True, errors="coerce")
+        if retained["date"].isna().any():
+            raise ValueError("Snapshot contains invalid dates: " + name)
         retained = retained.sort_values("date").drop_duplicates("asset_id", keep="last")
         output = io.BytesIO()
         retained.to_parquet(output, index=False)
         # Retain immutable prepared replacement for post-crash recovery.
         put_once(s3, bucket, root + "/prepared_snapshots/" + name + ".parquet", output.getvalue())
     write_event(s3, bucket, root, history[-1]["step"] + 1, "SNAPSHOTS_PREPARED")
-    # Back up both canonical wide-cache files before invoking the rebuild.\n    for suffix in (".parquet", ".meta.json"):\n        live_key = "market/cache/v1/returns_wide_min5y" + suffix\n        previous = fetch(s3, bucket, live_key)\n        if previous is not None:\n            put_once(s3, bucket, root + "/cache_backups/returns_wide_min5y" + suffix, previous)\n    # Cache build is done with all readers stopped.
+    # Back up both canonical wide-cache files before invoking the rebuild.
+    for suffix in (".parquet", ".meta.json"):
+        live_key = "market/cache/v1/returns_wide_min5y" + suffix
+        previous = fetch(s3, bucket, live_key)
+        if previous is not None:
+            put_once(s3, bucket, root + "/cache_backups/returns_wide_min5y" + suffix, previous)
+    # Cache build is done with all readers stopped.
     subprocess.run([sys.executable, "-m", "alpha_edge.market.build_returns_wide_cache",
                     "--env", "prod", "--confirm-prod-write", "--force"], check=True)
     for name in SNAPSHOTS:

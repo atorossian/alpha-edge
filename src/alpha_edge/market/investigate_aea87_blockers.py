@@ -47,19 +47,41 @@ def _compare(staged, active, *, table):
     only_staged = sorted(set(staged_dates) - set(active_dates))
     common = staged_dates.intersection(active_dates)
     metric = "close_adjusted_usd" if table == "ohlcv_usd" else "ret_log_close_adjusted_usd"
-    if metric not in staged or metric not in active:
-        raise ValueError(f"Cannot compare {table}; missing {metric}")
-    a = pd.to_numeric(staged.loc[common, metric], errors="coerce").to_numpy()
-    b = pd.to_numeric(active.loc[common, metric], errors="coerce").to_numpy()
-    differs = ~np.isclose(a, b, rtol=1e-9, atol=1e-11, equal_nan=True)
-    changed = common[differs]
+    # Legacy production return partitions may predate the normalized return
+    # column. Never misclassify an uncomparable column as matching data.
+    alternatives = ("ret_log_close_adjusted_usd", "ret_close_adjusted_usd",
+                    "ret_adj_close_usd")
+    def values(frame):
+        if metric in frame:
+            return pd.to_numeric(frame.loc[common, metric], errors="coerce").to_numpy(), metric
+        if table == "returns_usd":
+            for column in alternatives[1:]:
+                if column in frame:
+                    simple = pd.to_numeric(frame.loc[common, column], errors="coerce").to_numpy()
+                    if np.isfinite(simple).all() and (simple > -1).all():
+                        return np.log1p(simple), column + " (converted via log1p)"
+        return None, None
+    a, staged_metric = values(staged)
+    b, active_metric = values(active)
+    comparable = a is not None and b is not None
+    if comparable:
+        differs = ~np.isclose(a, b, rtol=1e-9, atol=1e-11, equal_nan=True)
+        changed = common[differs]
+    else:
+        differs = None
+        changed = []
     return {
+        "comparison_status": "COMPARED" if comparable else "INCOMPARABLE_SCHEMA",
+        "staged_metric": staged_metric,
+        "active_metric": active_metric,
+        "staged_columns": list(staged.columns),
+        "active_columns": list(active.columns),
         "active_only_dates": [x.strftime("%Y-%m-%d") for x in new_dates],
         "staged_only_dates": [x.strftime("%Y-%m-%d") for x in only_staged],
         "changed_overlap_dates": [x.strftime("%Y-%m-%d") for x in changed],
         "active_only_count": len(new_dates),
         "staged_only_count": len(only_staged),
-        "changed_overlap_count": int(differs.sum()),
+        "changed_overlap_count": int(differs.sum()) if comparable else None,
     }
 
 

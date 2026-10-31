@@ -52,8 +52,8 @@ def _last_for_asset(s3, bucket, ops, asset_id, table):
 
 def finalize(s3, bucket, root, publication):
     history = entries(s3, bucket, root)
-    if not history or history[-1]["state"] != "CACHE_REBUILD_REQUIRED":
-        raise RuntimeError("Manifest switch not verified or release already finalized")
+    if not history or history[-1]["state"] not in ("CACHE_REBUILD_REQUIRED", "SNAPSHOTS_PREPARED"):
+        raise RuntimeError("Expected switched manifests with cache rebuild pending")
     ops = publication["operations"]
     if any(checksum(fetch(s3, bucket, op["manifest_key"])) != op["after_sha"] for op in ops):
         raise RuntimeError("Manifest verification failed; do not rebuild")
@@ -63,7 +63,11 @@ def finalize(s3, bucket, root, publication):
         old = fetch(s3, bucket, key)
         backup_key = root + "/snapshot_backups/" + name + ".parquet"
         if old is not None:
-            put_once(s3, bucket, backup_key, old)
+            existing_backup = fetch(s3, bucket, backup_key)
+            if existing_backup is None:
+                put_once(s3, bucket, backup_key, old)
+            elif checksum(existing_backup) != checksum(old):
+                raise RuntimeError("Live snapshot changed since backup: " + name)
         original = _frame(old)
         if not original.empty and "asset_id" not in original:
             raise ValueError("Snapshot has no asset_id: " + name)
@@ -101,14 +105,25 @@ def finalize(s3, bucket, root, publication):
         output = io.BytesIO()
         retained.to_parquet(output, index=False)
         # Retain immutable prepared replacement for post-crash recovery.
-        put_once(s3, bucket, root + "/prepared_snapshots/" + name + ".parquet", output.getvalue())
-    write_event(s3, bucket, root, history[-1]["step"] + 1, "SNAPSHOTS_PREPARED")
+        prepared_key = root + "/prepared_snapshots/" + name + ".parquet"
+        existing = fetch(s3, bucket, prepared_key)
+        if existing is None:
+            put_once(s3, bucket, prepared_key, output.getvalue())
+        elif checksum(existing) != checksum(output.getvalue()):
+            raise RuntimeError("Prepared snapshot differs on retry: " + name)
+    if history[-1]["state"] == "CACHE_REBUILD_REQUIRED":
+        write_event(s3, bucket, root, history[-1]["step"] + 1, "SNAPSHOTS_PREPARED")
     # Back up both canonical wide-cache files before invoking the rebuild.
     for suffix in (".parquet", ".meta.json"):
         live_key = "market/cache/v1/returns_wide_min5y" + suffix
         previous = fetch(s3, bucket, live_key)
         if previous is not None:
-            put_once(s3, bucket, root + "/cache_backups/returns_wide_min5y" + suffix, previous)
+            backup_key = root + "/cache_backups/returns_wide_min5y" + suffix
+            existing_backup = fetch(s3, bucket, backup_key)
+            if existing_backup is None:
+                put_once(s3, bucket, backup_key, previous)
+            elif checksum(existing_backup) != checksum(previous):
+                raise RuntimeError("Wide cache changed since original backup: " + live_key)
     # Cache build is done with all readers stopped.
     subprocess.run([sys.executable, "-m", "alpha_edge.market.build_returns_wide_cache",
                     "--env", "prod", "--confirm-prod-write", "--force"], check=True)

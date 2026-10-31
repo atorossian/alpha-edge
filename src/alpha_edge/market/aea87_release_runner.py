@@ -1,5 +1,6 @@
 """AEA87 release workflow. Requires an exclusive maintenance window."""
 import json
+from botocore.exceptions import ClientError
 from alpha_edge.market.aea87_publication_transaction import checksum, fetch, put_once, write_event, switch_manifests, rollback, entries
 from alpha_edge.market.preview_aea87_publication import read_document, select_candidates
 
@@ -57,30 +58,119 @@ def build(s3,bucket,plan_key,release_id):
     return dict(kind="AEA87_PUBLICATION",release_id=release_id,plan_key=plan_key,plan_sha=plan_sha,
                 candidates=selected,excluded=excluded,operations=operations)
 
-def stage(s3,bucket,manifest):
-    release_id=manifest["release_id"]
-    root=f"{ROOT}/{release_id}"
-    put_once(s3,bucket,root+"/operations.json",json.dumps(manifest,sort_keys=True).encode())
-    write_event(s3,bucket,root,0,"PREPARING")
-    for op in manifest["operations"]:
-        original=fetch(s3,bucket,op["manifest_key"])
-        if checksum(original)!=op["before_sha"]:
-            raise RuntimeError("Active manifest changed "+op["manifest_key"])
-        if original is not None:
-            put_once(s3,bucket,op["backup_key"],original)
-        if op["staged_key"]:
-            data=fetch(s3,bucket,op["staged_key"])
-            if checksum(data)!=op["staged_sha"]:
-                raise RuntimeError("Stage checksum mismatch "+op["staged_key"])
-            put_once(s3,bucket,op["part_key"],data)
-    for op in manifest["operations"]:
-        if checksum(fetch(s3,bucket,op["manifest_key"]))!=op["before_sha"]:
-            raise RuntimeError("Active manifest changed during stage")
-        if op["before_sha"] is not None and checksum(fetch(s3,bucket,op["backup_key"]))!=op["before_sha"]:
-            raise RuntimeError("Backup corrupted")
-        if op["staged_key"] and checksum(fetch(s3,bucket,op["part_key"]))!=op["staged_sha"]:
-            raise RuntimeError("New partition corrupted")
-    write_event(s3,bucket,root,1,"READY")
+def _stage_one(s3, bucket, op):
+    """Idempotent operation: existing objects must match approved SHA-256."""
+    original = fetch(s3, bucket, op["manifest_key"])
+    if checksum(original) != op["before_sha"]:
+        raise RuntimeError("Active manifest changed: " + op["manifest_key"])
+    reused = 0
+    if original is not None:
+        backup = fetch(s3, bucket, op["backup_key"])
+        if backup is None:
+            try:
+                put_once(s3, bucket, op["backup_key"], original)
+            except ClientError as exc:
+                if exc.response.get("Error", {}).get("Code") not in ("PreconditionFailed", "412"):
+                    raise
+            backup = fetch(s3, bucket, op["backup_key"])
+        else:
+            reused += 1
+        if checksum(backup) != op["before_sha"]:
+            raise RuntimeError("Backup differs from approved original: " + op["backup_key"])
+    if op["staged_key"]:
+        # Never replace an existing destination: it may belong to a previous
+        # attempt and must be validated instead.
+        try:
+            head = s3.head_object(Bucket=bucket, Key=op["part_key"])
+        except ClientError as exc:
+            if exc.response.get("Error", {}).get("Code") not in ("404", "NoSuchKey", "NotFound"):
+                raise
+            head = None
+        if head is None:
+            # S3-side copy avoids streaming Parquet bytes through the PC.
+            # Verify staged content before copying; the existing campaign validator
+            # already recorded its expected SHA-256.
+            source = fetch(s3, bucket, op["staged_key"])
+            if checksum(source) != op["staged_sha"]:
+                raise RuntimeError("Staged partition changed: " + op["staged_key"])
+            try:
+                s3.copy_object(Bucket=bucket,
+                    CopySource={"Bucket": bucket, "Key": op["staged_key"]},
+                    Key=op["part_key"], MetadataDirective="REPLACE",
+                    Metadata={"aea87-sha256": op["staged_sha"]},
+                    CopySourceIfMatch=s3.head_object(
+                        Bucket=bucket, Key=op["staged_key"])["ETag"].strip('"'))
+            except ClientError as exc:
+                # A second process may have created the destination. We still
+                # require exact contents, rather than overwriting them.
+                raise RuntimeError("S3 copy failed; inspect destination " + op["part_key"]) from exc
+        else:
+            reused += 1
+        part_head = s3.head_object(Bucket=bucket, Key=op["part_key"])
+        advertised = part_head.get("Metadata", {}).get("aea87-sha256")
+        if advertised == op["staged_sha"] and head is None:
+            pass  # just copied from checked source
+        elif checksum(fetch(s3, bucket, op["part_key"])) != op["staged_sha"]:
+            raise RuntimeError("Destination partition checksum mismatch: " + op["part_key"])
+    return reused
+
+
+def stage(s3, bucket, manifest, workers=16, progress_every=200):
+    """Prepare or resume the SAME release ID. No manifest switching here."""
+    import time
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    release_id = manifest["release_id"]
+    root = f"{ROOT}/{release_id}"
+    payload = json.dumps(manifest, sort_keys=True).encode()
+    saved = fetch(s3, bucket, root + "/operations.json")
+    if saved is None:
+        put_once(s3, bucket, root + "/operations.json", payload)
+    elif checksum(saved) != checksum(payload):
+        raise RuntimeError("Existing release operations differ; do not reuse release ID")
+    history = entries(s3, bucket, root)
+    if not history:
+        write_event(s3, bucket, root, 0, "PREPARING")
+    elif history[-1]["state"] == "READY":
+        print("[stage] release already READY; no writes required", flush=True)
+        return
+    elif history[-1]["state"] != "PREPARING":
+        raise RuntimeError("Cannot stage in state " + history[-1]["state"])
+    total = len(manifest["operations"])
+    done = reused = 0
+    started = time.monotonic()
+    print(f"[stage] {total:,} operations; {workers} workers; resuming verified S3 objects", flush=True)
+    # Bounded in-flight futures avoid queues of 34k jobs and allow Ctrl-C
+    # to stop after running work has drained.
+    from concurrent.futures import wait, FIRST_COMPLETED
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        it = iter(manifest["operations"])
+        inflight = {}
+        def submit():
+            try:
+                op = next(it)
+            except StopIteration:
+                return False
+            inflight[executor.submit(_stage_one, s3, bucket, op)] = op
+            return True
+        for _ in range(workers * 2):
+            if not submit():
+                break
+        while inflight:
+            finished, _ = wait(inflight, return_when=FIRST_COMPLETED)
+            for future in finished:
+                op = inflight.pop(future)
+                reused += future.result()
+                done += 1
+                if done % progress_every == 0 or done == total:
+                    elapsed = max(time.monotonic() - started, 0.001)
+                    print(f"[stage] {done:,}/{total:,} ({done/total:.1%}); "
+                          f"verified existing objects={reused:,}; rate={done/elapsed:.1f} ops/s",
+                          flush=True)
+                submit()
+    # READY means all backup and partition operations were verified.
+    write_event(s3, bucket, root, 1, "READY")
+    print("[stage] READY; activate only under exclusive maintenance", flush=True)
 
 def resume(s3,bucket,release_id,action):
     root=f"{ROOT}/{release_id}"
@@ -115,20 +205,28 @@ def main():
     p.add_argument("--env",choices=("dev","prod"),default="dev")
     p.add_argument("--confirm-prod-write",action="store_true")
     p.add_argument("--maintenance-ack",action="store_true")
+    p.add_argument("--workers",type=int,default=16)
+    p.add_argument("--progress-every",type=int,default=200)
     a=p.parse_args()
     if a.action in ("stage","activate","rollback","finalize") and not (
         a.env=="prod" and a.confirm_prod_write and a.maintenance_ack
     ):
         p.error("Writes require --env prod --confirm-prod-write --maintenance-ack")
-    s3=boto3.client("s3",region_name=a.region)
+    if not 1 <= a.workers <= 32 or a.progress_every < 1:
+        p.error("--workers must be 1..32 and --progress-every must be positive")
+    from botocore.config import Config
+    s3=boto3.client("s3",region_name=a.region,config=Config(max_pool_connections=max(32,a.workers*2)))
     if a.action=="inspect":
         doc=build(s3,a.bucket,a.plan_key,a.release_id)
         result={"release_id":a.release_id,"candidates":len(doc["candidates"]),
                 "excluded":len(doc["excluded"]),"manifest_operations":len(doc["operations"]),
                 "production_modified":False}
     elif a.action=="stage":
-        doc=build(s3,a.bucket,a.plan_key,a.release_id)
-        stage(s3,a.bucket,doc)
+        old=fetch(s3,a.bucket,f"{ROOT}/{a.release_id}/operations.json")
+        doc=json.loads(old) if old is not None else build(s3,a.bucket,a.plan_key,a.release_id)
+        if doc["plan_key"]!=a.plan_key or doc["release_id"]!=a.release_id:
+            raise ValueError("Existing release plan identity differs")
+        stage(s3,a.bucket,doc,workers=a.workers,progress_every=a.progress_every)
         result={"release_id":a.release_id,"state":"READY","operations":len(doc["operations"])}
     else:
         result=resume(s3,a.bucket,a.release_id,a.action)

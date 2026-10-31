@@ -98,3 +98,40 @@ def resume(s3,bucket,release_id,action):
     else:
         raise ValueError(action)
     return entries(s3,bucket,root)[-1]
+
+def main():
+    import argparse
+    import boto3
+    from alpha_edge.market.preview_aea87_publication import APPROVED_PLAN
+    p=argparse.ArgumentParser(description="AEA87 maintenance-window release runner")
+    p.add_argument("--action",choices=("inspect","stage","activate","verify","rollback"),default="inspect")
+    p.add_argument("--release-id",required=True)
+    p.add_argument("--plan-key",default=APPROVED_PLAN)
+    p.add_argument("--bucket",default="alpha-edge-algo")
+    p.add_argument("--region",default="eu-west-1")
+    p.add_argument("--env",choices=("dev","prod"),default="dev")
+    p.add_argument("--confirm-prod-write",action="store_true")
+    p.add_argument("--maintenance-ack",action="store_true")
+    a=p.parse_args()
+    if a.action in ("stage","activate","rollback") and not (
+        a.env=="prod" and a.confirm_prod_write and a.maintenance_ack
+    ):
+        p.error("Writes require --env prod --confirm-prod-write --maintenance-ack")
+    s3=boto3.client("s3",region_name=a.region)
+    if a.action=="inspect":
+        doc=build(s3,a.bucket,a.plan_key,a.release_id)
+        result={"release_id":a.release_id,"candidates":len(doc["candidates"]),
+                "excluded":len(doc["excluded"]),"manifest_operations":len(doc["operations"]),
+                "production_modified":False}
+    elif a.action=="stage":
+        doc=build(s3,a.bucket,a.plan_key,a.release_id)
+        stage(s3,a.bucket,doc)
+        result={"release_id":a.release_id,"state":"READY","operations":len(doc["operations"])}
+    else:
+        result=resume(s3,a.bucket,a.release_id,a.action)
+    print(json.dumps(result,indent=2))
+    if a.action=="activate":
+        print("READERS MUST REMAIN STOPPED: caches and snapshots have not been rebuilt.")
+
+if __name__=="__main__":
+    main()

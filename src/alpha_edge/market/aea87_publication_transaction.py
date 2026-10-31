@@ -111,11 +111,12 @@ def switch_manifests(s3, bucket, root, ops, workers=16, batch_size=200):
     history = entries(s3, bucket, root)
     if not history or history[-1]["state"] != "READY":
         raise RuntimeError("Publication journal is not READY")
-    for op in ops:
+    def check(op):
         if checksum(fetch(s3, bucket, op["manifest_key"])) != op["before_sha"]:
             raise RuntimeError("Manifest drift: " + op["manifest_key"])
         if checksum(fetch(s3, bucket, op["backup_key"])) != op["before_sha"]:
             raise RuntimeError("Missing backup: " + op["manifest_key"])
+    _parallel(ops, check, workers, "activation-check")
     step = history[-1]["step"] + 1
     write_event(s3, bucket, root, step, "SWITCHING")
     try:

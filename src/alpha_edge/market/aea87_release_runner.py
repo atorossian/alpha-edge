@@ -92,6 +92,9 @@ def resume(s3,bucket,release_id,action):
         rollback(s3,bucket,root,doc["operations"])
     elif action=="activate":
         switch_manifests(s3,bucket,root,doc["operations"])
+    elif action=="finalize":
+        from alpha_edge.market.aea87_release_finalize import finalize
+        return finalize(s3,bucket,root,doc)
     elif action=="verify":
         bad=[x["manifest_key"] for x in doc["operations"] if checksum(fetch(s3,bucket,x["manifest_key"]))!=x["after_sha"]]
         return {"mismatches":len(bad),"samples":bad[:10],"journal_state":entries(s3,bucket,root)[-1]["state"]}
@@ -104,7 +107,7 @@ def main():
     import boto3
     from alpha_edge.market.preview_aea87_publication import APPROVED_PLAN
     p=argparse.ArgumentParser(description="AEA87 maintenance-window release runner")
-    p.add_argument("--action",choices=("inspect","stage","activate","verify","rollback"),default="inspect")
+    p.add_argument("--action",choices=("inspect","stage","activate","verify","rollback","finalize"),default="inspect")
     p.add_argument("--release-id",required=True)
     p.add_argument("--plan-key",default=APPROVED_PLAN)
     p.add_argument("--bucket",default="alpha-edge-algo")
@@ -113,7 +116,7 @@ def main():
     p.add_argument("--confirm-prod-write",action="store_true")
     p.add_argument("--maintenance-ack",action="store_true")
     a=p.parse_args()
-    if a.action in ("stage","activate","rollback") and not (
+    if a.action in ("stage","activate","rollback","finalize") and not (
         a.env=="prod" and a.confirm_prod_write and a.maintenance_ack
     ):
         p.error("Writes require --env prod --confirm-prod-write --maintenance-ack")

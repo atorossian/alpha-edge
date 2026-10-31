@@ -67,7 +67,7 @@ def finalize(s3, bucket, root, publication):
         original = _frame(old)
         if not original.empty and "asset_id" not in original:
             raise ValueError("Snapshot has no asset_id: " + name)
-        retained = original.loc[~original["asset_id"].astype(str).isin(candidates)].copy() if not original.empty else original
+        retained = original.copy()
         updated = []
         for aid in publication["candidates"]:
             row = _last_for_asset(s3, bucket, ops, aid, table)
@@ -81,11 +81,11 @@ def finalize(s3, bucket, root, publication):
                 common = set(original.columns).intersection(newer.columns)
                 if "asset_id" not in common or "date" not in common:
                     raise ValueError("Incompatible snapshot schema: " + name)
-                newer = newer.reindex(columns=original.columns)
+                required = {"close_raw_usd"} if name == "latest_prices_raw" else ({"close_adjusted_usd"} if name == "latest_prices_adjusted" else ({"ret_adj_close_usd"} if name == "latest_returns" else {"close_adjusted_usd"})\n                if not required.issubset(set(newer.columns)):\n                    raise ValueError("Required snapshot values missing: " + name)\n                newer = newer.reindex(columns=original.columns)
             retained = pd.concat([retained, newer], ignore_index=True)
         if retained.empty:
             raise RuntimeError("Empty rebuilt snapshot " + name)
-        retained["date"] = pd.to_datetime(retained["date"], utc=True, errors="coerce")
+        retained["date"] = pd.to_datetime(retained["date"], utc=True, errors="coerce")\n        if retained["date"].isna().any():\n            raise ValueError("Snapshot contains invalid dates: " + name)
         retained = retained.sort_values("date").drop_duplicates("asset_id", keep="last")
         output = io.BytesIO()
         retained.to_parquet(output, index=False)

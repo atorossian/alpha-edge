@@ -92,7 +92,7 @@ def finalize(s3, bucket, root, publication):
         # Retain immutable prepared replacement for post-crash recovery.
         put_once(s3, bucket, root + "/prepared_snapshots/" + name + ".parquet", output.getvalue())
     write_event(s3, bucket, root, history[-1]["step"] + 1, "SNAPSHOTS_PREPARED")
-    # Cache build is done with all readers stopped.
+    # Back up both canonical wide-cache files before invoking the rebuild.\n    for suffix in (".parquet", ".meta.json"):\n        live_key = "market/cache/v1/returns_wide_min5y" + suffix\n        previous = fetch(s3, bucket, live_key)\n        if previous is not None:\n            put_once(s3, bucket, root + "/cache_backups/returns_wide_min5y" + suffix, previous)\n    # Cache build is done with all readers stopped.
     subprocess.run([sys.executable, "-m", "alpha_edge.market.build_returns_wide_cache",
                     "--env", "prod", "--confirm-prod-write", "--force"], check=True)
     for name in SNAPSHOTS:

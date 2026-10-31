@@ -32,22 +32,22 @@ def _last_for_asset(s3, bucket, ops, asset_id, table):
                and x["staged_key"] and ("/" + table + "/") in x["manifest_key"]]
     if not matches:
         return None
-    data = []
-    for op in matches:
-        part = fetch(s3, bucket, op["part_key"])
-        if checksum(part) != op["staged_sha"]:
-            raise ValueError("Published partition content mismatch: " + op["part_key"])
-        frame = _frame(part)
-        if frame.empty:
-            continue
-        frame["date"] = pd.to_datetime(frame["date"], utc=True, errors="coerce")
-        frame = frame.dropna(subset=["date"])
-        if frame["asset_id"].astype(str).ne(asset_id).any():
-            raise ValueError("Unexpected asset identity")
-        data.append(frame.sort_values("date").iloc[-1])
-    if not data:
+    # Each asset/year has a verified staged replacement. Only the newest
+    # partition can contain its latest observation, so avoid rereading 30+
+    # years of history for each snapshot.
+    latest = max(matches, key=lambda op: int(
+        op["manifest_key"].split("/year=")[-1].split("/")[0]))
+    part = fetch(s3, bucket, latest["part_key"])
+    if checksum(part) != latest["staged_sha"]:
+        raise ValueError("Published partition content mismatch: " + latest["part_key"])
+    frame = _frame(part)
+    if frame.empty:
         return None
-    return max(data, key=lambda row: row["date"]).to_dict()
+    frame["date"] = pd.to_datetime(frame["date"], utc=True, errors="coerce")
+    frame = frame.dropna(subset=["date"])
+    if frame["asset_id"].astype(str).ne(asset_id).any():
+        raise ValueError("Unexpected asset identity")
+    return frame.sort_values("date").iloc[-1].to_dict()
 
 
 def finalize(s3, bucket, root, publication):
@@ -68,11 +68,7 @@ def finalize(s3, bucket, root, publication):
         if not original.empty and "asset_id" not in original:
             raise ValueError("Snapshot has no asset_id: " + name)
         retained = original.copy()
-        updated = []
-        for aid in publication["candidates"]:
-            row = _last_for_asset(s3, bucket, ops, aid, table)
-            if row is not None:
-                updated.append(row)
+        from concurrent.futures import ThreadPoolExecutor\n        with ThreadPoolExecutor(max_workers=16) as pool:\n            rows = pool.map(lambda aid: _last_for_asset(s3, bucket, ops, aid, table), publication["candidates"])\n            updated = [row for row in rows if row is not None]\n        print(f"[finalize] prepared {name}: {len(updated):,} affected asset rows", flush=True)
         newer = pd.DataFrame(updated)
         if not newer.empty:
             # Only preserve columns compatible with the destination snapshot.

@@ -22,7 +22,9 @@ def test_rollback_rejects_third_party_version():
 def test_release_build_rejects_invalid_plan(monkeypatch):
     class Dummy: pass
     def invalid_plan(s3,bucket,key):
-        return {"reconciliation_id":"a","reconciliation_sha256":"bogus"}, "hash"
+        if key == "plan":
+            return {"reconciliation_id":"a","reconciliation_sha256":"bogus"}, "hash"
+        return {"run_id":"a"}, "different-hash"
     monkeypatch.setattr("alpha_edge.market.aea87_release_runner.read_document",invalid_plan)
     with pytest.raises(ValueError,match="Reconciliation changed"):
         build(Dummy(),"bucket","plan","AEA87-TEST-01")

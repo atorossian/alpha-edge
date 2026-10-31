@@ -186,7 +186,11 @@ def resume(s3,bucket,release_id,action,workers=16):
         from alpha_edge.market.aea87_release_finalize import finalize
         return finalize(s3,bucket,root,doc)
     elif action=="verify":
-        from concurrent.futures import ThreadPoolExecutor\n        def mismatch(x):\n            return x["manifest_key"] if checksum(fetch(s3,bucket,x["manifest_key"]))!=x["after_sha"] else None\n        with ThreadPoolExecutor(max_workers=workers) as pool:\n            bad=[key for key in pool.map(mismatch, doc["operations"]) if key]
+        from concurrent.futures import ThreadPoolExecutor
+        def mismatch(x):
+            return x["manifest_key"] if checksum(fetch(s3,bucket,x["manifest_key"]))!=x["after_sha"] else None
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            bad=[key for key in pool.map(mismatch, doc["operations"]) if key]
         return {"mismatches":len(bad),"samples":bad[:10],"journal_state":entries(s3,bucket,root)[-1]["state"]}
     else:
         raise ValueError(action)

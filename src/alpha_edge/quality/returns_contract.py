@@ -54,5 +54,18 @@ def validate_simple_returns(wide: pd.DataFrame, *, max_abs_review: float = 0.50)
 def assert_no_critical(wide: pd.DataFrame) -> dict:
     report = validate_simple_returns(wide)
     if report['critical']:
+        values = wide.stack(dropna=True)
+        extreme = values[values.abs() > 0.50]
+        invalid = values[values <= -1.0]
+        offenders = extreme.abs().sort_values(ascending=False).head(30).index
+        examples = [
+            {'date': str(date), 'asset_id': str(asset),
+             'simple_return': float(values.loc[(date, asset)])}
+            for date, asset in offenders
+        ]
+        by_asset = extreme.groupby(level=1).size().sort_values(ascending=False).head(30)
+        print('[AEA87][quality] extreme return examples:', examples, flush=True)
+        print('[AEA87][quality] assets with most extreme observations:',
+              {str(k): int(v) for k, v in by_asset.items()}, flush=True)
         raise ValueError('AEA-87 returns quality gate failed: ' + str(report))
     return report

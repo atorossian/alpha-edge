@@ -81,7 +81,13 @@ def finalize(s3, bucket, root, publication):
                 common = set(original.columns).intersection(newer.columns)
                 if "asset_id" not in common or "date" not in common:
                     raise ValueError("Incompatible snapshot schema: " + name)
-                required = {"close_raw_usd"} if name == "latest_prices_raw" else ({"close_adjusted_usd"} if name == "latest_prices_adjusted" else ({"ret_adj_close_usd"} if name == "latest_returns" else {"close_adjusted_usd"})
+                required_columns = {
+                    "latest_prices_raw": "close_raw_usd",
+                    "latest_prices_adjusted": "close_adjusted_usd",
+                    "latest_returns": "ret_adj_close_usd",
+                    "latest_prices": "close_adjusted_usd",
+                }
+                required = {required_columns[name]}
                 if not required.issubset(set(newer.columns)):
                     raise ValueError("Required snapshot values missing: " + name)
                 newer = newer.reindex(columns=original.columns)

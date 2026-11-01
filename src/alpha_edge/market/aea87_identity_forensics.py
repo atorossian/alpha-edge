@@ -189,6 +189,11 @@ def run(args):
               "production_modified":False}
     (output / "summary.json").write_text(json.dumps(report, indent=2))
     print(json.dumps(report, indent=2), flush=True)
+    if args.archive_s3:
+        from alpha_edge.market.aea87_archive_evidence import archive
+        from datetime import datetime, timezone
+        archive_id = "forensic_" + datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        archive(output, args.bucket, args.region, archive_id, args.workers)
     if errors:
         raise RuntimeError("Failed asset reads; consult read_errors.csv")
 
@@ -208,6 +213,7 @@ def main():
     parser.add_argument("--tolerance", type=float, default=1e-5)
     parser.add_argument("--plots", type=int, default=15)
     parser.add_argument("--output-dir", default=str(paths.local_outputs_dir() / "aea87_forensics"))
+    parser.add_argument("--archive-s3", action="store_true", help="Upload local evidence to versioned S3 after run")
     args = parser.parse_args()
     if not Path(args.inception_csv).exists():
         parser.error("Validated inceptions CSV not found: " + args.inception_csv)

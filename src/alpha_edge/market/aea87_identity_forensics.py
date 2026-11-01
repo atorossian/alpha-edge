@@ -2,7 +2,11 @@
 from __future__ import annotations
 
 import argparse
+import io
 import json
+import uuid
+from datetime import datetime, timezone
+import boto3
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
@@ -109,13 +113,26 @@ def plot_case(frame, flags, output, inception=None, window=40):
         ax.grid(alpha=.2)
     fig.suptitle(str(flags.iloc[0]["asset_id"]))
     fig.tight_layout()
-    fig.savefig(output, dpi=140)
+    buffer = io.BytesIO()
+    fig.savefig(buffer, format='png', dpi=140)
     plt.close(fig)
+    return buffer.getvalue()
 
 
 def run(args):
-    output = Path(args.output_dir)
-    output.mkdir(parents=True, exist_ok=True)
+    # S3 is the primary and only evidence destination; no local reports are written.
+    run_id = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ') + '_' + uuid.uuid4().hex[:8]
+    prefix = f'market/repairs/aea87/forensics/v1/runs/{run_id}'
+    s3 = boto3.client('s3', region_name=args.region)
+    artifacts = []
+    def save(name, body, content_type):
+        if isinstance(body, str):
+            body = body.encode('utf-8')
+        key = prefix + '/' + name
+        s3.put_object(Bucket=args.bucket, Key=key, Body=body,
+                      ContentType=content_type, IfNoneMatch='*')
+        artifacts.append({'key':key,'bytes':len(body)})
+
     boundaries = load_boundaries(args.inception_csv)
     store = MarketStore(bucket=args.bucket, region=args.region)
     universe = pd.read_csv(args.universe)
@@ -156,8 +173,8 @@ def run(args):
             "recomputed_return", "stored_return", "return_type", "discrepancy",
             "classification", "severity"]
     anomalies = pd.concat(findings, ignore_index=True) if findings else pd.DataFrame(columns=cols)
-    anomalies.to_csv(output / "anomalies.csv", index=False)
-    pd.DataFrame(errors, columns=["asset_id", "error"]).to_csv(output / "read_errors.csv", index=False)
+    save("anomalies.csv", anomalies.to_csv(index=False), "text/csv")
+    save("read_errors.csv", pd.DataFrame(errors, columns=["asset_id", "error"]).to_csv(index=False), "text/csv")
     ranking = []
     for score, aid, flags, frame in sorted(candidates, key=lambda x: x[0], reverse=True):
         ranking.append({"asset_id": aid, "identity_priority_score": score,
@@ -167,33 +184,28 @@ def run(args):
                         "pre_inception_rows": int(flags["flag"].str.contains("pre_inception").sum()),
                         "return_mismatch_rows": int(flags["flag"].str.contains("return_mismatch").sum()),
                         "large_move_rows": int(flags["flag"].str.contains("large_move_review").sum())})
-    pd.DataFrame(ranking, columns=["asset_id","identity_priority_score","first_observation",
+    save("candidates.csv", pd.DataFrame(ranking, columns=["asset_id","identity_priority_score","first_observation",
                                    "inception_date","flagged_rows","pre_inception_rows",
-                                   "return_mismatch_rows","large_move_rows"]).to_csv(output / "candidates.csv", index=False)
-    chart_dir = output / "forensic_cases"
-    chart_dir.mkdir(exist_ok=True)
+                                   "return_mismatch_rows","large_move_rows"]).to_csv(index=False), "text/csv")
+
     for i, (_, aid, flags, frame) in enumerate(sorted(candidates, key=lambda x: x[0], reverse=True)[:args.plots], 1):
-        case = chart_dir / (f"{i:02d}_" + "".join(c if c.isalnum() else "_" for c in aid))
-        case.mkdir(exist_ok=True)
-        plot_case(frame, flags, case / "price_evidence.png", inception=boundaries.get(aid))
-        (case / "evidence.json").write_text(json.dumps({
+        case = "forensic_cases/" + (f"{i:02d}_" + "".join(c if c.isalnum() else "_" for c in aid))
+        save(case + "/price_evidence.png", plot_case(frame, flags, None, inception=boundaries.get(aid)), "image/png")
+        save(case + "/evidence.json", json.dumps({
             "asset_id":aid, "validated_inception":boundaries.get(aid),
             "observed_first_date":str(frame["date"].min().date()),
             "flags":flags["flag"].value_counts().to_dict(),
             "status":"REVIEW_REQUIRED; no automated deletion or confirmation"
-        }, indent=2))
+        }, indent=2), "application/json")
     report = {"assets_scanned":len(ids),"candidate_assets":len(candidates),
               "flagged_observations":len(anomalies),"read_errors":len(errors),
               "plots":min(args.plots,len(candidates)),
               "inception_rules":len(boundaries),
               "production_modified":False}
-    (output / "summary.json").write_text(json.dumps(report, indent=2))
+    report["s3_prefix"] = f"s3://{args.bucket}/{prefix}/"
+    save("summary.json", json.dumps(report, indent=2), "application/json")
+    save("manifest.json", json.dumps({"run_id":run_id,"artifacts":artifacts}, indent=2), "application/json")
     print(json.dumps(report, indent=2), flush=True)
-    if args.archive_s3:
-        from alpha_edge.market.aea87_archive_evidence import archive
-        from datetime import datetime, timezone
-        archive_id = "forensic_" + datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-        archive(output, args.bucket, args.region, archive_id, args.workers)
     if errors:
         raise RuntimeError("Failed asset reads; consult read_errors.csv")
 
@@ -212,8 +224,6 @@ def main():
     parser.add_argument("--threshold", type=float, default=.50)
     parser.add_argument("--tolerance", type=float, default=1e-5)
     parser.add_argument("--plots", type=int, default=15)
-    parser.add_argument("--output-dir", default=str(paths.local_outputs_dir() / "aea87_forensics"))
-    parser.add_argument("--archive-s3", action="store_true", help="Upload local evidence to versioned S3 after run")
     args = parser.parse_args()
     if not Path(args.inception_csv).exists():
         parser.error("Validated inceptions CSV not found: " + args.inception_csv)

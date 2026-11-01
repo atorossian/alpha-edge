@@ -9,5 +9,5 @@ def test_plot_generates_png_bytes_without_local_file(tmp_path):
     flags, frame = normalize(p, pd.DataFrame(), "CRYPTO:HYPE-USD",
                              inception="2024-11-29")
     img = plot_case(frame, flags, None, inception="2024-11-29")
-    assert img.startswith(b"\\x89PNG\\r\\n\\x1a\\n")
+    assert img.startswith(bytes.fromhex("89504e470d0a1a0a"))
     assert list(tmp_path.iterdir()) == []

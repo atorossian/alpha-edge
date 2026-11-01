@@ -14,6 +14,7 @@ import numpy as np
 import pandas as pd
 
 from alpha_edge.core.market_store import MarketStore
+from alpha_edge import paths
 
 
 def inspect_asset(prices: pd.DataFrame, returns: pd.DataFrame, asset_id: str,
@@ -158,7 +159,7 @@ def run(args):
 
 def main():
     p = argparse.ArgumentParser(description="Read-only forensic audit of S3 market histories")
-    p.add_argument("--universe", default="data/universe/universe.csv")
+    p.add_argument("--universe", default=str(paths.universe_dir() / "universe.csv"))
     p.add_argument("--bucket", default="alpha-edge-algo")
     p.add_argument("--region", default="eu-west-1")
     p.add_argument("--start", default="2010-01-01")
@@ -170,7 +171,7 @@ def main():
     p.add_argument("--mismatch-tolerance", type=float, default=1e-5)
     p.add_argument("--plots", type=int, default=15)
     p.add_argument("--window", type=int, default=30)
-    p.add_argument("--output-dir", default="data/outputs/aea87_anomaly_audit")
+    p.add_argument("--output-dir", default=str(paths.data_dir() / "outputs" / "aea87_anomaly_audit"))
     args = p.parse_args()
     if not 1 <= args.workers <= 16 or args.plots < 0:
         p.error("workers must be 1..16 and plots must be nonnegative")

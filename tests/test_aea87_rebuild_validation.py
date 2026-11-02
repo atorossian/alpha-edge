@@ -34,3 +34,20 @@ def test_old_extra_dates_require_review():
     report = coverage_review(old, fresh, compare_histories(old, fresh))
     assert report["old_only_weekend_count"] == 1
     assert report["status"] == "REVIEW_REQUIRED"
+
+
+def test_fx_weekend_gap_uses_recent_prior_quote():
+    raw = _raw()
+    fx = normalize_fx_history(pd.DataFrame({
+        "date": [pd.Timestamp("2026-01-02")], "Close": [1.2]}))
+    prices, returns, status = build_candidate(raw, "A", "EUR", fx=fx)
+    assert status == "STAGED_FOR_REVIEW"
+    assert list(prices["close_adjusted_usd"].round(6)) == [12.0, 13.2]
+
+
+def test_fx_stale_quote_rejected():
+    fx = normalize_fx_history(pd.DataFrame({
+        "date": [pd.Timestamp("2025-12-25")], "Close": [1.2]}))
+    prices, returns, status = build_candidate(_raw(), "A", "EUR", fx=fx)
+    assert status == "MISSING_EXACT_DATE_FX"
+    assert prices is None and returns is None

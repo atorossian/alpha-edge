@@ -979,6 +979,15 @@ class MarketStore:
                     all_keys.extend(parts)
                     continue
 
+                # Explicitly retired/empty manifest must NEVER fall back to orphan
+                # legacy partitions. Missing manifest keeps legacy compatibility.
+                if man and (
+                    man.get("status") in ("RETIRED", "EMPTY", "TOMBSTONED")
+                    or man.get("retired") is True
+                    or ("parts" in man and not man["parts"])
+                ):
+                    continue
+
                 prefix = f"{table_prefix}/asset_id={asset_id}/year={int(y)}/"
                 keys = [k for k in self._list_keys(prefix) if k.endswith(".parquet")]
                 all_keys.extend(keys)

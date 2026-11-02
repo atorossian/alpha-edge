@@ -19,12 +19,14 @@ def test_inverse_fx():
     assert list(prices["close_adjusted_usd"]) == [5., 2.75]
 
 
-def test_missing_fx_fails_closed():
+def test_recent_fx_is_carried_backward_only_with_provenance():
     fx = normalize_fx_history(pd.DataFrame({"date":[pd.Timestamp("2026-01-02")],
                                             "Close":[1.1]}))
     prices, returns, status = build_candidate(_raw(), "A", "EUR", fx=fx)
-    assert prices is None and returns is None
-    assert status == "MISSING_RECENT_HISTORICAL_FX"
+    assert status == "STAGED_FOR_REVIEW"
+    assert prices is not None and returns is not None
+    assert list(prices["fx_age_calendar_days"]) == [0, 3]
+    assert list(prices["fx_quote_date"].dt.strftime("%Y-%m-%d")) == ["2026-01-02"] * 2
 
 
 def test_old_extra_dates_require_review():

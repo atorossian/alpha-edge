@@ -18,6 +18,7 @@ import pandas as pd
 import yfinance as yf
 from alpha_edge import paths
 from alpha_edge.core.market_store import MarketStore
+from alpha_edge.market.aea87_rebuild_validation import (fx_symbol, normalize_fx_history, convert_raw_with_fx, corporate_actions_report, coverage_review)
 
 DEFAULT_ASSETS = ("CRYPTO:HYPE-USD", "EQH028b839246b50817",
                   "EQH09dbac0e89987ccc", "EQH40e5d597ac178c4e",
@@ -68,9 +69,9 @@ def provider_metadata(symbol):
     return out
 
 
-def build_candidate(raw, asset_id, currency, inception=None):
+def build_candidate(raw, asset_id, currency, inception=None, fx=None):
     """No FX shortcuts: stage a canonical USD candidate only for USD instruments."""
-    if str(currency or "").upper() != "USD":
+    if str(currency or "").upper() != "USD" and fx is None:
         return None, None, "NON_USD_REQUIRES_HISTORICAL_FX"
     columns = ["Open", "High", "Low", "Close", "Adj Close", "Volume"]
     if not set(columns).issubset(raw.columns):
@@ -80,6 +81,12 @@ def build_candidate(raw, asset_id, currency, inception=None):
         return None, None, "NO_POST_INCEPTION_OBSERVATIONS"
     for col in columns:
         x[col] = pd.to_numeric(x[col], errors="coerce")
+    if fx is not None:
+        x = convert_raw_with_fx(x, fx)
+        if x["fx_to_usd"].isna().any():
+            return None, None, "MISSING_EXACT_DATE_FX"
+        for col in ("Open", "High", "Low", "Close", "Adj Close"):
+            x[col] = x[col + "_usd"]
     if (x["Close"].notna() & ~np.isfinite(x["Close"])).any() or (x["Adj Close"].notna() & ~np.isfinite(x["Adj Close"])).any() or x["Close"].dropna().le(0).any() or x["Adj Close"].dropna().le(0).any():
         return None, None, "INVALID_SOURCE_PRICES"
     prices = pd.DataFrame({"asset_id": asset_id, "date": x["date"],
@@ -160,14 +167,34 @@ def run(args):
             if asset_id == "CRYPTO:HYPE-USD" and symbol != "HYPE32196-USD":
                 state["status"] = "IDENTITY_SYMBOL_CONFLICT"
                 continue
+            put(f"assets/{safe}/corporate_actions.json", json.dumps(corporate_actions_report(raw), indent=2), "application/json")
+            fx = None
+            if str(meta["currency"] or "").upper() != "USD":
+                direct, inverse = fx_symbol(meta["currency"])
+                fx_error = None
+                for fx_ticker, inverse_flag in ((direct, False), (inverse, True)):
+                    try:
+                        fx_raw = download_fresh(fx_ticker, args.start, args.end_exclusive)
+                        put(f"assets/{safe}/fx_{'inverse' if inverse_flag else 'direct'}_raw.parquet", parquet_bytes(fx_raw), "application/octet-stream")
+                        fx = normalize_fx_history(fx_raw, inverse=inverse_flag)
+                        state["fx_symbol"] = fx_ticker
+                        break
+                    except Exception as exc:
+                        fx_error = str(exc)
+                if fx is None:
+                    state["status"] = "FX_DOWNLOAD_UNAVAILABLE"
+                    state["fx_error"] = fx_error
+                    continue
             candidate, returns, status = build_candidate(
-                raw, asset_id, meta["currency"],
+                raw, asset_id, meta["currency"], fx=fx,
                 inception="2024-11-29" if asset_id == "CRYPTO:HYPE-USD" else None)
             state["status"] = status
             if candidate is None:
                 continue
             old = store.read_ohlcv_usd([asset_id], start=args.start, end=args.end_exclusive)
             state["comparison"] = compare_histories(old, candidate)
+            state["coverage_review"] = coverage_review(old, candidate, state["comparison"])
+            put(f"assets/{safe}/coverage_review.json", json.dumps(state["coverage_review"], indent=2), "application/json")
             put(f"assets/{safe}/candidate_ohlcv_usd.parquet", parquet_bytes(candidate), "application/octet-stream")
             put(f"assets/{safe}/candidate_returns_usd.parquet", parquet_bytes(returns), "application/octet-stream")
             put(f"assets/{safe}/comparison.json", json.dumps(state["comparison"], indent=2), "application/json")

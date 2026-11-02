@@ -24,7 +24,7 @@ def test_missing_fx_fails_closed():
                                             "Close":[1.1]}))
     prices, returns, status = build_candidate(_raw(), "A", "EUR", fx=fx)
     assert prices is None and returns is None
-    assert status == "MISSING_EXACT_DATE_FX"
+    assert status == "MISSING_RECENT_HISTORICAL_FX"
 
 
 def test_old_extra_dates_require_review():
@@ -49,5 +49,5 @@ def test_fx_stale_quote_rejected():
     fx = normalize_fx_history(pd.DataFrame({
         "date": [pd.Timestamp("2025-12-25")], "Close": [1.2]}))
     prices, returns, status = build_candidate(_raw(), "A", "EUR", fx=fx)
-    assert status == "MISSING_EXACT_DATE_FX"
+    assert status == "MISSING_RECENT_HISTORICAL_FX"
     assert prices is None and returns is None

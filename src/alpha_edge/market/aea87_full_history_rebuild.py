@@ -84,7 +84,7 @@ def build_candidate(raw, asset_id, currency, inception=None, fx=None):
     if fx is not None:
         x = convert_raw_with_fx(x, fx)
         if x["fx_to_usd"].isna().any():
-            return None, None, "MISSING_EXACT_DATE_FX"
+            return None, None, "MISSING_RECENT_HISTORICAL_FX"
         for col in ("Open", "High", "Low", "Close", "Adj Close"):
             x[col] = x[col + "_usd"]
     if (x["Close"].notna() & ~np.isfinite(x["Close"])).any() or (x["Adj Close"].notna() & ~np.isfinite(x["Adj Close"])).any() or x["Close"].dropna().le(0).any() or x["Adj Close"].dropna().le(0).any():
@@ -95,6 +95,10 @@ def build_candidate(raw, asset_id, currency, inception=None, fx=None):
                            "close_adjusted_usd": x["Adj Close"],
                            "close_usd": x["Close"], "adj_close_usd": x["Adj Close"],
                            "volume": x["Volume"]}).reset_index(drop=True)
+    if fx is not None:
+        prices["fx_to_usd"] = x["fx_to_usd"].to_numpy()
+        prices["fx_quote_date"] = x["fx_quote_date"].to_numpy()
+        prices["fx_age_calendar_days"] = x["fx_age_calendar_days"].to_numpy()
     p = prices["close_adjusted_usd"]
     valid = p.gt(0) & p.shift().gt(0)
     returns = pd.DataFrame({"asset_id": asset_id, "date": prices["date"],

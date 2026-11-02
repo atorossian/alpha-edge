@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 import boto3
 import pandas as pd
 from alpha_edge.core.market_store import MarketStore
+from alpha_edge.market.aea87_publication_validation import validate_candidate, validate_old_only_against_calendar
 
 ASSETS = ("CRYPTO:HYPE-USD", "EQH028b839246b50817")
 ROOT = "market/repairs/aea87/rebuilds/v1/runs"
@@ -22,7 +23,9 @@ def check_asset(s3, bucket, store, run_id, aid, date_end):
     prices = pd.read_parquet(io.BytesIO(s3.get_object(Bucket=bucket, Key=base+"/candidate_ohlcv_usd.parquet")["Body"].read()))
     returns = pd.read_parquet(io.BytesIO(s3.get_object(Bucket=bucket, Key=base+"/candidate_returns_usd.parquet")["Body"].read()))
     review = json.loads(s3.get_object(Bucket=bucket, Key=base+"/coverage_review.json")["Body"].read())
-    issues = list(review.get("reasons", []))
+    issues = [x for x in review.get("reasons", []) if x != "OLD_ONLY_DATES_REQUIRE_EXCHANGE_CALENDAR_VALIDATION"]
+    inception = "2024-11-29" if aid == "CRYPTO:HYPE-USD" else None
+    issues.extend(validate_candidate(prices, returns, inception))
     if prices.empty or prices["date"].duplicated().any() or returns["date"].duplicated().any():
         issues.append("EMPTY_OR_DUPLICATE_CANDIDATE")
     if set(prices["date"]) != set(returns["date"]):
@@ -32,6 +35,17 @@ def check_asset(s3, bucket, store, run_id, aid, date_end):
     # from the rebuild must receive explicit retired manifests.
     old = store.read_ohlcv_usd([aid], start="2010-01-01", end=date_end)
     old_years = set(pd.to_datetime(old["date"]).dt.year) if not old.empty else set()
+    calendar_report = None
+    if aid == "EQH028b839246b50817":
+        calendar_report = validate_old_only_against_calendar(old["date"], prices["date"], "NYSE")
+        if calendar_report["status"] != "PASSED":
+            issues.append("OLD_ONLY_DATES_INCLUDE_VALID_NYSE_SESSIONS")
+    elif review.get("old_only_dates") and aid != "CRYPTO:HYPE-USD":
+        issues.append("OLD_ONLY_DATES_REQUIRE_EXCHANGE_CALENDAR_VALIDATION")
+    if aid == "CRYPTO:HYPE-USD":
+        bad_old_dates = pd.to_datetime(review.get("old_only_dates", []), utc=True)
+        if len(bad_old_dates) and (bad_old_dates >= pd.Timestamp("2024-11-29", tz="UTC")).any():
+            issues.append("OLD_ONLY_DATES_AFTER_VALIDATED_INCEPTION")
     operations = []
     for year in sorted(old_years | set(years)):
         for table in ("ohlcv_usd", "returns_usd"):
@@ -52,6 +66,7 @@ def check_asset(s3, bucket, store, run_id, aid, date_end):
                                "candidate_rows":int((pd.to_datetime(prices["date"] if table=="ohlcv_usd" else returns["date"]).dt.year==year).sum()),
                                "retire":bool(year not in years)})
     return {"asset_id":aid,"candidate_rows":len(prices),"return_rows":len(returns),
+            "calendar_validation":calendar_report,
             "blockers":sorted(set(issues)),"operations":operations,
             "status":"NOT_APPROVED" if issues else "PREFLIGHT_REQUIRES_MANUAL_APPROVAL"}
 

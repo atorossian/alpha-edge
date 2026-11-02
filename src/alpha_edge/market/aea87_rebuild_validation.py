@@ -30,9 +30,25 @@ def normalize_fx_history(frame, inverse=False):
     return x[["date", "fx_to_usd"]].sort_values("date")
 
 
-def convert_raw_with_fx(raw, fx):
-    """Exact date-only FX conversion; missing FX means missing USD value, not a guess."""
-    x = raw.merge(fx, how="left", on="date", validate="one_to_one")
+def convert_raw_with_fx(raw, fx, max_lag_days=3):
+    """Backward-only FX as-of matching; never invent or interpolate quotations.
+
+    Each equity observation retains the FX observation date and calendar lag.
+    A missing or excessively stale quote remains missing, and staging then fails closed.
+    """
+    if not 0 <= max_lag_days <= 7:
+        raise ValueError("max_lag_days must be 0..7")
+    x = raw.copy()
+    x["date"] = pd.to_datetime(x["date"], utc=True).dt.tz_localize(None).dt.normalize()
+    f = fx.copy()
+    f["date"] = pd.to_datetime(f["date"], utc=True).dt.tz_localize(None).dt.normalize()
+    if x.duplicated("date").any() or f.duplicated("date").any():
+        raise ValueError("Duplicate date in equity or FX input")
+    f = f.rename(columns={"date": "fx_quote_date"})
+    x = pd.merge_asof(x.sort_values("date"), f.sort_values("fx_quote_date"),
+                      left_on="date", right_on="fx_quote_date", direction="backward",
+                      tolerance=pd.Timedelta(days=max_lag_days))
+    x["fx_age_calendar_days"] = (x["date"] - x["fx_quote_date"]).dt.days
     for col in ("Open", "High", "Low", "Close", "Adj Close"):
         x[col + "_usd"] = pd.to_numeric(x[col], errors="coerce") * x["fx_to_usd"]
     return x

@@ -90,6 +90,7 @@ def main():
     if "asset_id" not in universe:
         p.error("Universe requires asset_id")
     ids = universe["asset_id"].dropna().astype(str).drop_duplicates().tolist()
+    full_universe_count = len(ids)
     if a.max_assets is not None:
         ids = ids[:a.max_assets]
     store = MarketStore(bucket=a.bucket, region=a.region)
@@ -111,12 +112,20 @@ def main():
     run = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "_" + uuid.uuid4().hex[:8]
     root = f"market/repairs/aea87/universe_screen/v1/runs/{run}"
     s3 = boto3.client("s3", region_name=a.region)
-    report = {"run_id": run, "scanned": len(results), "classification_counts": counts,
+    report = {"run_id": run, "scanned": len(results),
+              "universe_count": full_universe_count,
+              "complete_universe": len(results) == full_universe_count,
+              "classification_counts": counts,
               "screen_policy": "NUMERICAL_ONLY; IDENTITY_NOT_VERIFIED; NO_AUTO_PUBLICATION",
               "active_data_modified": False, "assets": results}
     blob = json.dumps(report, indent=2, default=str).encode()
     s3.put_object(Bucket=a.bucket, Key=root+"/report.json", Body=blob,
                   ContentType="application/json", IfNoneMatch="*")
+    if report["complete_universe"]:
+        s3.put_object(Bucket=a.bucket, Key="market/repairs/aea87/universe_screen/v1/latest.json",
+                      Body=json.dumps({"run_id":run, "report_key":root+"/report.json",
+                                       "universe_count":full_universe_count}).encode(),
+                      ContentType="application/json")
     print(json.dumps({"report": f"s3://{a.bucket}/{root}/report.json", "scanned": len(results),
                       "classification_counts": counts}, indent=2))
 

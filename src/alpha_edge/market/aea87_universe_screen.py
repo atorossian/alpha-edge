@@ -80,7 +80,7 @@ def main():
     p.add_argument("--bucket", default="alpha-edge-algo")
     p.add_argument("--region", default="eu-west-1")
     p.add_argument("--start", default="2010-01-01")
-    p.add_argument("--end", default="2026-11-01")
+    p.add_argument("--end", default=(datetime.now(timezone.utc).date() - timedelta(days=1)).isoformat())
     p.add_argument("--max-assets", type=int)
     p.add_argument("--workers", type=int, default=8)
     a = p.parse_args()

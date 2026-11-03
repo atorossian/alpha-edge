@@ -13,12 +13,14 @@ import io
 import json
 import uuid
 from datetime import datetime, timezone
+from functools import lru_cache
 
 import boto3
 import pandas as pd
 import numpy as np
 from botocore.exceptions import ClientError
 
+from alpha_edge import paths
 from alpha_edge.core.market_store import MarketStore
 from alpha_edge.market.aea87_publication_transaction import fetch, checksum, put_once
 from alpha_edge.market.aea87_publication_validation import validate_candidate, validate_old_only_against_calendar
@@ -42,7 +44,9 @@ REQUIRED = {
 def publication_schema_issues(candidate, active, table):
     missing = sorted(REQUIRED[table] - set(candidate.columns))
     issues = ["MISSING_REQUIRED_COLUMN:" + col for col in missing]
-    # Check the documented consumer contract, not every incidental field\n    # present in legacy files; old optional columns are not source truth.\n    if "asset_id" in candidate and candidate["asset_id"].astype(str).nunique() != 1:
+    # Check the documented consumer contract, not every incidental field
+    # present in legacy files; old optional columns are not source truth.
+    if "asset_id" in candidate and candidate["asset_id"].astype(str).nunique() != 1:
         issues.append("MULTIPLE_ASSET_IDENTITIES")
     if "date" in candidate and candidate["date"].duplicated().any():
         issues.append("DUPLICATE_CANDIDATE_DATES")

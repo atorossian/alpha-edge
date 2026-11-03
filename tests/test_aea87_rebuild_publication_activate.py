@@ -65,3 +65,25 @@ def test_missing_original_manifest_requires_legacy_retirement():
     plan["operations"][0]["before_missing"] = True
     with pytest.raises(ValueError, match="legacy-retirement"):
         require_ready_plan(s3, "test", plan)
+
+
+def test_downstream_backup_and_restore_exact_bytes(monkeypatch):
+    from alpha_edge.market import aea87_rebuild_publication_activate as module
+    class MutableS3(InMemoryS3):
+        def put_object(self, Bucket, Key, Body, **kwargs):
+            if kwargs.get("IfNoneMatch") == "*" and Key in self.items:
+                raise AssertionError("Overwrite during immutable staging")
+            self.items[Key] = Body
+        def delete_object(self, Bucket, Key):
+            self.items.pop(Key, None)
+    monkeypatch.setattr(module, "DOWNSTREAM",
+                        ["market/snapshots/v1/latest_returns.parquet",
+                         "market/cache/v1/returns_wide_min5y.parquet"])
+    initial = b"original-cache"
+    s3 = MutableS3({"market/cache/v1/returns_wide_min5y.parquet": initial})
+    previous = module.backup_downstream(s3, "test", "release/transaction")
+    s3.items["market/cache/v1/returns_wide_min5y.parquet"] = b"bad-cache"
+    s3.items["market/snapshots/v1/latest_returns.parquet"] = b"new-file"
+    module.restore_downstream(s3, "test", previous)
+    assert s3.items["market/cache/v1/returns_wide_min5y.parquet"] == initial
+    assert "market/snapshots/v1/latest_returns.parquet" not in s3.items

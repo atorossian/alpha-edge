@@ -125,6 +125,22 @@ def prepare(s3, store, bucket, source_run, asset_id, end, publication_id):
     for table in TABLES:
         frames[table] = align_verified_metadata(frames[table], active[table], table,
             provider_symbol=source["yahoo_ticker"], provider_currency=provider.get("currency"))
+    # Production may have advanced after the staged Yahoo run. A full-history
+    # replacement must never discard later live market sessions.
+    current_day = datetime.now(timezone.utc).date().isoformat()
+    stale = []
+    for table in TABLES:
+        later = (store.read_ohlcv_usd([asset_id], start=end, end=current_day)
+                 if table == "ohlcv_usd" else
+                 store.read_returns_usd([asset_id], start=end, end=current_day))
+        if not later.empty:
+            live_latest = pd.to_datetime(later["date"], utc=True).max()
+            candidate_latest = pd.to_datetime(frames[table]["date"], utc=True).max()
+            if live_latest > candidate_latest:
+                stale.append(f"{table}:ACTIVE_DATA_NEWER_THAN_CANDIDATE:{live_latest.date()}")
+    if stale:
+        return {"asset_id": asset_id, "status": "BLOCKED_STALE_SOURCE",
+                "blockers": stale, "operations": []}
     problems = []
     for table in TABLES:
         problems += [table + ":" + x for x in publication_schema_issues(

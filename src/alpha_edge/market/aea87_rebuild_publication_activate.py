@@ -40,7 +40,8 @@ def require_ready_plan(s3, bucket, plan):
             raise ValueError("Missing original manifest requires legacy-retirement workflow")
         if checksum(fetch(s3, bucket, op["manifest_key"])) != op["before_sha"]:
             raise ValueError("Active manifest drift: " + op["manifest_key"])
-        if checksum(fetch(s3, bucket, op["backup_key"])) != op["before_sha"]:
+        backup = fetch(s3, bucket, op["backup_key"]) if op.get("backup_key") else None
+        if checksum(backup) != op["before_sha"]:
             raise ValueError("Original manifest backup unavailable: " + op["manifest_key"])
         if op["part_key"] and checksum(fetch(s3, bucket, op["part_key"])) != op["part_sha"]:
             raise ValueError("Prepared partition failed checksum: " + op["part_key"])

@@ -157,7 +157,7 @@ def run(args):
     batch_size = args.batch_size
 
     def progress(processed, phase, last_asset=None):
-        state = {"run_id": release, "status": "RUNNING", "phase": phase,
+        state = {"run_id": release, "status": phase if phase in {"COMPLETED", "COMPLETED_WITH_EXCEPTIONS", "FAILED"} else "RUNNING", "phase": phase,
                  "processed": processed, "total": total,
                  "published": len(published), "exceptions": len(exceptions),
                  "last_asset_id": last_asset,
@@ -250,6 +250,18 @@ def run(args):
                  "exceptions":exceptions, "active_modified":bool(published),
                  "validation_run_id": report_metadata["validation_run_id"]}
     uri = _write_report(s3, args.bucket, root, "result.json", completed)
+    audit_cfg = load_runtime_config("prod")
+    summary_event = build_audit_event(
+        cfg=audit_cfg, run_id=release, event_type="rebuild",
+        entity_type="market_data", entity_id=release,
+        as_of=args.end_exclusive, source_script="aea87_rebuild",
+        source_mode="production_reconstruction", status="success" if published else "failed",
+        input_args={"asset_count":total,"validation_run_id":report_metadata["validation_run_id"]},
+        output_keys=[root+"/result.json"],
+        metadata={"selected":total,"published":len(published),
+                  "unresolved":len(exceptions),"result_status":completed["status"],
+                  "source_runs":source_runs})
+    write_audit_event(cfg=audit_cfg, event=summary_event)
     progress(total, completed["status"])
     print(json.dumps({"status":completed["status"], "selected":total,
                       "published":len(published), "unresolved":len(exceptions),
@@ -284,6 +296,17 @@ def main():
         try:
             run(a)
         except Exception as exc:
+            try:
+                s3 = boto3.client("s3", region_name=a.region)
+                fail_key = f"{ROOT}/{a.run_id}/progress/latest.json"
+                s3.put_object(Bucket=a.bucket, Key=fail_key,
+                    Body=json.dumps({"run_id":a.run_id,"status":"FAILED",
+                                     "timestamp_utc":datetime.now(timezone.utc).isoformat(),
+                                     "error":f"{type(exc).__name__}: {exc}"}).encode(),
+                    ContentType="application/json")
+            except Exception:
+                # Failure of progress reporting cannot conceal the original error.
+                pass
             event = build_audit_event(
                 cfg=cfg, run_id=a.run_id, event_type="rebuild",
                 entity_type="market_data", entity_id=None,

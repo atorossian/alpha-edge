@@ -81,6 +81,14 @@ def build_candidate(raw, asset_id, currency, inception=None, fx=None):
         return None, None, "NO_POST_INCEPTION_OBSERVATIONS"
     for col in columns:
         x[col] = pd.to_numeric(x[col], errors="coerce")
+    # Yahoo keepna=True retains source placeholders (including an entirely
+    # empty HYPE candle on 2026-02-02). Preserve them in raw_yahoo, but do
+    # not create a fictitious trading observation or bridge returns across it.
+    # All other incomplete bars remain visible and fail publication validation.
+    empty_candle = x[["Open", "High", "Low", "Close", "Adj Close"]].isna().all(axis=1)
+    x = x.loc[~empty_candle].copy()
+    if x.empty:
+        return None, None, "NO_VALID_SOURCE_CANDLES"
     if fx is not None:
         x = convert_raw_with_fx(x, fx)
         if x["fx_to_usd"].isna().any():
@@ -193,6 +201,8 @@ def run(args):
                 raw, asset_id, meta["currency"], fx=fx,
                 inception="2024-11-29" if asset_id == "CRYPTO:HYPE-USD" else None)
             state["status"] = status
+            if candidate is not None:
+                state["source_placeholder_rows_excluded"] = int(len(raw) - len(candidate) - (int((raw["date"] < pd.Timestamp("2024-11-29")).sum()) if asset_id == "CRYPTO:HYPE-USD" else 0))
             if candidate is None:
                 continue
             old = store.read_ohlcv_usd([asset_id], start=args.start, end=args.end_exclusive)

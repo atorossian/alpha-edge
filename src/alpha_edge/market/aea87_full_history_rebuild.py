@@ -10,6 +10,8 @@ import hashlib
 import io
 import json
 import uuid
+import time
+from collections import Counter
 from datetime import datetime, timezone
 
 import boto3
@@ -145,18 +147,21 @@ def run(args):
     if selected["asset_id"].duplicated().any():
         raise ValueError("Ambiguous asset identity: duplicate asset_id in universe")
     mapped = selected.set_index("asset_id")
-    run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "_" + uuid.uuid4().hex[:8]
+    run_id = getattr(args, "run_id", None) or (datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "_" + uuid.uuid4().hex[:8])
     prefix = f"{ROOT}/{run_id}"
     s3 = boto3.client("s3", region_name=args.region)
     store = MarketStore(bucket=args.bucket, region=args.region)
     results, objects = {}, []
+    started = time.monotonic()
+    total = len(ids)
+    print(f"[rebuild/source] run_id={run_id} assets={total} start={args.start} end_exclusive={args.end_exclusive}", flush=True)
     def put(relative, body, mime):
         if isinstance(body, str):
             body = body.encode()
         key = prefix + "/" + relative
         s3.put_object(Bucket=args.bucket, Key=key, Body=body, ContentType=mime, IfNoneMatch="*")
         objects.append({"key": key, "sha256": hashlib.sha256(body).hexdigest(), "bytes": len(body)})
-    for asset_id in ids:
+    for completed, asset_id in enumerate(ids, 1):
         state = {"asset_id": asset_id, "status": "NOT_STARTED"}
         results[asset_id] = state
         try:
@@ -216,13 +221,33 @@ def run(args):
             state["status"] = "ERROR"
             state["error"] = str(exc)
         finally:
-            print(f"[rebuild] {asset_id}: {state['status']}", flush=True)
+            elapsed = max(time.monotonic() - started, 0.001)
+            counts = Counter(x["status"] for x in results.values())
+            progress = {"run_id": run_id, "status": "RUNNING",
+                        "processed": completed, "total": total, "elapsed_seconds": round(elapsed, 1),
+                        "as_of_utc": datetime.now(timezone.utc).isoformat(),
+                        "status_counts": dict(counts), "last_asset_id": asset_id,
+                        "last_asset_status": state["status"]}
+            # Overwrite only the run-scoped progress pointer; never live history.
+            s3.put_object(Bucket=args.bucket, Key=prefix+"/progress/latest.json",
+                          Body=json.dumps(progress, default=str).encode(),
+                          ContentType="application/json")
+            print(f"[rebuild/source] {completed}/{total} ({completed/total:.1%}) "
+                  f"{asset_id}: {state['status']} elapsed={elapsed:.0f}s "
+                  f"success={counts.get('STAGED_FOR_REVIEW', 0)} "
+                  f"exceptions={completed-counts.get('STAGED_FOR_REVIEW', 0)}", flush=True)
     summary = {"schema": "aea87_full_history_rebuild_v1", "run_id": run_id,
                "status": "STAGING_ONLY", "source": "fresh_yahoo_daily",
                "start": args.start, "end_exclusive": args.end_exclusive,
                "active_histories_modified": False, "assets": results}
     put("summary.json", json.dumps(summary, indent=2, default=str), "application/json")
     put("manifest.json", json.dumps({"run_id": run_id, "objects": objects}, indent=2), "application/json")
+    s3.put_object(Bucket=args.bucket, Key=prefix+"/progress/latest.json",
+                  Body=json.dumps({"run_id": run_id, "status": "COMPLETED",
+                                   "processed": total, "total": total,
+                                   "status_counts": dict(Counter(v["status"] for v in results.values())),
+                                   "elapsed_seconds": round(time.monotonic()-started, 1)}, default=str).encode(),
+                  ContentType="application/json")
     print(json.dumps({"s3_prefix": f"s3://{args.bucket}/{prefix}/",
                       "statuses": {k: v["status"] for k, v in results.items()}}, indent=2))
     return summary

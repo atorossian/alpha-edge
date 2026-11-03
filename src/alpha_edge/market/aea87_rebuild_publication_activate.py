@@ -16,6 +16,10 @@ from alpha_edge.market.aea87_publication_transaction import (
 from alpha_edge.market.aea87_release_finalize import finalize
 
 ROOT = "market/repairs/aea87/rebuild_publications/v1"
+DOWNSTREAM = [
+    "market/snapshots/v1/" + name + ".parquet"
+    for name in ("latest_prices", "latest_prices_raw", "latest_prices_adjusted", "latest_returns")
+] + ["market/cache/v1/returns_wide_min5y.parquet", "market/cache/v1/returns_wide_min5y.meta.json"]
 
 
 def require_ready_plan(s3, bucket, plan):
@@ -55,16 +59,57 @@ def convert_to_transaction_ops(operations):
     } for op in operations]
 
 
+def backup_downstream(s3, bucket, root):
+    """Immutable before-images of live analytics, taken before first manifest write."""
+    records = []
+    for i, key in enumerate(DOWNSTREAM):
+        before = fetch(s3, bucket, key)
+        backup_key = f"{root}/downstream_backups/{i:02d}.bin" if before is not None else None
+        if before is not None:
+            previous = fetch(s3, bucket, backup_key)
+            if previous is None:
+                put_once(s3, bucket, backup_key, before)
+                previous = fetch(s3, bucket, backup_key)
+            if checksum(previous) != checksum(before):
+                raise RuntimeError("Changed downstream backup: " + key)
+        records.append({"key": key, "backup_key": backup_key,
+                        "before_sha": checksum(before)})
+    put_once(s3, bucket, root + "/downstream_backup_index.json",
+             json.dumps(records, sort_keys=True).encode())
+    return records
+
+
+def restore_downstream(s3, bucket, records):
+    """Restore exact prior analytics bytes after a failed publication."""
+    for record in records:
+        before = fetch(s3, bucket, record["backup_key"]) if record["backup_key"] else None
+        if checksum(before) != record["before_sha"]:
+            raise RuntimeError("Corrupt downstream backup: " + record["key"])
+        if before is None:
+            # No pre-existing object: remove outputs created by failed cutover.
+            s3.delete_object(Bucket=bucket, Key=record["key"])
+        else:
+            s3.put_object(Bucket=bucket, Key=record["key"], Body=before)
+        if checksum(fetch(s3, bucket, record["key"])) != record["before_sha"]:
+            raise RuntimeError("Downstream restoration not verified: " + record["key"])
+
+
 def activate(s3, bucket, plan, publication_id):
     records = require_ready_plan(s3, bucket, plan)
     root = f"{ROOT}/{publication_id}/transaction"
     ops = convert_to_transaction_ops(records)
     if entries(s3, bucket, root):
         raise RuntimeError("Publication already has journal events; use controlled recovery")
+    downstream = backup_downstream(s3, bucket, root)
     put_once(s3, bucket, root + "/operations.json",
              json.dumps(ops, sort_keys=True).encode())
     write_event(s3, bucket, root, 0, "READY")
-    switch_manifests(s3, bucket, root, ops, workers=1, batch_size=1)
+    try:
+        switch_manifests(s3, bucket, root, ops, workers=1, batch_size=1)
+    except Exception:
+        # switch_manifests rolls back manifests on activation errors.
+        restore_downstream(s3, bucket, downstream)
+        raise
     # The existing finalizer backs up snapshots and cache, and rebuilds cache.
     # An error must not be treated as success; keep the maintenance window open
     # until manifests and downstream artifacts are verified or restored.
@@ -74,10 +119,13 @@ def activate(s3, bucket, plan, publication_id):
     except Exception as exc:
         # Restore original manifests immediately. Cache/snapshot restoration
         # must be assessed separately because it may already have been modified.
-        rollback(s3, bucket, root, ops, workers=1)
+        try:
+            rollback(s3, bucket, root, ops, workers=1)
+        finally:
+            restore_downstream(s3, bucket, downstream)
         raise RuntimeError(
-            "Manifest rollback executed after downstream failure; "
-            "keep readers stopped and verify/restore backed-up cache and snapshots"
+            "Cutover failed; manifest and downstream restoration attempted. "
+            "Keep readers stopped until restoration and dependent jobs are verified."
         ) from exc
     return result
 

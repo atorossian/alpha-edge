@@ -5,9 +5,8 @@ rebuild the historical returns-wide cache. All prior snapshot bytes are backed u
 """
 import io
 import json
-import subprocess
-import sys
 import hashlib
+import numpy as np
 
 import pandas as pd
 
@@ -50,6 +49,113 @@ def _last_for_asset(s3, bucket, ops, asset_id, table):
     return frame.sort_values("date").iloc[-1].to_dict()
 
 
+def refresh_repaired_returns_cache(s3, bucket, root, ops, asset_ids):
+    """Replace only repaired asset columns in the existing canonical wide cache.
+
+    Full-universe cache reconstruction is not safe while other assets remain
+    flagged by AEA87. This incremental *full-history per asset* replacement
+    preserves untouched columns, removes stale repaired dates, and never
+    fills source gaps or manufactures returns.
+    """
+    cache_key = "market/cache/v1/returns_wide_min5y.parquet"
+    meta_key = "market/cache/v1/returns_wide_min5y.meta.json"
+    prior = fetch(s3, bucket, cache_key)
+    if prior is None:
+        raise RuntimeError("No existing canonical returns-wide cache to update")
+    wide = _frame(prior)
+    if "date" in wide.columns:
+        wide["date"] = pd.to_datetime(wide["date"], utc=True, errors="coerce")
+        wide = wide.set_index("date")
+    else:
+        wide.index = pd.to_datetime(wide.index, utc=True, errors="coerce")
+    if wide.index.isna().any() or wide.index.duplicated().any():
+        raise ValueError("Existing returns-wide index is invalid")
+    wide.index = wide.index.tz_convert(None).normalize()
+    if wide.index.duplicated().any():
+        raise ValueError("Existing returns-wide dates duplicate after normalization")
+    if wide.columns.duplicated().any():
+        raise ValueError("Existing returns-wide contains duplicate asset columns")
+    original_cols = set(wide.columns.astype(str))
+    refreshed, excluded = {}, []
+    for aid in asset_ids:
+        relevant = [op for op in ops if op["asset_id"] == aid and
+                    "/returns_usd/" in op["manifest_key"] and op.get("part_key")]
+        if not relevant:
+            raise RuntimeError("Missing freshly published return partitions: "+aid)
+        rows = []
+        for op in relevant:
+            raw = fetch(s3, bucket, op["part_key"])
+            if checksum(raw) != op["staged_sha"]:
+                raise RuntimeError("Repaired return partition changed: "+op["part_key"])
+            rows.append(_frame(raw))
+        frame = pd.concat(rows, ignore_index=True)
+        if frame["asset_id"].astype(str).ne(aid).any():
+            raise ValueError("Mixed identities in repaired return parts")
+        dates = pd.to_datetime(frame["date"], utc=True, errors="coerce")
+        if dates.isna().any() or dates.duplicated().any():
+            raise ValueError("Repaired returns contain missing or duplicate dates")
+        if "ret_log_close_adjusted_usd" in frame:
+            log_value = pd.to_numeric(frame["ret_log_close_adjusted_usd"], errors="coerce")
+            values = pd.Series(np.expm1(log_value.to_numpy()), index=dates.dt.tz_convert(None).dt.normalize())
+        else:
+            simple = pd.to_numeric(frame["ret_close_adjusted_usd"], errors="coerce")
+            values = pd.Series(simple.to_numpy(), index=dates.dt.tz_convert(None).dt.normalize())
+        if (values.dropna() < -1).any() or not np.isfinite(values.dropna()).all():
+            raise ValueError("Invalid repaired simple returns: "+aid)
+        values = values.dropna().sort_index()
+        # Respect the existing cache's five-year/1260-obs eligibility policy.
+        eligible = (len(values) >= 1260 and not values.empty and
+                    (values.index.max() - values.index.min()).days >= 5*365)
+        if eligible:
+            refreshed[aid] = values
+        else:
+            excluded.append(aid)
+        if aid in wide:
+            wide = wide.drop(columns=[aid])
+    if refreshed:
+        combined_index = wide.index
+        for series in refreshed.values():
+            combined_index = combined_index.union(series.index)
+        wide = wide.reindex(combined_index).sort_index()
+        for aid, values in refreshed.items():
+            wide[aid] = values.reindex(wide.index).astype("float32")
+    if wide.empty or wide.shape[1] == 0:
+        raise RuntimeError("Refresh would leave canonical cache empty")
+    old_meta = fetch(s3, bucket, meta_key)
+    meta = json.loads(old_meta) if old_meta else {}
+    meta.update({"n_days": int(len(wide)), "n_assets": int(len(wide.columns)),
+                 "last_date": str(wide.index.max().date()),
+                 "as_of_utc": pd.Timestamp.utcnow().isoformat(),
+                 "aea87_incremental_repaired_full_history": {
+                     "run_root": root, "repaired_assets": sorted(refreshed),
+                     "excluded_below_5y": sorted(excluded),
+                     "unchanged_assets_not_revalidated": True}})
+    out = io.BytesIO()
+    wide.sort_index().to_parquet(out, index=True)
+    s3.put_object(Bucket=bucket, Key=cache_key, Body=out.getvalue(),
+                  ContentType="application/octet-stream")
+    s3.put_object(Bucket=bucket, Key=meta_key,
+                  Body=json.dumps(meta, indent=2, default=str).encode(),
+                  ContentType="application/json")
+    # Prove that repaired values (including NaNs) actually landed.
+    observed = _frame(fetch(s3, bucket, cache_key))
+    if "date" in observed.columns:
+        observed = observed.set_index("date")
+    observed.index = pd.to_datetime(observed.index, utc=True).tz_convert(None).normalize()
+    for aid, source in refreshed.items():
+        if aid not in observed:
+            raise RuntimeError("Repaired asset missing from published cache: "+aid)
+        actual = observed[aid].reindex(source.index)
+        if not np.allclose(actual.to_numpy(dtype=float), source.to_numpy(dtype=float),
+                           rtol=1e-6, atol=1e-7, equal_nan=True):
+            raise RuntimeError("Repaired returns-wide values differ from source: "+aid)
+    for aid in excluded:
+        if aid in observed:
+            raise RuntimeError("Stale short-history asset remained in returns-wide cache: "+aid)
+    return {"refreshed":len(refreshed), "excluded_below_5y":excluded,
+            "unchanged_columns":len(original_cols-set(asset_ids))}
+
+
 def finalize(s3, bucket, root, publication):
     history = entries(s3, bucket, root)
     if not history or history[-1]["state"] not in ("CACHE_REBUILD_REQUIRED", "SNAPSHOTS_PREPARED"):
@@ -71,7 +177,7 @@ def finalize(s3, bucket, root, publication):
         original = _frame(old)
         if not original.empty and "asset_id" not in original:
             raise ValueError("Snapshot has no asset_id: " + name)
-        retained = original.copy()
+        retained = original.loc[~original["asset_id"].astype(str).isin(candidates)].copy() if not original.empty else original.copy()
         from concurrent.futures import ThreadPoolExecutor
         with ThreadPoolExecutor(max_workers=16) as pool:
             rows = pool.map(lambda aid: _last_for_asset(s3, bucket, ops, aid, table), publication["candidates"])
@@ -124,9 +230,9 @@ def finalize(s3, bucket, root, publication):
                 put_once(s3, bucket, backup_key, previous)
             elif checksum(existing_backup) != checksum(previous):
                 raise RuntimeError("Wide cache changed since original backup: " + live_key)
-    # Cache build is done with all readers stopped.
-    subprocess.run([sys.executable, "-m", "alpha_edge.market.build_returns_wide_cache",
-                    "--env", "prod", "--confirm-prod-write", "--force"], check=True)
+    # Internal full-history replacement only for successfully repaired assets.
+    cache_result = refresh_repaired_returns_cache(s3, bucket, root, ops, candidates)
+    print(f"[finalize] affected returns-wide columns refreshed: {cache_result}", flush=True)
     for name in SNAPSHOTS:
         key = "market/snapshots/v1/" + name + ".parquet"
         blob = fetch(s3, bucket, root + "/prepared_snapshots/" + name + ".parquet")

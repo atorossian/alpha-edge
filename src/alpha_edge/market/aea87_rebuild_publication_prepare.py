@@ -210,6 +210,10 @@ def main():
     s3 = boto3.client("s3", region_name=a.region)
     store = MarketStore(bucket=a.bucket, region=a.region)
     outcome = prepare(s3, store, a.bucket, a.source_run_id, a.asset_id, a.end, pub_id)
+    if outcome["status"].startswith("BLOCKED"):
+        report_key = f"{PREPARED}/{pub_id}/blocked_report.json"
+        _put_verified(s3, a.bucket, report_key, json.dumps(outcome, indent=2).encode())
+        outcome["s3_report"] = f"s3://{a.bucket}/{report_key}"
     print(json.dumps({k: v for k, v in outcome.items() if k != "operations"} |
                      {"operation_count": len(outcome["operations"])}, indent=2))
     if outcome["status"].startswith("BLOCKED"):

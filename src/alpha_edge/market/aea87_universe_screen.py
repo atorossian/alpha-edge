@@ -55,9 +55,13 @@ def screen_one(aid, prices, returns, *, jump_threshold=.50):
             joined = expected.merge(r[["date", "ret_close_adjusted_usd"]],
                                     on="date", how="inner", validate="one_to_one")
             stored = pd.to_numeric(joined["ret_close_adjusted_usd"], errors="coerce")
-            # Canonical ret_close_adjusted_usd is SIMPLE return, not a log return.
-            mismatch = (stored - joined["expected"]).abs().gt(1e-5)
+            # Compare only adjacent valid observed prices, never missing adjusted
+            # prices, or a return without a computable price-side denominator.
+            eligible = np.isfinite(joined["expected"]) & np.isfinite(stored)
+            mismatch = eligible & (stored - joined["expected"]).abs().gt(1e-5)
             issues["RETURN_PRICE_MISMATCH"] = int(mismatch.sum()) if mismatch.any() else 0
+            if not eligible.any():
+                issues["NO_COMPARABLE_PRICE_RETURN_PAIRS"] = 1
             issues = {k: v for k, v in issues.items() if v}
     else:
         issues["MISSING_CANONICAL_RETURNS_COLUMN"] = 1

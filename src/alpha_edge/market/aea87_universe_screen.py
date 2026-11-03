@@ -45,7 +45,9 @@ def screen_one(aid, prices, returns, *, jump_threshold=.50):
     elif {"date", "ret_close_adjusted_usd"}.issubset(returns):
         r = returns.copy()
         r["date"] = pd.to_datetime(r["date"], utc=True, errors="coerce").dt.tz_localize(None).dt.normalize()
-        if r["date"].duplicated().any():
+        if duplicates:
+            issues["RETURN_RECONCILIATION_BLOCKED_BY_DUPLICATE_PRICES"] = duplicates
+        elif r["date"].duplicated().any():
             issues["DUPLICATE_RETURN_DATES"] = int(r["date"].duplicated().sum())
         else:
             expected = p[["date"]].copy()

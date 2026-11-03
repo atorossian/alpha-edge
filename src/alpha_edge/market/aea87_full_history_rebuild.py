@@ -121,6 +121,11 @@ def compare_histories(old, new):
     if old.empty:
         return {"old_rows": 0, "new_rows": len(new), "overlap": 0}
     old = normalize_dates(old)
+    # Legacy history may have no canonical adjusted column at all. That is
+    # precisely a reconstruction candidate, not a reason to abandon source
+    # download after a valid fresh provider response.
+    if "close_adjusted_usd" not in old:
+        old["close_adjusted_usd"] = np.nan
     a = old[["date", "close_adjusted_usd"]].rename(columns={"close_adjusted_usd": "old"})
     b = new[["date", "close_adjusted_usd"]].rename(columns={"close_adjusted_usd": "new"})
     m = a.merge(b, on="date", how="outer", indicator=True)

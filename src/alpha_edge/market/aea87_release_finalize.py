@@ -124,6 +124,7 @@ def refresh_repaired_returns_cache(s3, bucket, root, ops, asset_ids):
     old_meta = fetch(s3, bucket, meta_key)
     meta = json.loads(old_meta) if old_meta else {}
     meta.update({"n_days": int(len(wide)), "n_assets": int(len(wide.columns)),
+                 "first_date": str(wide.index.min().date()),
                  "last_date": str(wide.index.max().date()),
                  "as_of_utc": pd.Timestamp.utcnow().isoformat(),
                  "aea87_incremental_repaired_full_history": {

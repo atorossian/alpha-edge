@@ -53,7 +53,18 @@ def publication_schema_issues(candidate, active, table):
     return sorted(set(issues))
 
 
-def align_verified_metadata(candidate, active, table, *, provider_symbol, provider_currency):
+@lru_cache(maxsize=1)
+def _broker_ticker_map():
+    universe = pd.read_csv(paths.universe_dir() / "universe.csv", dtype=str).fillna("")
+    if universe["asset_id"].duplicated().any():
+        raise ValueError("Ambiguous duplicate universe asset_id")
+    column = "broker_ticker" if "broker_ticker" in universe else "ticker"
+    if column not in universe:
+        raise ValueError("Universe lacks broker symbol identity")
+    return dict(zip(universe["asset_id"], universe[column]))
+
+
+def align_verified_metadata(candidate, active, table, *, provider_symbol, provider_currency, broker_ticker=None):
     """Add verified identity and mathematically derived fields, never prices.
 
     Identity metadata must be invariant in active data, and the Yahoo symbol
@@ -77,7 +88,9 @@ def align_verified_metadata(candidate, active, table, *, provider_symbol, provid
         elif field in expected and expected[field]:
             out[field] = expected[field]
     if "ticker" not in out:
-        raise ValueError("Missing authoritative broker ticker")
+        if not broker_ticker:
+            raise ValueError("Missing authoritative broker ticker")
+        out["ticker"] = str(broker_ticker)
     if table == "ohlcv_usd":
         # Existing consumers still expect historical source-style aliases.
         # Each is an exact column copy from the new validated USD candidate.
@@ -136,7 +149,8 @@ def prepare(s3, store, bucket, source_run, asset_id, end, publication_id):
     provider = source.get("provider_metadata") or {}
     for table in TABLES:
         frames[table] = align_verified_metadata(frames[table], active[table], table,
-            provider_symbol=source["yahoo_ticker"], provider_currency=provider.get("currency"))
+            provider_symbol=source["yahoo_ticker"], provider_currency=provider.get("currency"),
+            broker_ticker=_broker_ticker_map().get(asset_id))
     # One candidate quality gate, internal to the rebuild. The old preflight
     # command is deliberately NOT part of deployment.
     inception = "2024-11-29" if asset_id == "CRYPTO:HYPE-USD" else None

@@ -13,6 +13,7 @@ attempted on failure. Non-approvable instruments receive S3 exception reports.
 from __future__ import annotations
 import argparse
 import json
+import hashlib
 import uuid
 import time
 from collections import Counter
@@ -63,6 +64,110 @@ def selected_from_latest(s3, bucket, *, only=None):
         selected = sorted(set(only))
     return selected, {"validation_run_id": report["run_id"], "classification_counts":report["classification_counts"],
                       "complete_universe": True}
+
+
+SOURCE_ROOT = "market/repairs/aea87/rebuilds/v1/runs"
+
+
+def _safe_asset_folder(asset_id):
+    return "".join(c if c.isalnum() else "_" for c in asset_id)
+
+
+def _source_file_valid(s3, bucket, index, key):
+    record = index.get(key)
+    if record is None:
+        return False
+    body = fetch(s3, bucket, key)
+    return body is not None and hashlib.sha256(body).hexdigest() == record.get("sha256")
+
+
+def find_reusable_source(s3, bucket, batch, args):
+    """Reuse a complete immutable source run for exactly the requested batch.
+
+    No partial source run, failed publication, changed date window, changed
+    provider mapping, or corrupted candidate may be promoted implicitly.
+    """
+    prefix = SOURCE_ROOT + "/"
+    paginator = s3.get_paginator("list_objects_v2")
+    runs = []
+    for page in paginator.paginate(Bucket=bucket, Prefix=prefix, Delimiter="/"):
+        for item in page.get("CommonPrefixes", []):
+            run_id = item["Prefix"].rstrip("/").rsplit("/", 1)[-1]
+            if "_source_" in run_id:
+                runs.append(run_id)
+    universe = pd.read_csv(args.universe, dtype=str).fillna("")
+    if universe["asset_id"].duplicated().any():
+        raise ValueError("Duplicate asset identities in universe")
+    mapped = universe.set_index("asset_id")
+    for run_id in sorted(runs, reverse=True):
+        source_prefix = prefix + run_id + "/"
+        summary_key = source_prefix + "summary.json"
+        manifest_key = source_prefix + "manifest.json"
+        summary_bytes = fetch(s3, bucket, summary_key)
+        manifest_bytes = fetch(s3, bucket, manifest_key)
+        if summary_bytes is None or manifest_bytes is None:
+            continue
+        try:
+            summary = json.loads(summary_bytes)
+            manifest = json.loads(manifest_bytes)
+            if (summary.get("run_id") != run_id
+                    or summary.get("status") != "STAGING_ONLY"
+                    or summary.get("active_histories_modified") is not False
+                    or summary.get("start") != args.start
+                    or summary.get("end_exclusive") != args.end_exclusive
+                    or set(summary.get("assets", {})) != set(batch)
+                    or manifest.get("run_id") != run_id):
+                continue
+            index = {obj["key"]: obj for obj in manifest["objects"]}
+            if not _source_file_valid(s3, bucket, index, summary_key):
+                continue
+            valid = True
+            for aid in batch:
+                item = summary["assets"][aid]
+                if aid not in mapped.index:
+                    valid = False
+                    break
+                expected_symbol = str(mapped.at[aid, "yahoo_ticker"]).strip()
+                if expected_symbol != str(item.get("yahoo_ticker", "")).strip():
+                    # Failed source downloads without a symbol cannot be reused.
+                    valid = False
+                    break
+                if item.get("status") == "STAGED_FOR_REVIEW":
+                    asset_prefix = source_prefix + "assets/" + _safe_asset_folder(aid) + "/"
+                    for name in ("raw_yahoo.parquet", "candidate_ohlcv_usd.parquet",
+                                 "candidate_returns_usd.parquet", "provider_metadata.json"):
+                        if not _source_file_valid(s3, bucket, index, asset_prefix + name):
+                            valid = False
+                            break
+                if not valid:
+                    break
+            if valid:
+                print(f"[aea87_rebuild] Reusing verified immutable source run {run_id} "
+                      f"for {len(batch)} assets", flush=True)
+                return summary
+        except (ValueError, KeyError, TypeError, IndexError):
+            continue
+    return None
+
+
+def find_reusable_plan(s3, bucket, source_run, asset_id):
+    """Reuse staged publication plans only when all active checksums match."""
+    original_release = source_run.split("_source_", 1)[0]
+    key = (ROOT + "/" + original_release + "_" + _safe_asset_folder(asset_id)
+           + "/plan.json")
+    body = fetch(s3, bucket, key)
+    if body is None:
+        return None
+    try:
+        plan = json.loads(body)
+        if plan.get("asset_id") != asset_id or plan.get("source_run") != source_run:
+            return None
+        require_ready_plan(s3, bucket, plan)
+        return plan
+    except (ValueError, KeyError, TypeError) as exc:
+        print(f"[aea87_rebuild] Existing prepared plan for {asset_id} "
+              f"not reusable ({exc}); reconstructing plan", flush=True)
+        return None
 
 
 def _write_report(s3, bucket, root, name, data):
@@ -194,7 +299,9 @@ def run(args):
             asset_ids=",".join(batch), universe=args.universe, bucket=args.bucket,
             region=args.region, start=args.start, end_exclusive=args.end_exclusive,
             run_id=release + "_source_" + str(offset//batch_size+1).zfill(4))
-        staged = download_and_stage(download_args)
+        staged = find_reusable_source(s3, args.bucket, batch, download_args)
+        if staged is None:
+            staged = download_and_stage(download_args)
         if not staged or not staged.get("run_id"):
             raise RuntimeError("Fresh source run did not produce an S3 summary")
         source_run = staged["run_id"]
@@ -207,9 +314,11 @@ def run(args):
                                    "reason":entry.get("status"), "detail":entry.get("error")})
                 continue
             try:
-                outcome = prepare(s3, store, args.bucket, source_run, aid,
-                                  args.end_exclusive,
-                                  release + "_" + "".join(c if c.isalnum() else "_" for c in aid))
+                outcome = find_reusable_plan(s3, args.bucket, source_run, aid)
+                if outcome is None:
+                    outcome = prepare(s3, store, args.bucket, source_run, aid,
+                                      args.end_exclusive,
+                                      release + "_" + _safe_asset_folder(aid))
                 if outcome.get("status") == "PREPARED_NOT_PUBLISHED":
                     candidates.append(outcome)
                 else:

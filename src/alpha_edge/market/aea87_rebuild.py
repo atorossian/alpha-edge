@@ -24,6 +24,9 @@ import pandas as pd
 from botocore.exceptions import ClientError
 
 from alpha_edge import paths
+from alpha_edge.core.audit import make_run_id, build_audit_event, write_audit_event
+from alpha_edge.core.run_logging import capture_script_run
+from alpha_edge.core.runtime import load_runtime_config
 from alpha_edge.core.market_store import MarketStore
 from alpha_edge.market.aea87_full_history_rebuild import run as download_and_stage
 from alpha_edge.market.aea87_rebuild_publication_prepare import prepare
@@ -139,7 +142,7 @@ def run(args):
     if not asset_ids:
         print("Validation found no implicated assets. Production unchanged.")
         return
-    release = "aea87_rebuild_" + datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "_" + uuid.uuid4().hex[:8]
+    release = getattr(args, "run_id", None) or ("aea87_rebuild_" + datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "_" + uuid.uuid4().hex[:8])
     root = f"{ROOT}/{release}"
     started = {"status":"STARTED", "asset_count":len(asset_ids), "selected_assets":asset_ids,
                **report_metadata, "active_modified":False}
@@ -210,6 +213,27 @@ def run(args):
             _publish_batch(s3, args.bucket, store, candidates,
                            release + "_batch_" + str(offset//batch_size+1).zfill(4))
             published.extend(p["asset_id"] for p in candidates)
+            # Use the established Alpha Edge audit trail, not a parallel journal.
+            audit_cfg = load_runtime_config("prod")
+            if audit_cfg.bucket != args.bucket or audit_cfg.region != args.region:
+                raise RuntimeError("Audit target differs from production data target")
+            batch_id = release + "_batch_" + str(offset//batch_size+1).zfill(4)
+            ops = [op for plan in candidates for op in plan["operations"]]
+            event = build_audit_event(
+                cfg=audit_cfg, run_id=release, event_type="rebuild",
+                entity_type="market_data", entity_id=batch_id,
+                as_of=args.end_exclusive, source_script="aea87_rebuild",
+                source_mode="production_reconstruction", status="success",
+                input_args={"batch_index":offset//batch_size+1,
+                            "source_run":source_run,"asset_count":len(candidates)},
+                output_keys=[op["manifest_key"] for op in ops],
+                backup_keys=[op["backup_key"] for op in ops if op.get("backup_key")],
+                metadata={"affected_assets":[p["asset_id"] for p in candidates],
+                          "manifest_count":len(ops),
+                          "before_sha256_by_key":{op["manifest_key"]:op["before_sha"] for op in ops},
+                          "after_sha256_by_key":{op["manifest_key"]:op["after_sha"] for op in ops},
+                          "publication_root":f"{ROOT}/{batch_id}/transaction"})
+            write_audit_event(cfg=audit_cfg, event=event)
         # Preserve independent completed batches and exceptions after every cutover.
         progress(offset + len(batch), "BATCH_COMPLETE", batch[-1])
         _write_report(s3, args.bucket, root,
@@ -251,7 +275,25 @@ def main():
         p.error("end-exclusive must be greater than start")
     if not a.confirm_prod_write:
         p.error("Explicit --confirm-prod-write required; stop scheduled ingestion and readers during cutover")
-    run(a)
+    cfg = load_runtime_config("prod")
+    if cfg.bucket != a.bucket or cfg.region != a.region:
+        p.error("Production runtime audit bucket/region mismatch")
+    a.run_id = make_run_id("aea87_rebuild")
+    with capture_script_run(cfg=cfg, script_name="aea87_rebuild",
+                            input_args=vars(a), run_id=a.run_id):
+        try:
+            run(a)
+        except Exception as exc:
+            event = build_audit_event(
+                cfg=cfg, run_id=a.run_id, event_type="rebuild",
+                entity_type="market_data", entity_id=None,
+                as_of=a.end_exclusive, source_script="aea87_rebuild",
+                source_mode="production_reconstruction", status="failed",
+                input_args=vars(a),
+                metadata={"recovery":"check publication journal and batch checkpoints"},
+                error=f"{type(exc).__name__}: {exc}")
+            write_audit_event(cfg=cfg, event=event)
+            raise
 
 
 if __name__ == "__main__":

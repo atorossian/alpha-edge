@@ -16,6 +16,7 @@ from datetime import datetime, timezone
 
 import boto3
 import pandas as pd
+import numpy as np
 from botocore.exceptions import ClientError
 
 from alpha_edge.core.market_store import MarketStore
@@ -52,6 +53,40 @@ def publication_schema_issues(candidate, active, table):
     return sorted(set(issues))
 
 
+def align_verified_metadata(candidate, active, table, *, provider_symbol, provider_currency):
+    """Add verified identity and mathematically derived fields, never prices.
+
+    Identity metadata must be invariant in active data, and the Yahoo symbol
+    must not conflict with the active provider symbol. Fail closed otherwise.
+    """
+    out = candidate.copy()
+    if "asset_id" not in out or out["asset_id"].nunique() != 1:
+        raise ValueError("Candidate asset identity is missing or ambiguous")
+    expected = {"yahoo_ticker": provider_symbol, "currency": provider_currency}
+    for field in ("ticker", "yahoo_ticker", "currency"):
+        if field in active and active[field].notna().any():
+            values = {str(x).strip() for x in active[field].dropna().unique() if str(x).strip()}
+            if len(values) != 1:
+                raise ValueError("Ambiguous active identity field: " + field)
+            actual = next(iter(values))
+            if field in expected and expected[field] and actual.upper() != str(expected[field]).upper():
+                raise ValueError("Provider identity conflict: " + field)
+            if field in out and out[field].notna().any() and out[field].astype(str).ne(actual).any():
+                raise ValueError("Candidate identity conflict: " + field)
+            out[field] = actual
+        elif field in expected and expected[field]:
+            out[field] = expected[field]
+    if "ticker" not in out:
+        raise ValueError("Missing authoritative broker ticker")
+    if table == "returns_usd":
+        # Derived log-return identity: log(1+r); first return remains null.
+        r = pd.to_numeric(out["ret_close_adjusted_usd"], errors="coerce")
+        if (r.dropna() <= -1).any():
+            raise ValueError("Impossible return <= -100%")
+        out["ret_log_close_adjusted_usd"] = np.log1p(r)
+    return out
+
+
 def _parquet(frame):
     out = io.BytesIO()
     frame.to_parquet(out, index=False)
@@ -82,6 +117,14 @@ def prepare(s3, store, bucket, source_run, asset_id, end, publication_id):
         "ohlcv_usd": store.read_ohlcv_usd([asset_id], start="2010-01-01", end=end),
         "returns_usd": store.read_returns_usd([asset_id], start="2010-01-01", end=end),
     }
+    source_summary = json.loads(s3.get_object(Bucket=bucket, Key=f"{ROOT}/{source_run}/summary.json")["Body"].read())
+    source = source_summary["assets"][asset_id]
+    if source.get("status") != "STAGED_FOR_REVIEW":
+        raise ValueError("Source reconstruction is not staged for review")
+    provider = source.get("provider_metadata") or {}
+    for table in TABLES:
+        frames[table] = align_verified_metadata(frames[table], active[table], table,
+            provider_symbol=source["yahoo_ticker"], provider_currency=provider.get("currency"))
     problems = []
     for table in TABLES:
         problems += [table + ":" + x for x in publication_schema_issues(

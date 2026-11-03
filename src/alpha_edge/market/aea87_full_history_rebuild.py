@@ -157,6 +157,7 @@ def run(args):
     s3 = boto3.client("s3", region_name=args.region)
     store = MarketStore(bucket=args.bucket, region=args.region)
     results, objects = {}, []
+    fx_cache = {}
     started = time.monotonic()
     total = len(ids)
     print(f"[rebuild/source] run_id={run_id} assets={total} start={args.start} end_exclusive={args.end_exclusive}", flush=True)
@@ -183,6 +184,19 @@ def run(args):
             put(f"assets/{safe}/raw_yahoo.parquet", parquet_bytes(raw), "application/octet-stream")
             state["raw_rows"] = len(raw)
             meta = provider_metadata(symbol)
+            # Canonical universe metadata is an allowed fallback for absent
+            # provider metadata, not a substitute for conflicting provider data.
+            universe_currency = str(mapped.at[asset_id, "currency"]).strip() if "currency" in mapped else ""
+            if not meta.get("currency") and universe_currency:
+                meta["currency"] = universe_currency
+                meta["currency_source"] = "universe_fallback"
+            elif universe_currency and str(meta.get("currency")).upper() != universe_currency.upper():
+                state["status"] = "PROVIDER_CURRENCY_CONFLICT"
+                state["provider_currency"] = meta.get("currency")
+                state["universe_currency"] = universe_currency
+                continue
+            if not meta.get("exchange") and "exchange" in mapped:
+                meta["exchange"] = str(mapped.at[asset_id, "exchange"]).strip() or None
             state["provider_metadata"] = meta
             put(f"assets/{safe}/provider_metadata.json", json.dumps(meta, indent=2), "application/json")
             # HYPE ticker is explicitly validated; other symbols need independent identity review.
@@ -196,9 +210,13 @@ def run(args):
                 fx_error = None
                 for fx_ticker, inverse_flag in ((direct, False), (inverse, True)):
                     try:
-                        fx_raw = download_fresh(fx_ticker, args.start, args.end_exclusive)
+                        cache_key = (fx_ticker, inverse_flag)
+                        if cache_key not in fx_cache:
+                            fx_raw = download_fresh(fx_ticker, args.start, args.end_exclusive)
+                            normalized = normalize_fx_history(fx_raw, inverse=inverse_flag)
+                            fx_cache[cache_key] = (fx_raw, normalized)
+                        fx_raw, fx = fx_cache[cache_key]
                         put(f"assets/{safe}/fx_{'inverse' if inverse_flag else 'direct'}_raw.parquet", parquet_bytes(fx_raw), "application/octet-stream")
-                        fx = normalize_fx_history(fx_raw, inverse=inverse_flag)
                         state["fx_symbol"] = fx_ticker
                         break
                     except Exception as exc:

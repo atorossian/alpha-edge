@@ -225,6 +225,7 @@ def run(args):
     put("manifest.json", json.dumps({"run_id": run_id, "objects": objects}, indent=2), "application/json")
     print(json.dumps({"s3_prefix": f"s3://{args.bucket}/{prefix}/",
                       "statuses": {k: v["status"] for k, v in results.items()}}, indent=2))
+    return summary
 
 
 def main():

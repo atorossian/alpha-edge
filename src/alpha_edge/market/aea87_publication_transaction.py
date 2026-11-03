@@ -44,7 +44,7 @@ def safe_restore(s3, bucket, op):
         return
     if actual != op["after_sha"]:
         raise RuntimeError("Concurrent change prevents rollback: "+op["manifest_key"])
-    original = fetch(s3,bucket,op["backup_key"])
+    original = fetch(s3,bucket,op["backup_key"]) if op.get("backup_key") else None
     if checksum(original) != op["before_sha"]:
         raise RuntimeError("Missing/corrupt backup: "+op["manifest_key"])
     if original is None:
@@ -114,7 +114,8 @@ def switch_manifests(s3, bucket, root, ops, workers=16, batch_size=200):
     def check(op):
         if checksum(fetch(s3, bucket, op["manifest_key"])) != op["before_sha"]:
             raise RuntimeError("Manifest drift: " + op["manifest_key"])
-        if checksum(fetch(s3, bucket, op["backup_key"])) != op["before_sha"]:
+        backup = fetch(s3, bucket, op["backup_key"]) if op.get("backup_key") else None
+        if checksum(backup) != op["before_sha"]:
             raise RuntimeError("Missing backup: " + op["manifest_key"])
     _parallel(ops, check, workers, "activation-check")
     step = history[-1]["step"] + 1

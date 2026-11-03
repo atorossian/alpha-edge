@@ -129,6 +129,21 @@ def _publish_batch(s3, bucket, store, plans, publication_id):
             restore_downstream(s3, bucket, downstream)
         except Exception as restore_exc:
             raise RuntimeError("CRITICAL: downstream rollback failed; keep all jobs stopped") from restore_exc
+        # Durable audit of the rollback through the existing Operational
+        # Control Layer, with the same run ID as the journal.
+        cfg = load_runtime_config("prod")
+        event = build_audit_event(
+            cfg=cfg, run_id=publication_id.split("_batch_")[0],
+            event_type="rebuild", entity_type="market_data",
+            entity_id=publication_id, as_of=None,
+            source_script="aea87_rebuild", source_mode="publication_rollback",
+            status="failed",
+            input_args={"publication_id":publication_id},
+            output_keys=[op["manifest_key"] for op in ops],
+            backup_keys=[op["backup_key"] for op in ops if op.get("backup_key")],
+            metadata={"rollback_completed": True, "recovered_assets": [p["asset_id"] for p in plans]},
+            error=f"{type(exc).__name__}: {exc}")
+        write_audit_event(cfg=cfg, event=event)
         raise RuntimeError("Publication failed; original manifests and downstream backups restored") from exc
 
 

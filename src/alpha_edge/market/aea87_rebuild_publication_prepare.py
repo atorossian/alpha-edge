@@ -78,6 +78,22 @@ def align_verified_metadata(candidate, active, table, *, provider_symbol, provid
             out[field] = expected[field]
     if "ticker" not in out:
         raise ValueError("Missing authoritative broker ticker")
+    if table == "ohlcv_usd":
+        # Existing consumers still expect historical source-style aliases.
+        # Each is an exact column copy from the new validated USD candidate.
+        aliases = {
+            "open": "open_raw_usd",
+            "high": "high_raw_usd",
+            "low": "low_raw_usd",
+            "close": "close_raw_usd",
+            "adj_close": "close_adjusted_usd",
+        }
+        for destination, source in aliases.items():
+            if destination not in out and source in out:
+                out[destination] = out[source]
+        if "fx_to_usd" not in out and str(provider_currency).upper() == "USD":
+            # USD-to-USD is exactly 1 by definition, not an inferred historical FX quote.
+            out["fx_to_usd"] = 1.0
     if table == "returns_usd":
         # Derived log-return identity: log(1+r); first return remains null.
         r = pd.to_numeric(out["ret_close_adjusted_usd"], errors="coerce")

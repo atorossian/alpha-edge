@@ -14,6 +14,8 @@ from __future__ import annotations
 import argparse
 import json
 import uuid
+import time
+from collections import Counter
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
@@ -144,55 +146,92 @@ def run(args):
     _write_report(s3, args.bucket, root, "selection.json", started)
     print(f"[aea87_rebuild] {len(asset_ids)} implicated assets selected; immutable raw data -> S3", flush=True)
 
-    # Batch ingest is internal. The old staging script is not an operator step.
-    download_args = SimpleNamespace(
-        asset_ids=",".join(asset_ids), universe=args.universe,
-        bucket=args.bucket, region=args.region, start=args.start,
-        end_exclusive=args.end_exclusive)
-    staged = download_and_stage(download_args)
-    if not staged or not staged.get("run_id"):
-        raise RuntimeError("Reconstruction did not return a verified S3 staging run")
-    source_run = staged["run_id"]
-
-    candidates = []
     exceptions = []
-    for aid in asset_ids:
-        entry = staged["assets"].get(aid, {})
-        if entry.get("status") != "STAGED_FOR_REVIEW":
-            exceptions.append({"asset_id":aid, "stage":"SOURCE", "reason":entry.get("status"),
-                               "detail":entry.get("error")})
-            continue
-        try:
-            outcome = prepare(s3, store, args.bucket, source_run, aid,
-                              args.end_exclusive, release + "_" + "".join(c if c.isalnum() else "_" for c in aid))
-            if outcome.get("status") != "PREPARED_NOT_PUBLISHED":
-                exceptions.append({"asset_id":aid, "stage":"RECONSTRUCTION",
-                                   "reason":outcome.get("status"), "blockers":outcome.get("blockers")})
-            else:
-                candidates.append(outcome)
-        except Exception as exc:
-            exceptions.append({"asset_id":aid, "stage":"RECONSTRUCTION",
-                               "reason":type(exc).__name__, "detail":str(exc)})
-    disposition = {"release_id":release, "source_run":source_run,
-                   "validation_run_id":report_metadata["validation_run_id"],
-                   "selected":len(asset_ids), "publishable":len(candidates),
-                   "exceptions":exceptions, "active_modified":False}
-    _write_report(s3, args.bucket, root, "disposition.json", disposition)
-    if not candidates:
-        print(json.dumps({"status":"NO_SAFE_REPLACEMENTS", **disposition}, indent=2))
-        raise RuntimeError("No candidate qualified for publication; production unchanged")
+    published = []
+    source_runs = []
+    total = len(asset_ids)
+    started_at = time.monotonic()
+    batch_size = args.batch_size
 
-    # The caller is responsible for actual external maintenance isolation.
-    # We do not claim to pause remote applications or scheduled market ingestion.
-    print(f"[aea87_rebuild] Publishing {len(candidates)} verified candidates to production S3", flush=True)
-    result = _publish_batch(s3, args.bucket, store, candidates, release)
-    completed = {"status":"PRODUCTION_PUBLISHED", "release_id":release,
-                 "source_run":source_run, "published":sorted(p["asset_id"] for p in candidates),
-                 "exceptions":exceptions, "publication":result,
-                 "active_modified":True}
+    def progress(processed, phase, last_asset=None):
+        state = {"run_id": release, "status": "RUNNING", "phase": phase,
+                 "processed": processed, "total": total,
+                 "published": len(published), "exceptions": len(exceptions),
+                 "last_asset_id": last_asset,
+                 "elapsed_seconds": round(time.monotonic() - started_at, 1),
+                 "timestamp_utc": datetime.now(timezone.utc).isoformat()}
+        # Mutable run-specific checkpoint: write during work, not only at the end.
+        s3.put_object(Bucket=args.bucket, Key=root + "/progress/latest.json",
+                      Body=json.dumps(state).encode(), ContentType="application/json")
+        print(f"[aea87_rebuild] {phase}: {processed}/{total} "
+              f"published={len(published)} exceptions={len(exceptions)} "
+              f"elapsed={state['elapsed_seconds']}s", flush=True)
+
+    progress(0, "STARTED")
+    for offset in range(0, total, batch_size):
+        batch = asset_ids[offset:offset + batch_size]
+        print(f"[aea87_rebuild] Batch {offset//batch_size+1}: fresh history for "
+              f"{len(batch)} assets", flush=True)
+        download_args = SimpleNamespace(
+            asset_ids=",".join(batch), universe=args.universe, bucket=args.bucket,
+            region=args.region, start=args.start, end_exclusive=args.end_exclusive,
+            run_id=release + "_source_" + str(offset//batch_size+1).zfill(4))
+        staged = download_and_stage(download_args)
+        if not staged or not staged.get("run_id"):
+            raise RuntimeError("Fresh source run did not produce an S3 summary")
+        source_run = staged["run_id"]
+        source_runs.append(source_run)
+        candidates = []
+        for aid in batch:
+            entry = staged["assets"].get(aid, {})
+            if entry.get("status") != "STAGED_FOR_REVIEW":
+                exceptions.append({"asset_id":aid, "stage":"SOURCE",
+                                   "reason":entry.get("status"), "detail":entry.get("error")})
+                continue
+            try:
+                outcome = prepare(s3, store, args.bucket, source_run, aid,
+                                  args.end_exclusive,
+                                  release + "_" + "".join(c if c.isalnum() else "_" for c in aid))
+                if outcome.get("status") == "PREPARED_NOT_PUBLISHED":
+                    candidates.append(outcome)
+                else:
+                    exceptions.append({"asset_id":aid, "stage":"RECONSTRUCTION",
+                                       "reason":outcome.get("status"),
+                                       "blockers":outcome.get("blockers")})
+            except Exception as exc:
+                exceptions.append({"asset_id":aid, "stage":"RECONSTRUCTION",
+                                   "reason":type(exc).__name__, "detail":str(exc)})
+                print(f"[aea87_rebuild] {aid}: reconstruction exception {exc}", flush=True)
+
+        progress(offset + len(batch), "SOURCE_AND_PREPARATION_COMPLETE", batch[-1])
+        if candidates:
+            print(f"[aea87_rebuild] Publishing {len(candidates)} qualifying assets "
+                  f"in batch {offset//batch_size+1}", flush=True)
+            _publish_batch(s3, args.bucket, store, candidates,
+                           release + "_batch_" + str(offset//batch_size+1).zfill(4))
+            published.extend(p["asset_id"] for p in candidates)
+        # Preserve independent completed batches and exceptions after every cutover.
+        progress(offset + len(batch), "BATCH_COMPLETE", batch[-1])
+        _write_report(s3, args.bucket, root,
+                      f"batches/{offset//batch_size+1:04d}.json",
+                      {"batch": offset//batch_size+1, "assets": batch,
+                       "source_run":source_run,
+                       "published":[p["asset_id"] for p in candidates],
+                       "exceptions":[x for x in exceptions if x["asset_id"] in batch]})
+
+    completed = {"status": ("COMPLETED_WITH_EXCEPTIONS" if exceptions else "COMPLETED")
+                 if published else "FAILED",
+                 "release_id":release, "source_runs":source_runs,
+                 "selected":total, "published":sorted(published),
+                 "exceptions":exceptions, "active_modified":bool(published),
+                 "validation_run_id": report_metadata["validation_run_id"]}
     uri = _write_report(s3, args.bucket, root, "result.json", completed)
-    print(json.dumps({"status":completed["status"], "published":len(candidates),
-                      "unresolved":len(exceptions), "s3_report":uri}, indent=2))
+    progress(total, completed["status"])
+    print(json.dumps({"status":completed["status"], "selected":total,
+                      "published":len(published), "unresolved":len(exceptions),
+                      "s3_report":uri}, indent=2), flush=True)
+    if not published:
+        raise RuntimeError("No defensible replacements could be published; see S3 report")
 
 
 def main():
@@ -203,8 +242,11 @@ def main():
     p.add_argument("--start", default="2010-01-01")
     p.add_argument("--end-exclusive", default=datetime.now(timezone.utc).date().isoformat())
     p.add_argument("--asset-ids", help="Optional targeted selection; default ALL implicated assets from complete validation")
+    p.add_argument("--batch-size", type=int, default=25, help="Internal durable publication batch size (default 25)")
     p.add_argument("--confirm-prod-write", action="store_true")
     a = p.parse_args()
+    if not 1 <= a.batch_size <= 100:
+        p.error("batch-size must be between 1 and 100")
     if a.end_exclusive <= a.start:
         p.error("end-exclusive must be greater than start")
     if not a.confirm_prod_write:

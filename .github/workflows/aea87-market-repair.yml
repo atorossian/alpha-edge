@@ -1,0 +1,42 @@
+name: AEA-87 market repair checks
+on:
+  push:
+    branches:
+      - AEA-87-Hotfix-Returns-Data-Quality-and-Market-Data-Integrity-Repair
+  workflow_dispatch:
+
+jobs:
+  aea87-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      - name: Install Poetry
+        run: python -m pip install poetry
+      - name: Install project dependencies
+        run: poetry install --no-interaction
+      - name: Compile both operator commands and internal repair modules
+        run: |
+          poetry run python -m compileall -q \
+            src/alpha_edge/market/aea87_validate.py \
+            src/alpha_edge/market/aea87_universe_screen.py \
+            src/alpha_edge/market/aea87_rebuild.py \
+            src/alpha_edge/market/aea87_full_history_rebuild.py \
+            src/alpha_edge/market/aea87_rebuild_publication_prepare.py \
+            src/alpha_edge/market/aea87_rebuild_publication_activate.py \
+            src/alpha_edge/market/aea87_release_finalize.py
+      - name: Execute AEA-87 regression tests (no AWS production writes)
+        run: |
+          poetry run pytest -q \
+            tests/test_aea87_full_history_rebuild.py \
+            tests/test_aea87_rebuild_validation.py \
+            tests/test_aea87_publication_validation.py \
+            tests/test_aea87_retired_manifest_reader.py \
+            tests/test_aea87_rebuild_publication_prepare.py \
+            tests/test_aea87_rebuild_publication_activate.py \
+            tests/test_aea87_universe_screen.py \
+            tests/test_aea87_two_command_workflow.py \
+            tests/test_aea87_repaired_returns_cache.py

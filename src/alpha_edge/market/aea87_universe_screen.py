@@ -8,6 +8,7 @@ import argparse
 import io
 import json
 import uuid
+import time
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone, timedelta
@@ -74,7 +75,7 @@ def screen_one(aid, prices, returns, *, jump_threshold=.50):
             "identity_verified": False, "publication_approved": False}
 
 
-def main():
+def main(run_id=None):
     p = argparse.ArgumentParser()
     p.add_argument("--universe", default=str(paths.universe_dir() / "universe.csv"))
     p.add_argument("--bucket", default="alpha-edge-algo")
@@ -102,16 +103,31 @@ def main():
         except Exception as exc:
             return {"asset_id": aid, "status": "INSUFFICIENT_DATA",
                     "issues": {"READ_ERROR": str(exc)}}
+    started_at = time.monotonic()
+    run = run_id or (datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "_" + uuid.uuid4().hex[:8])
+    root = f"market/repairs/aea87/universe_screen/v1/runs/{run}"
+    s3 = boto3.client("s3", region_name=a.region)
+    print(f"[aea87_validate] run_id={run} assets={len(ids)}", flush=True)
     results = []
     with ThreadPoolExecutor(max_workers=a.workers) as pool:
         futures = [pool.submit(job, aid) for aid in ids]
         for future in as_completed(futures):
-            results.append(future.result())
+            result = future.result()
+            results.append(result)
+            completed = len(results)
+            if completed % 25 == 0 or completed == len(ids):
+                status_counts = dict(Counter(x["status"] for x in results))
+                elapsed = round(time.monotonic() - started_at, 1)
+                checkpoint = {"run_id":run,"status":"RUNNING","processed":completed,
+                              "total":len(ids),"elapsed_seconds":elapsed,
+                              "classification_counts":status_counts,
+                              "timestamp_utc":datetime.now(timezone.utc).isoformat()}
+                s3.put_object(Bucket=a.bucket, Key=root+"/progress/latest.json",
+                              Body=json.dumps(checkpoint).encode(), ContentType="application/json")
+                print(f"[aea87_validate] {completed}/{len(ids)} ({completed/len(ids):.1%}) "
+                      f"elapsed={elapsed}s classifications={status_counts}", flush=True)
     results.sort(key=lambda x: x["asset_id"])
     counts = dict(Counter(x["status"] for x in results))
-    run = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "_" + uuid.uuid4().hex[:8]
-    root = f"market/repairs/aea87/universe_screen/v1/runs/{run}"
-    s3 = boto3.client("s3", region_name=a.region)
     report = {"run_id": run, "scanned": len(results),
               "universe_count": full_universe_count,
               "complete_universe": len(results) == full_universe_count,
@@ -126,8 +142,15 @@ def main():
                       Body=json.dumps({"run_id":run, "report_key":root+"/report.json",
                                        "universe_count":full_universe_count}).encode(),
                       ContentType="application/json")
+    s3.put_object(Bucket=a.bucket, Key=root+"/progress/latest.json",
+                  Body=json.dumps({"run_id":run, "status":"COMPLETED",
+                                   "processed":len(results),"total":len(ids),
+                                   "classification_counts":counts,
+                                   "elapsed_seconds":round(time.monotonic()-started_at,1)}).encode(),
+                  ContentType="application/json")
     print(json.dumps({"report": f"s3://{a.bucket}/{root}/report.json", "scanned": len(results),
                       "classification_counts": counts}, indent=2))
+    return report
 
 
 if __name__ == "__main__":

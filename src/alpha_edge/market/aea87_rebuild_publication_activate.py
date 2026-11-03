@@ -34,10 +34,10 @@ def require_ready_plan(s3, bucket, plan):
     for op in operations:
         if op["asset_id"] != aid:
             raise ValueError("Mixed asset identities in plan")
-        if op["before_missing"]:
-            # HYPE needs a separate legacy-retirement transaction with a
-            # verifiable backup/listing of orphan partitions first.
-            raise ValueError("Missing original manifest requires legacy-retirement workflow")
+        if bool(op.get("before_missing")) != (op.get("before_sha") is None):
+            raise ValueError("Inconsistent original-manifest state")
+        if op.get("before_missing") and (op.get("backup_key") or not op.get("legacy_part_prefix")):
+            raise ValueError("Missing legacy inventory metadata")
         if checksum(fetch(s3, bucket, op["manifest_key"])) != op["before_sha"]:
             raise ValueError("Active manifest drift: " + op["manifest_key"])
         backup = fetch(s3, bucket, op["backup_key"]) if op.get("backup_key") else None

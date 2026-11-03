@@ -50,3 +50,17 @@ def test_all_null_yahoo_placeholder_not_in_usd_candidate():
     assert status == "STAGED_FOR_REVIEW"
     assert prices["date"].dt.strftime("%Y-%m-%d").tolist() == ["2026-02-01", "2026-02-03"]
     assert returns["ret_close_adjusted_usd"].iloc[1] == pytest.approx(0.2)
+
+
+def test_legacy_history_without_adjusted_column_does_not_abort_comparison():
+    import pandas as pd
+    from alpha_edge.market.aea87_full_history_rebuild import compare_histories
+    dates = pd.to_datetime(["2025-01-02", "2025-01-03"])
+    legacy = pd.DataFrame({"asset_id":["A","A"],"date":dates,"close":[10.,11.]})
+    fresh = pd.DataFrame({"asset_id":["A","A"],"date":dates,
+                          "close_adjusted_usd":[10.,11.]})
+    result = compare_histories(legacy, fresh)
+    assert result["old_rows"] == 2
+    assert result["new_rows"] == 2
+    assert result["overlap"] == 0
+    assert result["old_missing_new_valid"] == 2

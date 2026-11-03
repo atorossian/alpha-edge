@@ -39,4 +39,5 @@ jobs:
             tests/test_aea87_rebuild_publication_activate.py \
             tests/test_aea87_universe_screen.py \
             tests/test_aea87_two_command_workflow.py \
-            tests/test_aea87_repaired_returns_cache.py
+            tests/test_aea87_repaired_returns_cache.py \
+            tests/test_aea87_resume.py

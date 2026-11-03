@@ -21,7 +21,7 @@ from botocore.exceptions import ClientError
 
 from alpha_edge.core.market_store import MarketStore
 from alpha_edge.market.aea87_publication_transaction import fetch, checksum, put_once
-from alpha_edge.market.aea87_rebuild_publication_preflight import check_asset
+from alpha_edge.market.aea87_publication_validation import validate_candidate, validate_old_only_against_calendar
 
 ROOT = "market/repairs/aea87/rebuilds/v1/runs"
 PREPARED = "market/repairs/aea87/rebuild_publications/v1"
@@ -119,10 +119,6 @@ def _put_verified(s3, bucket, key, payload):
 
 
 def prepare(s3, store, bucket, source_run, asset_id, end, publication_id):
-    preflight = check_asset(s3, bucket, store, source_run, asset_id, end)
-    if preflight["blockers"]:
-        return {"asset_id": asset_id, "status": "BLOCKED_PREFLIGHT",
-                "blockers": preflight["blockers"], "operations": []}
     folder = "".join(c if c.isalnum() else "_" for c in asset_id)
     prefix = f"{ROOT}/{source_run}/assets/{folder}/"
     frames = {}
@@ -141,6 +137,34 @@ def prepare(s3, store, bucket, source_run, asset_id, end, publication_id):
     for table in TABLES:
         frames[table] = align_verified_metadata(frames[table], active[table], table,
             provider_symbol=source["yahoo_ticker"], provider_currency=provider.get("currency"))
+    # One candidate quality gate, internal to the rebuild. The old preflight
+    # command is deliberately NOT part of deployment.
+    inception = "2024-11-29" if asset_id == "CRYPTO:HYPE-USD" else None
+    problems = validate_candidate(frames["ohlcv_usd"], frames["returns_usd"], inception)
+    if problems:
+        return {"asset_id": asset_id, "status": "BLOCKED_CANDIDATE",
+                "blockers": problems, "operations": []}
+    # Only retire old-only dates when source identity/date provenance is
+    # established: NYSE verified independently; crypto pre-inception verified.
+    old_prices = active["ohlcv_usd"]
+    if not old_prices.empty:
+        previous = pd.to_datetime(old_prices["date"], utc=True)
+        fresh = pd.to_datetime(frames["ohlcv_usd"]["date"], utc=True)
+        extras = previous[~previous.isin(fresh)]
+        if len(extras) and asset_id == "CRYPTO:HYPE-USD":
+            if (extras >= pd.Timestamp("2024-11-29", tz="UTC")).any():
+                return {"asset_id": asset_id, "status": "BLOCKED_COVERAGE",
+                        "blockers": ["UNEXPLAINED_POST_INCEPTION_OLD_DATES"], "operations": []}
+        elif len(extras):
+            exchange = str(provider.get("exchange") or "").upper()
+            if exchange in {"NYQ", "NYE", "NMS", "NCM", "NGM", "ASE"}:
+                audit = validate_old_only_against_calendar(previous, fresh, "NYSE")
+                if audit["status"] != "PASSED":
+                    return {"asset_id": asset_id, "status": "BLOCKED_COVERAGE",
+                            "blockers": ["MISSING_LEGITIMATE_EXCHANGE_SESSIONS"], "operations": []}
+            else:
+                return {"asset_id": asset_id, "status": "BLOCKED_COVERAGE",
+                        "blockers": ["OLD_ONLY_DATES_NEED_VERIFIED_EXCHANGE_CALENDAR"], "operations": []}
     # Production may have advanced after the staged Yahoo run. A full-history
     # replacement must never discard later live market sessions.
     current_day = datetime.now(timezone.utc).date().isoformat()
@@ -176,7 +200,8 @@ def prepare(s3, store, bucket, source_run, asset_id, end, publication_id):
         for year in sorted(years | old_years):
             manifest_key = store._manifest_key(table=table, asset_id=asset_id, year=year)
             before = fetch(s3, bucket, manifest_key)
-            # Never activate without explicitly knowing what preceded this publication.
+            # A missing manifest is not a missing backup: rollback must delete
+            # the newly created manifest and restore legacy listing behavior.
             prior_sha = checksum(before)
             if year in years:
                 selected = frame[dates.dt.year == year].copy()
@@ -196,6 +221,7 @@ def prepare(s3, store, bucket, source_run, asset_id, end, publication_id):
             proposed.append({"table": table, "year": int(year), "asset_id": asset_id,
                              "manifest_key": manifest_key, "before_sha": prior_sha,
                              "before_missing": before is None,
+                             "legacy_part_prefix": f"{store.ohlcv_prefix if table == 'ohlcv_usd' else store.returns_prefix}/asset_id={asset_id}/year={year}/" if before is None else None,
                              "backup_key": f"{root}/backups/{table}/year={year}/manifest.json" if before is not None else None,
                              "part_key": part_key, "part_sha": checksum(payload),
                              "part_payload": payload, "after_sha": checksum(after),

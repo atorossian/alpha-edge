@@ -60,10 +60,25 @@ def test_manifest_drift_is_blocked():
         require_ready_plan(s3, "test", plan)
 
 
-def test_missing_original_manifest_requires_legacy_retirement():
+def test_missing_original_manifest_can_be_published_when_absence_is_recorded():
     s3, plan = sample()
-    plan["operations"][0]["before_missing"] = True
-    with pytest.raises(ValueError, match="legacy-retirement"):
+    op = plan["operations"][0]
+    del s3.items[op["manifest_key"]]
+    op["before_missing"] = True
+    op["before_sha"] = None
+    op["backup_key"] = None
+    op["legacy_part_prefix"] = "market/returns_usd/v1/asset_id=HAE_ID/year=2025/"
+    assert len(require_ready_plan(s3, "test", plan)) == 2
+
+
+def test_missing_original_manifest_without_legacy_inventory_is_blocked():
+    s3, plan = sample()
+    op = plan["operations"][0]
+    del s3.items[op["manifest_key"]]
+    op["before_missing"] = True
+    op["before_sha"] = None
+    op["backup_key"] = None
+    with pytest.raises(ValueError, match="inventory"):
         require_ready_plan(s3, "test", plan)
 
 

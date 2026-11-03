@@ -18,6 +18,7 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import boto3
+import pandas as pd
 from botocore.exceptions import ClientError
 
 from alpha_edge import paths
@@ -65,7 +66,30 @@ def _write_report(s3, bucket, root, name, data):
     return f"s3://{bucket}/{key}"
 
 
-def _publish_batch(s3, bucket, plans, publication_id):
+def _verify_active_histories(store, plans):
+    """After switching manifests, prove readers see exact candidate session dates."""
+    for plan in plans:
+        aid = plan["asset_id"]
+        for table in ("ohlcv_usd", "returns_usd"):
+            expected = set()
+            for op in plan["operations"]:
+                if op["table"] == table:
+                    expected.update(json.loads(op["after"]).get("dates", []))
+            if not expected:
+                raise RuntimeError("Cannot verify empty published history: " + aid)
+            first, last = min(expected), max(expected)
+            active = (store.read_ohlcv_usd([aid], start=first, end=last)
+                      if table == "ohlcv_usd" else
+                      store.read_returns_usd([aid], start=first, end=last))
+            if active.empty or "date" not in active:
+                raise RuntimeError("Published history unreadable: " + aid + "/" + table)
+            actual = pd.to_datetime(active["date"], utc=True).dt.strftime("%Y-%m-%d")
+            if actual.duplicated().any() or set(actual) != expected:
+                raise RuntimeError("Published dates differ from reconstructed candidate: "
+                                   + aid + "/" + table)
+
+
+def _publish_batch(s3, bucket, store, plans, publication_id):
     # Exactly one switch of the whole eligible group, not a separate
     # published maintenance cycle for each instrument.
     ops = []
@@ -83,6 +107,7 @@ def _publish_batch(s3, bucket, plans, publication_id):
     write_event(s3, bucket, root, 0, "READY")
     try:
         switch_manifests(s3, bucket, root, ops, workers=8, batch_size=100)
+        _verify_active_histories(store, plans)
         publication = {"candidates": [plan["asset_id"] for plan in plans], "operations": ops}
         finalized = finalize(s3, bucket, root, publication)
         if finalized.get("status") != "FINALIZED":
@@ -160,7 +185,7 @@ def run(args):
     # The caller is responsible for actual external maintenance isolation.
     # We do not claim to pause remote applications or scheduled market ingestion.
     print(f"[aea87_rebuild] Publishing {len(candidates)} verified candidates to production S3", flush=True)
-    result = _publish_batch(s3, args.bucket, candidates, release)
+    result = _publish_batch(s3, args.bucket, store, candidates, release)
     completed = {"status":"PRODUCTION_PUBLISHED", "release_id":release,
                  "source_run":source_run, "published":sorted(p["asset_id"] for p in candidates),
                  "exceptions":exceptions, "publication":result,

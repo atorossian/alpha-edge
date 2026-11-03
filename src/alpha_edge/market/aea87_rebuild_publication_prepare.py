@@ -226,6 +226,23 @@ def prepare(s3, store, bucket, source_run, asset_id, end, publication_id):
                              "part_key": part_key, "part_sha": checksum(payload),
                              "part_payload": payload, "after_sha": checksum(after),
                              "after": after.decode()})
+    # For years without an active manifest, preserve the exact legacy key
+    # inventory. A tombstone hides those immutable files, not deletes them;
+    # rollback removes the new manifest and restores original reader behavior.
+    legacy_inventories = []
+    for op in proposed:
+        if not op["before_missing"]:
+            continue
+        legacy = []
+        paginator = s3.get_paginator("list_objects_v2")
+        for page in paginator.paginate(Bucket=bucket, Prefix=op["legacy_part_prefix"]):
+            legacy.extend({"key": obj["Key"], "size": obj.get("Size"),
+                           "etag": obj.get("ETag")} for obj in page.get("Contents", [])
+                          if obj["Key"].endswith(".parquet"))
+        legacy_inventories.append({"manifest_key":op["manifest_key"], "objects":legacy})
+    if legacy_inventories:
+        _put_verified(s3, bucket, f"{root}/legacy_inventories.json",
+                      json.dumps(legacy_inventories, sort_keys=True).encode())
     # Require no concurrent changes, and immutable source material before writing.
     for op in proposed:
         if checksum(fetch(s3, bucket, op["manifest_key"])) != op["before_sha"]:

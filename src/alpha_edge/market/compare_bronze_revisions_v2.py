@@ -123,6 +123,38 @@ def compare_table(
     return result, counts
 
 
+def classify_revisions(changes: pd.DataFrame, *, snapshot_asof: str,
+                       price_relative_tolerance: float = 1e-5,
+                       provisional_volume_days: int = 3,
+                       provisional_volume_tolerance: float = 0.05) -> pd.DataFrame:
+    """Classify, never delete, source revisions. Provisional volume is not final."""
+    if not 0 < price_relative_tolerance < 1 or not 0 < provisional_volume_tolerance < 1:
+        raise RevisionContractError("Materiality tolerances must be in (0,1)")
+    if provisional_volume_days < 0:
+        raise RevisionContractError("Invalid provisional volume window")
+    asof = pd.Timestamp(snapshot_asof).tz_localize(None) if pd.Timestamp(snapshot_asof).tzinfo is None else pd.Timestamp(snapshot_asof).tz_convert(None)
+    result = changes.copy()
+    labels = []
+    for row in result.itertuples(index=False):
+        if row.change_type != "revised":
+            label = "requires_review"
+        elif row.field == "volume":
+            age = (asof.normalize() - pd.Timestamp(row.session_date)).days
+            label = ("provisional_volume" if 0 <= age <= provisional_volume_days
+                     and pd.notna(row.relative_change)
+                     and abs(float(row.relative_change)) <= provisional_volume_tolerance
+                     else "requires_review")
+        elif row.field in {"open", "high", "low", "close", "adj_close", "quote_close"}:
+            label = ("immaterial_numeric" if pd.notna(row.relative_change)
+                     and abs(float(row.relative_change)) <= price_relative_tolerance
+                     else "requires_review")
+        else:
+            label = "requires_review"
+        labels.append(label)
+    result["materiality"] = pd.Series(labels, index=result.index, dtype="object")
+    return result
+
+
 def compare_batches(*, old_dir: Path, new_dir: Path,
                     rtol: float = 1e-8, atol: float = 1e-10) -> tuple[pd.DataFrame, dict]:
     if rtol < 0 or atol < 0:
@@ -160,7 +192,12 @@ def compare_batches(*, old_dir: Path, new_dir: Path,
                                         label=name, rtol=rtol, atol=atol)
         results.append(changes)
         summaries[name] = counts
-    findings = pd.concat(results, ignore_index=True, sort=False)
+    findings = pd.concat([x for x in results if not x.empty], ignore_index=True,
+                         sort=False) if any(not x.empty for x in results) else results[0].copy()
+    asof = new_manifest.get("created_at_utc")
+    if not asof:
+        raise RevisionContractError("New batch lacks acquisition timestamp")
+    findings = classify_revisions(findings, snapshot_asof=asof)
     result = {
         "schema": "alpha_edge_bronze_source_revision_comparison_1",
         "old_batch_id": old_manifest["batch_id"],
@@ -171,6 +208,16 @@ def compare_batches(*, old_dir: Path, new_dir: Path,
         "common_window_end_exclusive": end.date().isoformat(),
         "comparisons": summaries,
         "revision_rows": len(findings),
+        "revision_materiality": {
+            name: int(findings["materiality"].eq(name).sum())
+            for name in ("immaterial_numeric", "provisional_volume", "requires_review")
+        },
+        "materiality_policy": {
+            "price_relative_tolerance": 1e-5,
+            "provisional_volume_days": 3,
+            "provisional_volume_relative_tolerance": 0.05,
+            "classification_only": True,
+        },
         "source_equivalence": (
             "observationally_equal_within_tolerances" if findings.empty
             else "differences_require_review"

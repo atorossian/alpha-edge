@@ -61,7 +61,8 @@ def load_plan(plan_dir: Path) -> tuple[dict, list[pd.DataFrame], list[str]]:
 
 
 def run(*, plan_dir: Path, output: Path, batch_prefix: str,
-        execute: bool = False, max_cohorts: int = 1, retries: int = 2,
+        execute: bool = False, max_cohorts: int = 1, start_cohort: int = 1,
+        retries: int = 2,
         delay_seconds: float = 1.0,
         start: str, end: str,
         runner: Callable = run_batch, sleeper: Callable = time.sleep) -> dict:
@@ -72,18 +73,20 @@ def run(*, plan_dir: Path, output: Path, batch_prefix: str,
     if pd.Timestamp(start) >= pd.Timestamp(end):
         raise CohortRunError("Invalid ingestion date window")
     manifest, frames, symbols = load_plan(plan_dir)
-    selected = frames[:max_cohorts]
+    if start_cohort < 1 or start_cohort > len(frames):
+        raise CohortRunError('Starting cohort out of range')
+    selected = list(enumerate(frames, start=1))[start_cohort - 1:start_cohort - 1 + max_cohorts]
     if not execute:
         return {
             "status": "dry_run", "planned_cohorts": len(selected),
-            "planned_assets": sum(len(f) for f in selected),
-            "total_cohorts_in_plan": len(frames), "s3_writes": 0,
+            "planned_assets": sum(len(f) for _, f in selected),
+            "total_cohorts_in_plan": len(frames), "start_cohort": start_cohort, "s3_writes": 0,
         }
     if output.exists():
         raise FileExistsError(f"Refusing to overwrite cohort execution: {output}")
     output.mkdir(parents=True, exist_ok=False)
     rows = []
-    for idx, subset in enumerate(selected, start=1):
+    for idx, subset in selected:
         batch_id = f"{batch_prefix}-{idx:04d}"
         error = None
         success = None
@@ -136,13 +139,15 @@ def main():
     p.add_argument("--end", required=True)
     p.add_argument("--execute", action="store_true")
     p.add_argument("--max-cohorts", type=int, default=1)
+    p.add_argument("--start-cohort", type=int, default=1)
     p.add_argument("--retries", type=int, default=2)
     p.add_argument("--delay-seconds", type=float, default=1)
     a = p.parse_args()
     print(json.dumps(run(
         plan_dir=a.plan_dir, output=a.output, batch_prefix=a.batch_prefix,
         start=a.start, end=a.end, execute=a.execute,
-        max_cohorts=a.max_cohorts, retries=a.retries,
+        max_cohorts=a.max_cohorts, start_cohort=a.start_cohort,
+        retries=a.retries,
         delay_seconds=a.delay_seconds,
     ), indent=2))
 

@@ -260,24 +260,25 @@ def validate(
     log = np.log(safe / previous).where(previous.gt(0))
     # Exchange gaps are independent from the validity of the next price.
     # Reconstruct the block from immutable candidate calendar evidence.
-    gap_flags = pd.read_parquet(candidate_dir / "session_flags.parquet")
-    gap_flags["session_date"] = _dates(gap_flags["session_date"])
-    if gap_flags.duplicated(["asset_id", "session_date"]).any():
-        raise AcceptanceError("Duplicate calendar evidence keys")
-    gap_flags = gold[["asset_id", "session_date"]].merge(
-        gap_flags[["asset_id", "session_date", "previous_expected_session_missing"]],
-        on=["asset_id", "session_date"], how="left", validate="one_to_one",
-    )
-    if gap_flags["previous_expected_session_missing"].isna().any():
-        raise AcceptanceError("Missing calendar continuity evidence")
-    blocked_gap = gap_flags["previous_expected_session_missing"].astype(bool)
-    simple = simple.mask(blocked_gap)
-    log = log.mask(blocked_gap)
     if "return_quality_reason" in gold:
-        observed_gap = gold["return_quality_reason"].eq("prior_expected_session_missing")
-        _event(findings, check="return_gap_reason", frame=gold,
-               mask=observed_gap.ne(blocked_gap).to_numpy(),
-               reason="Gap return reason differs from calendar evidence")
+        gap_flags = pd.read_parquet(candidate_dir / "session_flags.parquet")
+        gap_flags["session_date"] = _dates(gap_flags["session_date"])
+        if gap_flags.duplicated(["asset_id", "session_date"]).any():
+            raise AcceptanceError("Duplicate calendar evidence keys")
+        gap_flags = gold[["asset_id", "session_date"]].merge(
+            gap_flags[["asset_id", "session_date", "previous_expected_session_missing"]],
+            on=["asset_id", "session_date"], how="left", validate="one_to_one",
+        )
+        if gap_flags["previous_expected_session_missing"].isna().any():
+            raise AcceptanceError("Missing calendar continuity evidence")
+        blocked_gap = gap_flags["previous_expected_session_missing"].astype(bool)
+        simple = simple.mask(blocked_gap)
+        log = log.mask(blocked_gap)
+        if "return_quality_reason" in gold:
+            observed_gap = gold["return_quality_reason"].eq("prior_expected_session_missing")
+            _event(findings, check="return_gap_reason", frame=gold,
+                   mask=observed_gap.ne(blocked_gap).to_numpy(),
+                   reason="Gap return reason differs from calendar evidence")
     for name, expected in (
         ("ret_simple_close_adjusted_usd", simple),
         ("ret_log_close_adjusted_usd", log),

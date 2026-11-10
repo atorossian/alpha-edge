@@ -283,7 +283,7 @@ def run(args):
                   f"{asset_id}: {state['status']} elapsed={elapsed:.0f}s "
                   f"success={counts.get('STAGED_FOR_REVIEW', 0)} "
                   f"exceptions={completed-counts.get('STAGED_FOR_REVIEW', 0)}", flush=True)
-    summary = {"schema": "aea87_full_history_rebuild_v1", "run_id": run_id,
+    summary = {"schema": "aea87_full_history_rebuild_v2_local_session_dates", "run_id": run_id,
                "status": "STAGING_ONLY", "source": "fresh_yahoo_daily",
                "start": args.start, "end_exclusive": args.end_exclusive,
                "active_histories_modified": False, "assets": results}

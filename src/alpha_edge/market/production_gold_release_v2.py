@@ -170,6 +170,11 @@ def activate(s3, *, bucket: str, release_key: str, approved_sha256: str,
     previous = json.loads(current) if current else None
     if previous is not None and previous.get("release_id") == release["release_id"]:
         return {"state": "already_current", "release_id": release["release_id"]}
+    if previous is not None and previous.get("as_of") is not None:
+        if release["as_of"] <= previous["as_of"]:
+            raise ReleaseError(
+                "Refusing nonmonotonic Gold activation; audited rollback requires a separate operation"
+            )
     pointer = {
         "schema": "alpha_edge_v2_release_pointer_1",
         "release_id": release["release_id"],

@@ -96,7 +96,8 @@ def validate_release(s3, bucket: str, release: dict, *, require_approval: bool) 
         if seen_assets.intersection(c["assets"]):
             raise ReleaseError("Asset overlaps between release cohorts")
         seen_assets.update(c["assets"])
-        for field in ("bronze", "silver", "gold", "fx", "acceptance"):
+        for field in ("bronze", "silver", "gold", "fx", "acceptance",
+                      "indicator_candidate"):
             if not isinstance(c.get(field), dict):
                 raise ReleaseError(f"Missing {field} lineage")
             data = verify_object(s3, bucket, c[field])
@@ -111,6 +112,10 @@ def validate_release(s3, bucket: str, release: dict, *, require_approval: bool) 
                         raise ReleaseError("Nonzero blocker counts")
                     if report.get("open_external_evidence_gates"):
                         raise ReleaseError("Outstanding independent evidence gates")
+        if c.get("corrections") is not None:
+            if not isinstance(c["corrections"], dict):
+                raise ReleaseError("Manual correction evidence must be pinned in S3")
+            verify_object(s3, bucket, c["corrections"])
         if require_approval:
             signed = c.get("independent_approval")
             if not isinstance(signed, dict) or not isinstance(signed.get("reviewer"), str) or not signed["reviewer"].strip():

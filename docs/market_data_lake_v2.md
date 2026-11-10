@@ -644,3 +644,111 @@ directly to all ~1,700 assets; verify each cohort's source coverage,
 failure rates, and cost before broader ingestion. Production cutover
 is a separate later phase (consumer contracts, shadow calculations,
 immutable publication, rollback and morning orchestration).
+
+
+## Preparation for controlled full-universe ingestion — 2026-11-10
+
+**Scope:** start staged, local-only cohort ingestion safely. This does **not**
+declare the six-asset Gold dataset production-eligible, nor certify official
+exchange close timestamps, independently sourced corporate actions or full
+historical vendor accuracy. Legacy v1 remains outside quality acceptance.
+
+### Implemented safeguards
+
+1. Historical revisions now carry explicit \`materiality\` labels:
+   \`immaterial_numeric\` for price/FX changes at or below 1e-5 relative,
+   \`provisional_volume\` for <=5% revisions within three calendar days of
+   the new snapshot, and \`requires_review\` otherwise. All original differences
+   and SHA-256 provenance remain in \`source_revisions.csv\`. The thresholds are
+   **initial review rules**, not statistically calibrated universal values.
+2. \`preflight_universe_v2.py\` validates an explicit
+   \`asset_id,yahoo_ticker,currency,calendar_id,include\` registry, plus
+   \`currency,provider_symbol,direction\` FX registry, checks exchange
+   calendars with \`pandas_market_calendars\`, and writes immutable,
+   hash-pinned bounded cohort CSV plans. Unknown FX mappings or calendars
+   fail closed. Example pilot files are under \`data/quality/market_lake_v2/\`.
+3. \`run_standardization_pilot_v2.py\` can consume these registry CSV files
+   (\`--asset-registry-csv\` and \`--fx-registry-csv\`) and records their SHA
+   hashes in the candidate manifest, rather than depending on fixed six-symbol
+   lists. \`independent_acceptance_v2.py\` checks the same pinned configurations
+   if present; older pilot candidate contracts remain readable.
+4. \`source_evidence_v2.py\` audits first/last expected exchange sessions and
+   approximates theoretical cash-dividend adjustment steps (using the prior
+   native-currency close), marking inconsistencies for review. This is
+   **not** an authoritative corporate-action factor feed; missing rights
+   issues, share distributions and official close times remain risks.
+5. \`run_cohort_bronze_v2.py\` accepts a checksum-verified preflight plan,
+   defaults to a no-network dry run, requires explicit \`--execute\`, limits
+   the number of cohorts attempted, retries failed acquisitions within bounds,
+   and writes immutable **local-only** cohort batches and an execution
+   summary. No code path permits S3 upload in this runner.
+
+### Suggested staged rollout
+
+First, validate a pilot registry and generate a plan:
+
+\`\`\`bash
+poetry run python -m alpha_edge.market.preflight_universe_v2 \
+  --universe-csv data/quality/market_lake_v2/pilot_asset_registry_v2.csv \
+  --fx-csv data/quality/market_lake_v2/pilot_fx_registry_v2.csv \
+  --cohort-size 3 \
+  --output outputs/universe_preflight_v2/six_asset_validation
+\`\`\`
+
+Verify (no Yahoo network call):
+
+\`\`\`bash
+poetry run python -m alpha_edge.market.run_cohort_bronze_v2 \
+  --plan-dir outputs/universe_preflight_v2/six_asset_validation \
+  --batch-prefix validation-v2 \
+  --start 2025-01-01 --end 2026-11-10 \
+  --output outputs/cohort_bronze_v2/validation
+\`\`\`
+
+Execute **one** three-asset cohort as a smoke test (separate output directory):
+
+\`\`\`bash
+poetry run python -m alpha_edge.market.run_cohort_bronze_v2 \
+  --plan-dir outputs/universe_preflight_v2/six_asset_validation \
+  --batch-prefix validation-v2 \
+  --start 2025-01-01 --end 2026-11-10 \
+  --output outputs/cohort_bronze_v2/validation-executed \
+  --execute --max-cohorts 1
+\`\`\`
+
+For an actual larger universe, build a **new** independently reviewed
+registry, not an inferred mapping from ticker suffixes or legacy role metadata.
+Generate a new preflight plan with cohorts of 25 or fewer initially; do
+not execute all cohorts at once without confirming the first results.
+
+Additional source audits using the existing six-asset immutable snapshots:
+
+\`\`\`bash
+poetry run python -m alpha_edge.market.source_evidence_v2 \
+  --bronze-dir outputs/pilot_artifact/market_bronze_v2/six_asset_pilot \
+  --actions-dir outputs/market_corporate_actions_v2/20261110T193325Z-9fc45259 \
+  --universe-csv data/quality/market_lake_v2/pilot_asset_registry_v2.csv \
+  --fx-csv data/quality/market_lake_v2/pilot_fx_registry_v2.csv \
+  --output outputs/source_evidence_v2/six_asset_pilot
+\`\`\`
+
+### Unresolved gates separating cohort ingestion from production acceptance
+
+- Formal FX observation timing policy: daily provider session labels are not
+  confirmed close timestamps, and the current latest-on-or-before-date
+  conversion may have temporal lookahead for a given exchange. Verify with
+  timestamped quotes or adopt a conservative, documented convention.
+- Vendor-independent confirmation for material historical raw prices and
+  corporate actions; quantitative ratio checks are only diagnostic evidence.
+- Corporate-action types beyond cash dividends and splits (rights issues,
+  return of capital, special distributions) must be explicitly supported
+  or quarantined. No inferred adjusted close for the ALSEA.MX correction.
+- End-to-end error isolation at *asset* granularity, per-provider capacity
+  limits, incremental refresh/watermarks, S3 partition publishing and
+  historical reprocessing still require full implementation and load testing.
+- Cross-cohort Gold concatenation, absolute coverage, cache compatibility and
+  independent sign-off before production promotion.
+
+**Status:** readiness scaffolding and local cohort workflow implemented;
+safeguarded full-universe **Bronze implementation** can begin with verified
+registry cohorts. Full-universe **Gold publication/cutover is not authorized**.

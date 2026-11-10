@@ -28,6 +28,7 @@ from alpha_edge.market.ingest_bronze_yahoo_v2 import (
     acquire_yahoo_bars, acquire_yahoo_fx_quote, _parquet_bytes,
 )
 from alpha_edge.market.standardize_bronze_v2 import build_silver_gold_from_bronze
+from alpha_edge.market.manual_observations_v2 import append_manual_observations
 from alpha_edge.market.indicator_calculations import compute_market_indicators_for_asset
 from alpha_edge.market.production_gold_release_v2 import (
     CURRENT, ROOT, get, sha, encoded, immutable_put, verify_object,
@@ -132,21 +133,32 @@ def _merge(base: pd.DataFrame, fresh: pd.DataFrame, *,
 
 
 def _indicators(gold: pd.DataFrame) -> pd.DataFrame:
-    validated = gold.loc[gold["quality_status"].eq("accepted")].copy()
-    # Do not bridge missing or invalid periods through forward filling.
-    validated["date"] = pd.to_datetime(validated["session_date"].astype(str).str[:10])
-    validated["ticker"] = validated["provider_symbol"]
-    validated["open_raw_usd"] = validated["open"].astype(float) * validated["fx_to_usd"]
-    validated["high_raw_usd"] = validated["high"].astype(float) * validated["fx_to_usd"]
-    validated["low_raw_usd"] = validated["low"].astype(float) * validated["fx_to_usd"]
+    """Reuse canonical indicator calculations without bridging rejected sessions."""
+    accepted = gold.loc[gold["quality_status"].eq("accepted")].copy()
+    if accepted.empty:
+        return pd.DataFrame()
+    accepted["date"] = pd.to_datetime(
+        accepted["session_date"].astype(str).str[:10], errors="raise")
+    accepted["ticker"] = accepted["provider_symbol"]
+    accepted["open_raw_usd"] = accepted["open"].astype(float) * accepted["fx_to_usd"]
+    accepted["high_raw_usd"] = accepted["high"].astype(float) * accepted["fx_to_usd"]
+    accepted["low_raw_usd"] = accepted["low"].astype(float) * accepted["fx_to_usd"]
     calculated = []
-    for _, part in validated.groupby("asset_id", sort=False):
-        returns = part[["asset_id", "date", "ret_log_close_adjusted_usd"]].copy()
-        value = compute_market_indicators_for_asset(part, returns=returns)
-        if not value.empty:
-            calculated.append(value)
+    for _, asset in accepted.groupby("asset_id", sort=False):
+        asset = asset.sort_values("date", kind="stable").copy()
+        # Gaps and extreme review returns reset historical indicator windows.
+        # Unavailable/review daily returns must not become implicit contiguous
+        # volatility/momentum observations in indicator calculations.
+        segments = asset["return_quality_status"].ne("accepted").cumsum()
+        for _, part in asset.groupby(segments, sort=False):
+            part = part.copy()
+            part.loc[part["return_quality_status"].ne("accepted"),
+                     "ret_log_close_adjusted_usd"] = np.nan
+            returns = part[["asset_id", "date", "ret_log_close_adjusted_usd"]].copy()
+            frame = compute_market_indicators_for_asset(part, returns=returns)
+            if not frame.empty:
+                calculated.append(frame)
     return pd.concat(calculated, ignore_index=True) if calculated else pd.DataFrame()
-
 
 def _audit(cfg, *, run_id, as_of, status, metadata=None, error=None, keys=()):
     event = build_audit_event(
@@ -215,6 +227,18 @@ def run(*, s3, bucket: str, as_of: str, execute: bool,
                 raise IncrementalError("Prior release asset IDs do not match registry")
             raw_bars = _frame(verify_object(s3, bucket, cohort["bronze"]))
             raw_fx = _frame(verify_object(s3, bucket, cohort["fx"]))
+            original_gold = _frame(verify_object(s3, bucket, cohort["gold"]))
+            manual_prior = (
+                original_gold.get("observation_origin", pd.Series(dtype="string"))
+                .eq("user_supplied_manual").any()
+            )
+            corrections_ref = cohort.get("corrections")
+            if manual_prior and not isinstance(corrections_ref, dict):
+                raise IncrementalError("Historical manual corrections require a pinned S3 registry")
+            corrections = (
+                _frame(verify_object(s3, bucket, corrections_ref))
+                if isinstance(corrections_ref, dict) else None
+            )
             required_fx = cohort.get("fx_mapping", [])
             if not isinstance(required_fx, list):
                 raise IncrementalError("Missing FX mapping")
@@ -271,8 +295,14 @@ def run(*, s3, bucket: str, as_of: str, execute: bool,
                 raw_fx, new_quotes, keys=("provider_symbol", "session_date"),
                 overlap_start=start)
             calendars = {x["yahoo_ticker"]: x["calendar_id"] for x in registry}
+            corrected_bars = combined_bars
+            correction_evidence = None
+            if corrections is not None and not corrections.empty:
+                corrected_bars, correction_evidence = append_manual_observations(
+                    combined_bars, corrections
+                )
             tables = build_silver_gold_from_bronze(
-                combined_bars, combined_fx, calendars=calendars, pairs=rates)
+                corrected_bars, combined_fx, calendars=calendars, pairs=rates)
             gold = tables["gold"]
             if set(gold["asset_id"]) != set(assets):
                 raise IncrementalError("Incremental Gold asset coverage mismatch")
@@ -280,6 +310,9 @@ def run(*, s3, bucket: str, as_of: str, execute: bool,
                 raise IncrementalError("Duplicate Gold observation keys")
             # Daily snapshot stays unapproved until independently evaluated.
             snapshot = {
+                "corrections": (corrections_ref if correction_evidence is None else
+                                _put_parquet(s3, bucket, c_prefix + "/corrections.parquet",
+                                             correction_evidence)),
                 "bronze": _put_parquet(s3, bucket, c_prefix + "/raw_history.parquet", combined_bars),
                 "fx": _put_parquet(s3, bucket, c_prefix + "/raw_fx_history.parquet", combined_fx),
                 "silver": _put_parquet(s3, bucket, c_prefix + "/silver.parquet", tables["silver"]),

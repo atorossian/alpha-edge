@@ -66,6 +66,41 @@ def selected_from_latest(s3, bucket, *, only=None):
                       "complete_universe": True}
 
 
+P1_SOURCE_RELEASE = "aea87_rebuild_20261103T140216Z_57fb3b66"
+P1_REASONS = {"BLOCKED_COVERAGE", "ValueError"}
+P1_DATE_REPAIR_ASSETS = {
+    # Weekend sessions found in finalized publication evidence; revalidated
+    # against original ticker and exchange before being overwritten.
+    "EQHcaa24a3efdba259a", "EQHf14bb7ccefdc6856",
+}
+
+
+def select_p1_assets(s3, bucket, latest_selected, release=P1_SOURCE_RELEASE):
+    """Pin P1 to the actual failed original release plus two known date defects.
+
+    A fresh complete validation still gates the production selection. No new
+    or healthy instruments are silently admitted.
+    """
+    key = f"{ROOT}/{release}/result.json"
+    body = fetch(s3, bucket, key)
+    if body is None:
+        raise RuntimeError("Original AEA-87 release report unavailable: " + key)
+    report = json.loads(body)
+    if report.get("release_id") != release or report.get("status") != "COMPLETED_WITH_EXCEPTIONS":
+        raise RuntimeError("P1 requires the completed original release report")
+    unresolved = {
+        item["asset_id"] for item in report["exceptions"]
+        if item.get("reason") in P1_REASONS
+    }
+    candidates = unresolved | P1_DATE_REPAIR_ASSETS
+    selected = sorted(candidates.intersection(latest_selected))
+    if len(unresolved) != 287 or not P1_DATE_REPAIR_ASSETS.issubset(latest_selected):
+        raise RuntimeError("P1 baseline is inconsistent with latest universe validation")
+    if set(selected) != candidates:
+        raise RuntimeError("P1 selection incomplete; validate source records and universe")
+    return selected
+
+
 SOURCE_ROOT = "market/repairs/aea87/rebuilds/v1/runs"
 
 
@@ -260,6 +295,10 @@ def run(args):
     store = MarketStore(bucket=args.bucket, region=args.region)
     only = [x.strip() for x in args.asset_ids.split(",") if x.strip()] if args.asset_ids else None
     asset_ids, report_metadata = selected_from_latest(s3, args.bucket, only=only)
+    if getattr(args, "p1_only", False):
+        if only:
+            raise ValueError("--p1-only cannot be combined with --asset-ids")
+        asset_ids = select_p1_assets(s3, args.bucket, asset_ids)
     if not asset_ids:
         print("Validation found no implicated assets. Production unchanged.")
         return
@@ -404,6 +443,7 @@ def main():
     p.add_argument("--end-exclusive", default=datetime.now(timezone.utc).date().isoformat())
     p.add_argument("--asset-ids", help="Optional targeted selection; default ALL implicated assets from complete validation")
     p.add_argument("--batch-size", type=int, default=25, help="Internal durable publication batch size (default 25)")
+    p.add_argument("--p1-only", action="store_true", help="Only 287 P1 exceptions and 2 published session-date defects")
     p.add_argument("--confirm-prod-write", action="store_true")
     a = p.parse_args()
     if not 1 <= a.batch_size <= 100:

@@ -1,2 +1,2 @@
-asset_id,provider_symbol,currency_original,session_date,open,high,low,close,volume,adj_close,correction_id,reported_by,source_reference,verification_status,notes
-EQHd491d3c90f3be544,ALSEA.MX,MXN,2026-04-22,51.50,52.06,51.10,51.80,140975,,manual-alsea-20260422-v1,user_supplied,,pending_independent_verification,"User-provided OHLCV; adjusted close not supplied; volume identified as final measured volume check"
+asset_id,provider_symbol,currency_original,session_date,open,high,low,close,volume,adj_close,correction_id,reported_by,source_reference,verification_status,adj_close_policy,notes
+EQHd491d3c90f3be544,ALSEA.MX,MXN,2026-04-22,51.50,52.06,51.10,51.80,140975,51.80,manual-alsea-20260422-v1,user_supplied,,user_asserted_unverified,explicit_equal_close,"User-provided OHLCV; adjusted close explicitly asserted equal to raw close by user; not independently verified; volume identified as final measured volume check"

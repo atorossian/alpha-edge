@@ -10,6 +10,7 @@ import argparse
 import hashlib
 import io
 import json
+import re
 from pathlib import Path
 
 import boto3
@@ -17,7 +18,7 @@ import pandas as pd
 
 from alpha_edge.market.reconcile_aea87_lake_v2 import ReconciliationError
 
-DEFAULT_ASSETS = Path("data/quality/market_lake_v2/pilot_six_assets.csv")
+DEFAULT_ASSETS = Path(__file__).resolve().parents[3] / "data/quality/market_lake_v2/pilot_six_assets.csv"
 TABLES = {
     "ohlcv_usd": ("close_adjusted_usd", "aea87_prices.parquet"),
     "returns_usd": ("ret_close_adjusted_usd", "aea87_returns.parquet"),
@@ -38,6 +39,38 @@ def _object(s3, bucket: str, key: str) -> bytes:
 def _session_dates(values: pd.Series) -> pd.Series:
     # Daily session labels must not be timezone-converted to UTC.
     return pd.to_datetime(values.astype(str).str[:10], format="%Y-%m-%d", errors="coerce")
+
+
+def _approved_active_part(key: str, *, root: str, version: str,
+                          table: str, asset_id: str, year: int) -> bool:
+    """Allow legacy partitions or exact AEA-87 versioned repair parts only.
+
+    Never allow arbitrary paths from a manifest, even though that manifest
+    is currently active. AEA-87 may activate a repair outside the original
+    table prefix, keeping its explicit asset/table/year identity.
+    """
+    if not isinstance(key, str) or not key.endswith(".parquet"):
+        return False
+    if any(segment in {"", ".", ".."} for segment in key.split("/")):
+        return False
+    legacy = f"{root}/{table}/{version}/asset_id={asset_id}/year={year}/"
+    if key.startswith(legacy):
+        return True
+    repair_prefix = f"{root}/repairs/aea87/rebuild_publications/{version}/"
+    if not key.startswith(repair_prefix):
+        return False
+    remainder = key[len(repair_prefix):]
+    match = re.fullmatch(
+        r"([A-Za-z0-9_.-]{8,160})/parts/"
+        + re.escape(table)
+        + r"/asset_id="
+        + re.escape(asset_id)
+        + r"/year="
+        + str(year)
+        + r"/data\.parquet",
+        remainder,
+    )
+    return bool(match)
 
 
 def fetch_table(
@@ -72,8 +105,10 @@ def fetch_table(
                 "parts": [],
             }
             for part_key in parts:
-                expected_prefix = f"{root}/{table}/{version}/asset_id={asset_id}/year={year}/"
-                if not isinstance(part_key, str) or not part_key.startswith(expected_prefix) or not part_key.endswith(".parquet"):
+                if not _approved_active_part(
+                    part_key, root=root, version=version, table=table,
+                    asset_id=asset_id, year=year,
+                ):
                     raise ReconciliationError(f"Unsafe or unexpected active part: {part_key}")
                 raw = _object(s3, bucket, part_key)
                 try:

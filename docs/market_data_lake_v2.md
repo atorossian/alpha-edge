@@ -571,3 +571,76 @@ manual quarantine and corporate action evidence have pilot implementations;
 the **current phase** is proving independent correctness. Pilot acceptance,
 provider revision monitoring, formal rights-issue handling, full-universe
 incremental ingestion and controlled production cutover remain pending.
+
+
+## Milestone: source reliability / historical Yahoo revision detection
+
+The new local-only \`compare_bronze_revisions_v2.py\` compares two
+**distinct, immutable Bronze acquisitions**. Both snapshots must have
+valid checksum manifests, compatible Yahoo daily-bar acquisition
+parameters, and overlapping declared dates. It never uses AEA-87/v1 as
+an accuracy baseline.
+
+Compare first and second source captures:
+
+\`\`\`bash
+poetry run python -m alpha_edge.market.compare_bronze_revisions_v2 \
+  --old-bronze-dir outputs/pilot_artifact/market_bronze_v2/six_asset_pilot \
+  --new-bronze-dir outputs/market_bronze_v2/<new-batch-id> \
+  --output outputs/bronze_revision_audit_v2/six_asset_pilot
+\`\`\`
+
+The new snapshot must be separately acquired using the same six-asset
+universe, source FX symbols and source dates (do not point the command
+at the original directory twice). For a local-only acquisition:
+
+\`\`\`bash
+poetry run python -m alpha_edge.market.ingest_bronze_yahoo_v2 \
+  --universe-csv data/quality/market_lake_v2/pilot_six_assets.csv \
+  --fx-symbols 'EURUSD=X;USDBRL=X;USDMXN=X' \
+  --start 2025-01-01 \
+  --end 2026-11-10 \
+  --output outputs/market_bronze_v2
+\`\`\`
+
+Use the printed \`local_path\` as the \`--new-bronze-dir\`. The tool
+writes only \`source_revisions.csv\` and a checksum manifest in a
+previously nonexistent local directory. It reports original OHLCV,
+adjusted close, provider dividends/splits, volume, raw FX quotation
+changes, and missing or newly appeared observations over the overlap.
+An observed revision is evidence for review, **not** proof that the
+old or new provider snapshot is correct. AEA-87 differences do not
+control acceptance or source revision classification.
+
+### Gates before universe-wide ingestion
+
+1. **Provider revision controls:** run two-snapshot comparison, review
+   significant revisions (especially KESKOB.HE), establish revision
+   thresholds, preserve source provenance and acceptable response
+   to reprocessed historical quotations.
+2. **FX timing semantics:** declare an explicit market-session/FX
+   observation policy for each currency/exchange, including
+   daylight-saving changes and available-close timing; arithmetic
+   consistency alone does not certify economically correct alignment.
+3. **Corporate actions:** reconcile dividend adjustment magnitudes,
+   support rights issues and other relevant events (or explicitly
+   quarantine unsupported actions). The 16 same-day correlations
+   alone are not financial adjustment-factor validation.
+4. **Source and session coverage:** verify expected first/last
+   sessions and closing-candle completeness; internal gap
+   checks alone are insufficient.
+5. **Manual exception disposition:** resolve the single ALSEA.MX
+   unverified observation, or define an explicit partial-coverage
+   promotion policy that cannot silently generate returns.
+6. **Pilot independent acceptance:** produce a signed/reviewed
+   acceptance report bound to immutable source batch hashes.
+7. **Operational readiness before scaling:** implement configurable
+   per-exchange calendar and per-currency FX mappings; scheduling,
+   provider throttling/retries, idempotent partitioned incremental
+   ingestion, resource/cost bounds and failure isolation.
+
+After these gates, expand with staged cohorts rather than jumping
+directly to all ~1,700 assets; verify each cohort's source coverage,
+failure rates, and cost before broader ingestion. Production cutover
+is a separate later phase (consumer contracts, shadow calculations,
+immutable publication, rollback and morning orchestration).

@@ -161,3 +161,62 @@ pytest tests/unit/test_ingest_bronze_yahoo_v2.py tests/unit/test_data_lake_v2.py
   is not a multi-object atomic transaction.
 - Validate full-history run performance and compare with existing AEA-87
   source extracts; do not enable daily scheduling yet.
+
+## Stage 3: Exchange-session and FX standardization candidate
+
+The Stage-3 modules are `standardize_bronze_v2.py` and
+`run_standardization_pilot_v2.py`. They consume the checksummed Bronze
+batch and **never download data**; output is a local, versioned candidate
+directory with a manifest written last. They do not write S3 or modify
+legacy `market/ohlcv_usd/v1` and `market/returns_usd/v1`.
+
+Run on the six-asset Bronze batch:
+
+```bash
+python -m alpha_edge.market.run_standardization_pilot_v2 \
+  --bronze-batch-dir ./outputs/market_bronze_v2/six_asset_pilot \
+  --output ./outputs/market_silver_gold_v2/six_asset_pilot
+```
+
+The report includes source checksum verification, Bronze/Silver/Gold row-count
+reconciliation, FX diagnostics, missing/unexpected exchange sessions,
+quarantine counts, and explicit arithmetic/log returns.
+Each asset receives a CSV trace with source price, original currency,
+session date, source timestamp UTC (if offset-aware), FX quote symbol,
+direction, original quote, derived USD price and quality flags.
+
+Pilot FX pairs are **explicitly** mapped: EURUSD=X (EUR→USD direct),
+USDBRL=X (USD→BRL inverse) and USDMXN=X (USD→MXN inverse). Never infer
+direction from a string or apply a quote before specifying its unit.
+
+Pilot exchange calendars: NYSE for GLD/SMH/SPY, BMF for B3SA3.SA,
+XHEL for KESKOB.HE, and BMV for ALSEA.MX. Calendar checks cover
+expected exchange sessions **between first and last observed dates**.
+That is not yet a request-window completeness guarantee, nor proof of
+a source candle being fully closed.
+
+Stage-3 tests: `pytest -q tests/unit/test_standardize_bronze_v2.py`.
+The default-branch manual launcher now runs Stage 1–3 tests, re-acquires
+six assets, builds the candidate and archives its outputs to GitHub Actions.
+Results must be reviewed before promotion.
+
+**Pending production correctness controls:**
+
+- Validate official calendar identifiers and holiday schedules against real
+  pilot evidence. Fail closed on an unknown calendar.
+- FX daily-bar fixing times are not necessarily synchronous with the
+  underlying security close. Define a valuation cutoff policy and
+  prove no look-ahead across markets. The current same-session as-of
+  matching is a diagnostic candidate, not a point-in-time trading feed.
+- Implement multi-day gap classification, corporate action consistency
+  (including dividends/splits), and adjusted-close provenance checks.
+- Support direct/inverse quote cross-checks and disallow corrupt FX values
+  from subsequently entering the rate selection; Stage-3 currently uses
+  one requested Yahoo quote direction per currency.
+- Extend missing-session diagnostics to the requested start/end range and
+  define eligibility rules for current partial candles.
+- Add staging promotion, AEA-87 historical reconciliation and operational
+  backfill before integrating the morning pipeline.
+
+No claim of successful CI execution or real-data Stage-3 acceptance is made
+until the workflow is rerun and its candidate report reviewed.

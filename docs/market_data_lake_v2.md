@@ -417,3 +417,37 @@ adjusted-close gap remains an explicit review item.
 Next: obtain read-only AEA-87 extracts for the same six asset IDs and
 date interval, run the reconciler, review differences and add its
 results as a separate comparison view in the Explorer.
+
+## Existing corporate-actions reference: read-only lake-v2 audit
+
+`build_corporate_actions.py` already stores Yahoo split observations through
+`MarketStore.write_corporate_actions_partitioned()` to
+`market/reference/v1/corporate_actions/asset_id=.../part-00000.parquet`.
+The reference dataset is **not** a price adjustment engine.
+
+Use the new isolated audit to inspect that existing S3 reference dataset
+against the immutable six-asset Gold candidate. It checks for missing versus
+corrupt reference partitions, stores per-partition SHA-256 provenance, and
+flags changes in the Yahoo `adj_close / close` ratio over time. It does not
+modify Gold, overwrite S3, or infer that an adjustment factor is justified.
+
+```bash
+poetry run python -m alpha_edge.market.audit_corporate_actions_v2 \
+  --bucket alpha-edge-algo \
+  --region eu-west-1 \
+  --candidate-dir outputs/pilot_artifact/market_silver_gold_v2/six_asset_pilot \
+  --output outputs/corporate_action_audit_v2/six_asset_pilot
+```
+
+Outputs: `corporate_action_sources.csv`, `corporate_actions.csv`,
+`adjustment_ratio_flags.csv`, and hash-checked `manifest.json`.
+A missing partition means **reference unavailable**, not proof of no action.
+Corrupt or unreadable existing partitions cause the audit to fail.
+
+**Limitations:** legacy corporate actions contain splits only, not rights
+issues or cash dividends. A constant common multiplier in both Yahoo
+`close` and `adj_close` (as observed for some KESKOB.HE sessions)
+cannot be detected using the adjusted/raw ratio. Compare immutable source
+snapshots and obtain independent corporate-action evidence before correcting
+prices. This is a supplemental, manually executed read-only audit;
+it does not turn the existing split table into a mandatory production gate.

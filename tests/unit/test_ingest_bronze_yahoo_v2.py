@@ -132,3 +132,30 @@ def test_s3_legacy_prefix_rejected_before_local_side_effects(tmp_path):
             provenance=[], bucket="any", upload=True, market_root="market",
         )
     assert not (tmp_path / "x").exists()
+
+
+def test_full_history_uses_yahoo_period_max_and_records_observed_bounds():
+    fake = FakeYahooTicker("TEST.DE")
+    bars, meta = acquire_yahoo_bars(
+        "EQ123", "TEST.DE", start=None, end="2026-11-11",
+        batch_id="full_history", ticker_factory=lambda _: fake,
+        full_history=True,
+    )
+    assert fake.calls[0]["period"] == "max"
+    assert fake.calls[0]["end"] == "2026-11-11"
+    assert "start" not in fake.calls[0]
+    assert meta["full_history_requested"] is True
+    assert meta["first_observed_session"] == "2026-10-01"
+    assert len(bars) == 2
+
+
+def test_full_history_fx_uses_yahoo_period_max():
+    fake = FakeYahooTicker("EURUSD=X")
+    quote, meta = acquire_yahoo_fx_quote(
+        "EURUSD=X", start=None, end="2026-11-11", batch_id="full_fx",
+        ticker_factory=lambda _: fake, full_history=True,
+    )
+    assert fake.calls[0]["period"] == "max"
+    assert "start" not in fake.calls[0]
+    assert meta["full_history_requested"] is True
+    assert len(quote) == 2

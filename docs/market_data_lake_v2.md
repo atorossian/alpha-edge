@@ -512,3 +512,62 @@ still available via \`audit_corporate_actions_v2\`.
 manual Yahoo diagnostic; this is not yet an independently automated reconciled
 batch result. KESKOB.HE October 28–November 4 raw-price scaling remains
 unexplained. Do not promote the six-asset candidate to production.
+
+## Milestone: independent data integrity and acceptance (v1 not authoritative)
+
+New standalone module:
+\`alpha_edge.market.independent_acceptance_v2\`. This is a **local,
+read-only shadow assessment**, intentionally excluding AEA-87/v1 from the
+acceptance decision. Source records and stored transformation results are
+assessed against their own immutable Bronze and candidate SHA-256 manifests,
+not legacy prices.
+
+The module checks:
+- Exact source batch ID and manifest checksum, and Bronze file integrity.
+- No loss or mutation of source OHLCV observations in Gold (except separate
+  explicitly disclosed manual additions); one asset/session key per stage.
+- Silver/Gold observation-column identity; independent computation of USD raw
+  and adjusted prices, with rejected rows masked.
+- Direct/inverted FX arithmetic against preserved Bronze quote values; selection
+  of the latest accepted quote at-or-before the exchange session label.
+- Simple and logarithmic daily return arithmetic, quarantine chain breaks and
+  review statuses.
+- Separate **unresolved evidence** counts for unverified manual corrections,
+  quarantines, exchange-calendar issues, extreme returns and rejected FX rates.
+- Optional exact-universe, checksum-validated dividend/split acquisition batch.
+
+The output has \`internal_integrity_status\` and an intentionally more
+conservative \`acceptance\`. Even a fully consistent candidate remains
+\`review_required\`, **not production eligible**, until independent provider
+source observation verification, external corporate-action adjustment factors,
+historical source revision comparisons, FX timing policy, and endpoint
+completeness are evidenced. The existing publisher is unchanged: no automated
+production promotion is introduced.
+
+First locate the original immutable Bronze pilot under the extracted artifact
+(with \`find outputs/pilot_artifact -name source_ohlcv.parquet\`). The
+\`--bronze-dir\` argument must contain \`source_ohlcv.parquet\`,
+\`source_fx_quotes.parquet\` and \`manifest.json\`, and its manifest digest
+must equal the source digest listed in the Silver/Gold candidate.
+
+\`\`\`bash
+poetry run python -m alpha_edge.market.independent_acceptance_v2 \
+  --candidate-dir outputs/pilot_artifact/market_silver_gold_v2/six_asset_pilot \
+  --bronze-dir <path-to-extracted-original-bronze-batch> \
+  --actions-dir outputs/market_corporate_actions_v2/20261110T193325Z-9fc45259 \
+  --output outputs/independent_acceptance_v2/six_asset_pilot
+\`\`\`
+
+The local output contains \`integrity_findings.csv\` and
+\`manifest.json\`; neither source nor S3 is modified. If the exact Bronze
+source batch is not available, the tool refuses to assess data rather than
+substituting another provider snapshot. AEA-87 comparisons remain optional
+migration-impact diagnostics, not correctness gates.
+
+### Roadmap position
+
+Bronze acquisition, Silver normalization, Gold returns, quality explorer,
+manual quarantine and corporate action evidence have pilot implementations;
+the **current phase** is proving independent correctness. Pilot acceptance,
+provider revision monitoring, formal rights-issue handling, full-universe
+incremental ingestion and controlled production cutover remain pending.

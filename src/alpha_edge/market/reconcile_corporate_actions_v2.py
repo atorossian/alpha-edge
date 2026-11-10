@@ -56,7 +56,7 @@ def run(*, candidate_dir: Path, action_batch_dir: Path, output: Path,
     # manifest, not the event table, tracks the count of fully queried assets.
     if not event_assets.issubset(source_assets):
         raise ValueError("Event batch contains assets not in candidate Gold")
-    if batch_manifest["assets"] != len(source_assets):
+    if set(batch_manifest["asset_ids"]) != source_assets:
         raise ValueError("Corporate action batch does not cover all pilot assets")
     output.mkdir(parents=True, exist_ok=False)
     flags.to_csv(output / "adjustment_event_matches.csv", index=False)

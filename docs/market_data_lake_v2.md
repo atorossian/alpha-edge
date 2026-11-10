@@ -886,3 +886,44 @@ verification blocker for production approval.
 - Aggregate cohort validation and lake publication with immutable
   manifests, strict date coverage and rollback; no production cutover
   without separate authorization.
+
+
+### 5. Resumable entire ready-subset driver
+
+\`run_full_history_backfill_v2.py\` can orchestrate **all approved cohorts**
+and automatically produce the \`audit_missing_ohlcv_v2\` report for each
+successful immutable Bronze batch. It creates a new attempt directory for
+failed/interrupted cohorts; successful attempts are reused on the next run.
+It is deliberately local-only, with no S3 publication.
+
+Plan-only run:
+
+\`\`\`bash
+poetry run python -m alpha_edge.market.run_full_history_backfill_v2 \
+  --plan-dir outputs/full_universe_preflight_v2/first_review \
+  --output outputs/full_history_backfill_v2/ready_subset \
+  --end 2026-11-10 --start-cohort 1 --max-cohorts 100
+\`\`\`
+
+First cohort with network acquisition and automatic coverage audit:
+
+\`\`\`bash
+poetry run python -m alpha_edge.market.run_full_history_backfill_v2 \
+  --plan-dir outputs/full_universe_preflight_v2/first_review \
+  --output outputs/full_history_backfill_v2/ready_subset \
+  --end 2026-11-10 --start-cohort 1 --max-cohorts 1 --execute
+\`\`\`
+
+After review, rerun with a larger \`--max-cohorts\` (e.g. 5, then all
+remaining). The driver skips previously completed immutable cohorts,
+does not repeat successful downloads, writes a \`latest_progress.json\`
+checkpoint and per-cohort missing-data audit under \`audits/\`.
+A cohort that fails is reported and may be retried in a new attempt.
+Do not infer completion of all 2,099 included assets from a successful
+**ready-subset** backfill: 109 entries are provisionally unresolved
+(92 duplicate-symbol rows and 17 missing/unmapped exchange metadata
+at time of initial source inventory). Review and resolve them explicitly.
+
+This Bronze backfill driver does not yet orchestrate Silver/Gold or final
+provider-independent acceptance, and is not an authorization to promote
+production pointers.

@@ -220,3 +220,52 @@ Results must be reviewed before promotion.
 
 No claim of successful CI execution or real-data Stage-3 acceptance is made
 until the workflow is rerun and its candidate report reviewed.
+
+## Manual market observation corrections (pilot, 2026-11-10)
+
+A user-supplied observation for ALSEA.MX on 2026-04-22 is maintained as
+`data/quality/market_lake_v2/manual_ohlcv_corrections.csv`:
+
+| Field | Value |
+| --- | --- |
+| Asset ID | EQHd491d3c90f3be544 |
+| Symbol | ALSEA.MX |
+| Currency | MXN |
+| Session | 2026-04-22 |
+| Open | 51.50 |
+| High | 52.06 |
+| Low | 51.10 |
+| Close | 51.80 |
+| Volume | 140975 |
+| Adjusted close | **unknown / not supplied** |
+| Verification | **pending independent verification** |
+| Provenance | user-supplied historical trading observation; original source link not yet provided |
+
+The original Yahoo Bronze batch is never edited. To overlay corrections into a
+Silver/Gold candidate while preserving the original Bronze checksum:
+
+```bash
+python -m alpha_edge.market.run_standardization_pilot_v2 \
+  --bronze-batch-dir ./outputs/market_bronze_v2/six_asset_pilot \
+  --corrections-csv data/quality/market_lake_v2/manual_ohlcv_corrections.csv \
+  --output ./outputs/market_silver_gold_v2/six_asset_pilot
+```
+
+The overlay is strictly **append-only**: an existing Yahoo asset/session
+observation cannot be overwritten; identity and OHLC ranges are checked.
+The source CSV hash and row-level correction evidence are included in the
+candidate manifest and `manual_corrections_audit.parquet`.
+
+The missing exchange-calendar date is covered by the manual observation,
+but its adjusted close remains unknown. This means its adjusted USD close
+and the neighboring adjusted-return calculation must remain unavailable;
+**do not set adjusted close equal to raw close or manufacture a corporate-action
+adjustment factor**. The candidate is still `review_required`. Before promoting
+to Gold, reconcile the user-supplied OHLCV against BMV or another independently
+trusted primary record, confirm quote/volume units and obtain a supported
+adjusted-close calculation policy, with documented corporate-action evidence.
+
+The default-branch GitHub Actions pilot launcher includes this correction
+overlay, and its offline unit test covers append-only behavior and the
+unavailable adjusted-return boundary. The production daily ingestion and AEA-87
+historical repair pipelines remain unchanged.

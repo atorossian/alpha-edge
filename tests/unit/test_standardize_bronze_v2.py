@@ -102,7 +102,7 @@ def test_repaired_return_must_not_bridge_missing_expected_session():
 def test_mixed_currencies_preserve_fx_lineage_and_arithmetic_returns():
     results = build_silver_gold_from_bronze(bars(), quotes(),
                                             calendars={"SPY": "NYSE", "B3SA3.SA": "BMF",
-                                                       "KESKOB.HE": "XHEL", "ALSEA.MX": "BMV"})
+                                                       "KESKOB.HE": "XHEL", "ALSEA.MX": "XMEX"})
     silver = results["silver"]
     assert len(silver) == 12
     assert silver["quality_status"].eq("accepted").all()

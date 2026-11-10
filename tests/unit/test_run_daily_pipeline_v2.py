@@ -88,3 +88,86 @@ def test_pinned_current_release_dry_run_never_writes(monkeypatch):
     assert state["retrieval_end_exclusive"] == "2026-11-10"
     assert state["gold_activated"] is False
     assert len(s3.objects) == 2
+
+
+def test_real_daily_pipeline_writes_only_s3_candidates_and_audit(monkeypatch):
+    import pandas as pd
+    import io
+    from alpha_edge.market.ingest_bronze_yahoo_v2 import _parquet_bytes
+
+    class FakeTicker:
+        def __init__(self, symbol):
+            self.fast_info = {"currency": "USD", "exchange": "NYQ"}
+        def history(self, **kw):
+            assert kw["start"] == "2026-09-27"
+            assert kw["end"] == "2026-10-08"
+            index = pd.date_range("2026-10-05", periods=3, freq="D", tz="UTC")
+            return pd.DataFrame({
+                "Open": [100., 101., 102.],
+                "High": [101., 102., 103.],
+                "Low": [99., 100., 101.],
+                "Close": [100., 101., 102.],
+                "Adj Close": [100., 101., 102.],
+                "Volume": [100, 110, 120],
+            }, index=index)
+
+    s3 = S3()
+    historic = pd.DataFrame({
+        "asset_id": ["A", "A"], "provider_symbol": ["SPY", "SPY"],
+        "currency_original": ["USD", "USD"],
+        "session_date": ["2026-10-05", "2026-10-06"],
+        "open": [100., 101.], "high": [101., 102.],
+        "low": [99., 100.], "close": [100., 101.],
+        "adj_close": [100., 101.], "volume": [100, 110],
+        "source_timestamp": ["2026-10-05T00:00:00+00:00",
+                             "2026-10-06T00:00:00+00:00"],
+    })
+    fx = pd.DataFrame(columns=[
+        "provider_symbol", "session_date", "quote_close"])
+    source = {}
+    for name, frame in (("bronze", historic), ("fx", fx), ("gold", historic)):
+        key = f"market/lake_v2/releases/data/base/{name}.parquet"
+        blob = _parquet_bytes(frame)
+        s3.objects[key] = blob
+        source[name] = {"key": key, "sha256": sha(blob)}
+    release_key = "market/lake_v2/releases/candidates/base_release.json"
+    release = {
+        "schema": "alpha_edge_v2_release_candidate_1",
+        "release_id": "base_release", "as_of": "2026-10-06",
+        "expected_cohorts": 1, "expected_assets": 1,
+        "cohorts": [{
+            "cohort": 1, "assets": ["A"],
+            "registry": [{"asset_id": "A", "yahoo_ticker": "SPY",
+                          "currency": "USD", "calendar_id": "NYSE"}],
+            "fx_mapping": [], **source,
+        }],
+    }
+    raw = encoded(release)
+    s3.objects[release_key] = raw
+    s3.objects[CURRENT] = encoded({
+        "schema": "alpha_edge_v2_release_pointer_1",
+        "release_id": "base_release", "release_key": release_key,
+        "release_sha256": sha(raw), "as_of": "2026-10-06",
+    })
+    monkeypatch.setattr(daily, "validate_release", lambda *a, **kw: {"cohorts": 1})
+    events = []
+    def recorder(cfg, **kw):
+        events.append(kw)
+    original_pointer = s3.objects[CURRENT]
+    result = daily.run(
+        s3=s3, bucket="alpha-edge-algo", as_of="2026-10-07",
+        execute=True, confirm_prod_write=True, run_id="daily_test_001",
+        ticker_factory=FakeTicker, audit_writer=recorder,
+    )
+    assert result["cohorts_staged"] == 1
+    assert result["gold_activated"] is False
+    assert result["persistent_local_files"] == 0
+    assert s3.objects[CURRENT] == original_pointer
+    assert events[-1]["status"] == "review_required"
+    acceptance_key = ("market/lake_v2/daily/candidates/"
+                      "dt=2026-10-07/run=daily_test_001/"
+                      "cohort-0001/acceptance.json")
+    report = json.loads(s3.objects[acceptance_key])
+    assert report["internal_integrity_status"] == "passed"
+    assert report["acceptance"] == "review_required"
+    assert "market/lake_v2/releases/candidates/daily_test_001.json" in s3.objects

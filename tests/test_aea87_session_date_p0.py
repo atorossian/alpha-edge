@@ -60,6 +60,18 @@ def test_market_date_audit_flags_mismatched_price_return_dates():
     assert "PRICE_RETURN_DATE_SET_MISMATCH" in result["issues"]
 
 
+def test_publication_rejects_equity_weekend_dates_even_without_legacy_history():
+    from alpha_edge.market.aea87_rebuild_publication_prepare import equity_session_date_issues
+    frame = pd.DataFrame({"date": pd.to_datetime(["2026-05-31", "2026-06-01"])})
+    issues = equity_session_date_issues(
+        frame, "EQHxxx", {"quote_type": "EQUITY", "exchange": "PAR"}
+    )
+    assert issues == ["NONTRADING_WEEKEND_EQUITY_SESSIONS:1"]
+    assert equity_session_date_issues(
+        frame, "CRYPTO:BTC-USD", {"quote_type": "CRYPTOCURRENCY"}
+    ) == []
+
+
 def test_publication_evidence_aggregates_annual_manifest_dates():
     import json
     p = {"asset_id": "EQHxx", "dates": ["2025-12-31"]}

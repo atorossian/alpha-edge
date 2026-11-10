@@ -27,7 +27,8 @@ jobs:
             src/alpha_edge/market/aea87_full_history_rebuild.py \
             src/alpha_edge/market/aea87_rebuild_publication_prepare.py \
             src/alpha_edge/market/aea87_rebuild_publication_activate.py \
-            src/alpha_edge/market/aea87_release_finalize.py
+            src/alpha_edge/market/aea87_release_finalize.py \
+            src/alpha_edge/market/aea87_session_date_audit.py
       - name: Execute AEA-87 regression tests (no AWS production writes)
         run: |
           poetry run pytest -q \
@@ -40,4 +41,5 @@ jobs:
             tests/test_aea87_universe_screen.py \
             tests/test_aea87_two_command_workflow.py \
             tests/test_aea87_repaired_returns_cache.py \
-            tests/test_aea87_resume.py
+            tests/test_aea87_resume.py \
+            tests/test_aea87_session_date_p0.py

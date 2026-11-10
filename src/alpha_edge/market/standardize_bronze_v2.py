@@ -194,19 +194,21 @@ def build_silver_gold_from_bronze(
         session_flags.drop(columns=["provider_symbol"]),
         on=["asset_id", "session_date"], how="left", validate="one_to_one",
     )
-    missing_flag = flagged["previous_expected_session_missing"].fillna(False)
-    unexpected_flag = ~flagged["is_expected_session"].fillna(False)
-    for mask, reason in (
-        (missing_flag, "prior_expected_session_missing"),
-        (unexpected_flag, "unexpected_exchange_session"),
-    ):
-        flagged.loc[mask, "quality_reason"] = (
-            flagged.loc[mask, "quality_reason"].where(
-                flagged.loc[mask, "quality_reason"].eq(""),
-                flagged.loc[mask, "quality_reason"] + ";",
-            ) + reason
-        )
-    flagged.loc[missing_flag | unexpected_flag, "quality_status"] = "quarantined"
+    missing_flag = flagged["previous_expected_session_missing"].fillna(False).astype(bool)
+    unexpected_flag = ~flagged["is_expected_session"].fillna(False).astype(bool)
+    # A missing prior exchange session breaks the *return*, not the validity
+    # of the current source price. Preserve the price and its USD valuation.
+    # Unknown/unexpected session labels, however, are source quality concerns.
+    flagged["return_quality_reason"] = np.where(
+        missing_flag, "prior_expected_session_missing", ""
+    )
+    flagged.loc[unexpected_flag, "quality_reason"] = (
+        flagged.loc[unexpected_flag, "quality_reason"].where(
+            flagged.loc[unexpected_flag, "quality_reason"].eq(""),
+            flagged.loc[unexpected_flag, "quality_reason"] + ";",
+        ) + "unexpected_exchange_session"
+    )
+    flagged.loc[unexpected_flag, "quality_status"] = "quarantined"
     silver = standardize_bars(flagged, rates, policy=policy)
     # Convert genuine offset-aware provider index labels to UTC instants,
     # without reinterpreting their exchange session dates as UTC dates.
@@ -230,9 +232,13 @@ def build_silver_gold_from_bronze(
     if len(silver) != len(bronze):
         raise DataContractError("Silver row count does not reconcile with Bronze")
 
-    # The legacy Gold calculator correctly does not bridge a quarantined row.
-    # Here we additionally suppress returns after a missing *expected* session.
     gold = calculate_returns(silver, policy=policy)
+    # Suppress the spurious multi-session return crossing a missing bar,
+    # but permit the following day's return if both prices are accepted.
+    gap = gold["return_quality_reason"].eq("prior_expected_session_missing")
+    gold.loc[gap, ["ret_simple_close_adjusted_usd",
+                   "ret_log_close_adjusted_usd"]] = np.nan
+    gold.loc[gap, "return_quality_status"] = "unavailable"
     return {
         "bronze_validated": bronze,
         "fx_normalized": rates,

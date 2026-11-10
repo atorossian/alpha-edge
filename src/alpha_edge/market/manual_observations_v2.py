@@ -18,7 +18,7 @@ REQUIRED_CORRECTION = {
     "reported_by", "verification_status",
 }
 NUMERIC = ("open", "high", "low", "close", "volume")
-OPTIONAL = ("adj_close", "source_reference", "notes")
+OPTIONAL = ("adj_close", "source_reference", "notes", "adj_close_policy")
 SCHEMA_COLS = (
     "provider", "source_timestamp", "source_timezone", "interval",
     "ingestion_batch_id", "ingested_at_utc", "dividends", "stock_splits",
@@ -52,7 +52,8 @@ def append_manual_observations(
             raise DataContractError(f"Manual correction has missing {key}")
     if records["correction_id"].duplicated().any():
         raise DataContractError("Correction IDs must be unique")
-    if not records["verification_status"].eq("pending_independent_verification").all():
+    allowed = {"pending_independent_verification", "user_asserted_unverified"}
+    if not records["verification_status"].isin(allowed).all():
         raise DataContractError("Unexpected correction approval state")
 
     records["session_date"] = pd.to_datetime(
@@ -80,9 +81,20 @@ def append_manual_observations(
     ):
         raise DataContractError("Manual OHLCV violates price range or volume constraints")
 
-    # Never silently accept an adjusted-close assertion as verified.
-    if pd.to_numeric(records["adj_close"], errors="coerce").notna().any():
+    # Accept only an explicit, traceable user assertion of adj_close == close.
+    records["adj_close"] = pd.to_numeric(records["adj_close"], errors="coerce")
+    policy = records["adj_close_policy"].astype("string").fillna("").str.strip()
+    asserted = records["verification_status"].eq("user_asserted_unverified")
+    if (asserted & (~policy.eq("explicit_equal_close")
+                    | records["adj_close"].isna()
+                    | ~np.isclose(records["adj_close"].fillna(-1),
+                                  records["close"], rtol=0, atol=1e-9))).any():
+        raise DataContractError("User asserted adjusted close must explicitly equal close")
+    if ((~asserted) & records["adj_close"].notna()).any():
         raise DataContractError("Unverified corrections must not provide adjusted close")
+    if ((~asserted) & policy.ne("")).any():
+        raise DataContractError("Unexpected adjusted close policy")
+    records["adj_close_origin"] = np.where(asserted, "user_asserted_equal_close", "not_available")
 
     identity = source_bars[
         ["asset_id", "provider_symbol", "currency_original"]
@@ -117,6 +129,8 @@ def append_manual_observations(
     candidate["reported_by"] = pd.NA
     candidate["source_reference"] = pd.NA
     candidate["notes"] = pd.NA
+    candidate["adj_close_origin"] = "yahoo_finance"
+    candidate["adj_close_policy"] = pd.NA
 
     records["observation_origin"] = "user_supplied_manual"
     records["provider"] = "manual_correction"
@@ -127,7 +141,6 @@ def append_manual_observations(
     records["ingested_at_utc"] = pd.NA
     records["dividends"] = np.nan
     records["stock_splits"] = np.nan
-    records["adj_close"] = np.nan  # preserve unknown adjusted close, do not make it up
     candidate = pd.concat([candidate, records], ignore_index=True, sort=False)
     if candidate.duplicated(["asset_id", "session_date"]).any():
         raise DataContractError("Candidate has duplicate session keys")
@@ -135,7 +148,8 @@ def append_manual_observations(
     audit = records[[
         "correction_id", "asset_id", "provider_symbol", "currency_original",
         "session_date", "open", "high", "low", "close", "volume",
-        "adj_close", "observation_origin", "verification_status",
+        "adj_close", "adj_close_origin", "adj_close_policy",
+        "observation_origin", "verification_status",
         "reported_by", "source_reference", "notes",
     ]].copy()
     return candidate, audit

@@ -6,9 +6,6 @@ missing sessions. Original source columns remain available in Silver/Gold.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
-from pathlib import Path
-
 import numpy as np
 import pandas as pd
 
@@ -205,6 +202,17 @@ def build_silver_gold_from_bronze(
         )
     flagged.loc[missing_flag | unexpected_flag, "quality_status"] = "quarantined"
     silver = standardize_bars(flagged, rates, policy=policy)
+    # Preserve FX lineage through the conversion, including original quote,
+    # quote direction and source symbol. Never substitute an unaccepted quote.
+    fx_lineage = rates[
+        ["currency_original", "fx_date", "fx_quote_symbol", "fx_quote_direction", "quote_close"]
+    ].copy()
+    silver = silver.merge(
+        fx_lineage, on=["currency_original", "fx_date"],
+        how="left", validate="many_to_one",
+    )
+    if len(silver) != len(bronze):
+        raise DataContractError("Silver row count does not reconcile with Bronze")
 
     # The legacy Gold calculator correctly does not bridge a quarantined row.
     # Here we additionally suppress returns after a missing *expected* session.

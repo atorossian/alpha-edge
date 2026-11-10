@@ -1,0 +1,4 @@
+currency,provider_symbol,direction
+EUR,EURUSD=X,direct
+BRL,USDBRL=X,inverse
+MXN,USDMXN=X,inverse

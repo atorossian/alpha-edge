@@ -132,6 +132,32 @@ def align_verified_metadata(candidate, active, table, *, provider_symbol, provid
     return out
 
 
+def identity_conflict_diagnostic(asset_id, active, provider, broker_ticker, error):
+    """Report conflicting observations; never select a winning identity implicitly."""
+    fields = ("ticker", "yahoo_ticker", "currency")
+    observations = {}
+    for table, frame in active.items():
+        observations[table] = {}
+        for field in fields:
+            if field in frame:
+                observations[table][field] = sorted({
+                    str(v).strip() for v in frame[field].dropna().unique()
+                    if str(v).strip()
+                })[:20]
+    return {
+        "asset_id": asset_id, "status": "BLOCKED_IDENTITY",
+        "blockers": [str(error)],
+        "identity_evidence": {
+            "provider_yahoo_ticker": provider.get("symbol"),
+            "provider_currency": provider.get("currency"),
+            "provider_exchange": provider.get("exchange"),
+            "canonical_broker_ticker": broker_ticker,
+            "active_observations": observations,
+        },
+        "operations": [],
+    }
+
+
 def _parquet(frame):
     out = io.BytesIO()
     frame.to_parquet(out, index=False)
@@ -163,10 +189,20 @@ def prepare(s3, store, bucket, source_run, asset_id, end, publication_id):
     if source.get("status") != "STAGED_FOR_REVIEW":
         raise ValueError("Source reconstruction is not staged for review")
     provider = source.get("provider_metadata") or {}
-    for table in TABLES:
-        frames[table] = align_verified_metadata(frames[table], active[table], table,
-            provider_symbol=source["yahoo_ticker"], provider_currency=provider.get("currency"),
-            broker_ticker=_broker_ticker_map().get(asset_id))
+    broker_ticker = _broker_ticker_map().get(asset_id)
+    try:
+        for table in TABLES:
+            frames[table] = align_verified_metadata(frames[table], active[table], table,
+                provider_symbol=source["yahoo_ticker"],
+                provider_currency=provider.get("currency"),
+                broker_ticker=broker_ticker)
+    except ValueError as exc:
+        if not any(token in str(exc) for token in
+                   ("identity", "ticker", "currency", "broker ticker")):
+            raise
+        return identity_conflict_diagnostic(
+            asset_id, active,
+            {**provider, "symbol": source.get("yahoo_ticker")}, broker_ticker, exc)
     # One candidate quality gate, internal to the rebuild. The old preflight
     # command is deliberately NOT part of deployment.
     inception = "2024-11-29" if asset_id == "CRYPTO:HYPE-USD" else None

@@ -44,10 +44,20 @@ def generate(
     source_row_count = len(bars)
     correction_audit = None
     correction_sha256 = None
+    # Never silently omit registered manual observations during cohort runs.
+    # Filter the global registry by cohort asset, preserving original file hash.
+    registry_path = Path("data/quality/market_lake_v2/manual_ohlcv_corrections.csv")
+    if corrections_csv is None and registry_path.is_file():
+        corrections_csv = registry_path
     if corrections_csv is not None:
-        correction_sha256 = _sha256(corrections_csv)
         corrections = pd.read_csv(corrections_csv)
+        if "asset_id" not in corrections:
+            raise ValueError("Manual correction registry missing asset_id")
+        corrections = corrections.loc[
+            corrections["asset_id"].astype(str).isin(set(bars["asset_id"].astype(str)))
+        ].copy()
         if len(corrections):
+            correction_sha256 = _sha256(corrections_csv)
             bars, correction_audit = append_manual_observations(bars, corrections)
     if (asset_registry_csv is None) != (fx_registry_csv is None):
         raise ValueError("Both asset and FX registries must be supplied together")

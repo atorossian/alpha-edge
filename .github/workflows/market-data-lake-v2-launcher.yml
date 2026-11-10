@@ -50,11 +50,12 @@ jobs:
         run: python -m pip install poetry==2.1.2
       - name: Install project
         run: poetry install --no-interaction --no-ansi
-      - name: Run Stage 1 + Stage 2 offline tests
+      - name: Run Stage 1, Stage 2 and Stage 3 offline tests
         run: |
           poetry run pytest -q \
             tests/unit/test_data_lake_v2.py \
-            tests/unit/test_ingest_bronze_yahoo_v2.py
+            tests/unit/test_ingest_bronze_yahoo_v2.py \
+            tests/unit/test_standardize_bronze_v2.py
       - name: Acquire original Yahoo prices and FX quotes
         shell: bash
         env:
@@ -75,11 +76,18 @@ jobs:
         run: |
           poetry run python -m alpha_edge.market.validate_bronze_pilot_v2 \
             --batch-dir ./outputs/market_bronze_v2/six_asset_pilot
-      - name: Preserve pilot evidence
+      - name: Build Stage 3 Silver/Gold candidate and quality diagnostics
+        run: |
+          poetry run python -m alpha_edge.market.run_standardization_pilot_v2 \
+            --bronze-batch-dir ./outputs/market_bronze_v2/six_asset_pilot \
+            --output ./outputs/market_silver_gold_v2/six_asset_pilot
+      - name: Preserve Bronze and Silver/Gold evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: bronze-six-asset-pilot
-          path: outputs/market_bronze_v2/
+          name: market-lake-v2-six-asset-pilot
+          path: |
+            outputs/market_bronze_v2/
+            outputs/market_silver_gold_v2/
           if-no-files-found: warn
           retention-days: 14

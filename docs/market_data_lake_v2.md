@@ -330,3 +330,37 @@ Remaining items before a production-grade publisher:
   dataset reconciliation and consumer compatibility tests.
 - End-to-end CI dry run against an isolated AWS sandbox only after separate
   approval; no production writes or dev pointer update in routine CI.
+
+## Stage 5: Read-only Data Quality Explorer (initial implementation)
+
+Module: `alpha_edge.market.data_quality_explorer_v2`.
+
+The Explorer renders a **self-contained, local HTML snapshot** from a
+Silver/Gold candidate after checking the candidate's immutable manifest and
+SHA-256 hashes. It performs no S3 writes, starts no server, needs no login,
+and never retrieves live prices. No external JavaScript libraries are loaded.
+Run:
+
+```bash
+poetry run python -m alpha_edge.market.data_quality_explorer_v2 \
+  --candidate-dir ./outputs/market_silver_gold_v2/six_asset_pilot \
+  --output ./outputs/market_explorer_v2/index.html
+```
+
+Open `index.html` in a browser. The report provides: an asset selector,
+date-range filters, source/adjusted/USD price and simple/log-return charts,
+anomalies and calendar diagnostics, FX rejection evidence, a per-observation
+drill-down (including correction provenance), a CSV export and manifest
+checksum identity. Null values are left as gaps; the ALSEA.MX user-supplied
+raw close remains visible without fabricating an adjusted close.
+
+GitHub Actions' six-asset launcher builds the HTML report into the downloadable
+`market-lake-v2-six-asset-pilot` artifact. Its unit tests include checksum
+tamper detection, null handling and HTML script-injection safety.
+
+**Current scope:** 100,000 rows maximum in a single static snapshot. This
+is a pilot explorer for locally verified candidate datasets, not a persistent
+asset service or production-facing website. It does not yet fetch arbitrary
+historical revisions from S3 or independently compare AEA-87 and lake-v2
+history: historical reconciliation is a separate milestone. Source and
+corporate-action verification are still required for manual corrections.

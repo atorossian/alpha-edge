@@ -92,7 +92,7 @@ def verify_candidate_against_calendar(new_dates, calendar_name):
         valid = pd.DatetimeIndex(
             calendar.valid_days(start_date=dates.min(), end_date=dates.max())
         ).tz_localize(None).normalize()
-    except (ValueError, KeyError) as exc:
+    except (ValueError, KeyError, RuntimeError) as exc:
         return {"status": "REVIEW_REQUIRED", "reason": "UNKNOWN_OR_INVALID_EXCHANGE_CALENDAR",
                 "calendar": calendar_name, "error": str(exc), "dates": []}
     outside = dates.difference(valid)

@@ -64,13 +64,16 @@ def run(*, plan_dir: Path, output: Path, batch_prefix: str,
         execute: bool = False, max_cohorts: int = 1, start_cohort: int = 1,
         retries: int = 2,
         delay_seconds: float = 1.0,
-        start: str, end: str,
+        start: str | None, end: str, full_history: bool = False,
         runner: Callable = run_batch, sleeper: Callable = time.sleep) -> dict:
     if not SAFE_RUN.fullmatch(batch_prefix):
         raise CohortRunError("Invalid batch prefix")
     if max_cohorts < 1 or retries < 0 or retries > 3 or delay_seconds < 0:
         raise CohortRunError("Invalid execution limits")
-    if pd.Timestamp(start) >= pd.Timestamp(end):
+    if full_history:
+        if not end:
+            raise CohortRunError("Full-history ingestion requires an exclusive end date")
+    elif not start or pd.Timestamp(start) >= pd.Timestamp(end):
         raise CohortRunError("Invalid ingestion date window")
     manifest, frames, symbols = load_plan(plan_dir)
     if start_cohort < 1 or start_cohort > len(frames):
@@ -97,6 +100,7 @@ def run(*, plan_dir: Path, output: Path, batch_prefix: str,
                     universe=subset, fx_symbols=symbols,
                     start=start, end=end, batch_id=batch_id,
                     output=str(output / "bronze_batches"), upload=False,
+                    **({"full_history": True} if full_history else {}),
                 )
                 break
             except Exception as exc:
@@ -117,6 +121,7 @@ def run(*, plan_dir: Path, output: Path, batch_prefix: str,
         "schema": "alpha_edge_cohort_execution_v2_1",
         "plan_manifest_sha256": _sha(plan_dir / "manifest.json"),
         "requested_start": start, "requested_end_exclusive": end,
+        "full_history_requested": full_history,
         "attempted_cohorts": len(selected),
         "acquired_cohorts": int(result["state"].eq("acquired").sum()),
         "failed_cohorts": int(result["state"].eq("failed").sum()),
@@ -135,7 +140,8 @@ def main():
     p.add_argument("--plan-dir", type=Path, required=True)
     p.add_argument("--output", type=Path, required=True)
     p.add_argument("--batch-prefix", required=True)
-    p.add_argument("--start", required=True)
+    p.add_argument("--start", default=None)
+    p.add_argument("--full-history", action="store_true")
     p.add_argument("--end", required=True)
     p.add_argument("--execute", action="store_true")
     p.add_argument("--max-cohorts", type=int, default=1)
@@ -148,7 +154,7 @@ def main():
         start=a.start, end=a.end, execute=a.execute,
         max_cohorts=a.max_cohorts, start_cohort=a.start_cohort,
         retries=a.retries,
-        delay_seconds=a.delay_seconds,
+        delay_seconds=a.delay_seconds, full_history=a.full_history,
     ), indent=2))
 
 

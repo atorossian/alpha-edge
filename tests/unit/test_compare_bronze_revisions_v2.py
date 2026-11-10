@@ -42,6 +42,7 @@ def _batch(tmp_path, batch_id, *, close=25.18, fx=1.12, missing_day=False,
         files[name] = {"sha256": hashlib.sha256(target.read_bytes()).hexdigest()}
     manifest = {
         "schema_version": "bronze-v2-1", "batch_id": batch_id,
+        "created_at_utc": "2026-11-10T20:04:55Z",
         "files": files,
         "sources": [
             {"asset_id": "A", "provider_symbol": "KESKOB.HE",
@@ -111,3 +112,19 @@ def test_read_only_output_is_immutable(tmp_path):
     assert (output / "source_revisions.csv").is_file()
     with pytest.raises(FileExistsError):
         generate(old_dir=a, new_dir=b, output=output)
+
+
+def test_revision_materiality_classification():
+    from alpha_edge.market.compare_bronze_revisions_v2 import classify_revisions
+    changes = pd.DataFrame([
+        {"asset_id": "A", "session_date": "2025-01-15",
+         "change_type": "revised", "field": "adj_close", "relative_change": 3.5e-7},
+        {"asset_id": "A", "session_date": "2026-11-09",
+         "change_type": "revised", "field": "volume", "relative_change": .02234},
+        {"asset_id": "A", "session_date": "2025-01-15",
+         "change_type": "revised", "field": "close", "relative_change": .027},
+    ])
+    out = classify_revisions(changes, snapshot_asof="2026-11-10T20:04:55Z")
+    assert out["materiality"].tolist() == [
+        "immaterial_numeric", "provisional_volume", "requires_review"
+    ]

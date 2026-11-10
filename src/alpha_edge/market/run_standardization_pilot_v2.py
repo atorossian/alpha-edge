@@ -46,8 +46,13 @@ def generate(
     correction_sha256 = None
     # Never silently omit registered manual observations during cohort runs.
     # Filter the global registry by cohort asset, preserving original file hash.
-    registry_path = Path("data/quality/market_lake_v2/manual_ohlcv_corrections.csv")
-    if corrections_csv is None and registry_path.is_file():
+    registry_path = (
+        Path(__file__).resolve().parents[3]
+        / "data/quality/market_lake_v2/manual_ohlcv_corrections.csv"
+    )
+    if corrections_csv is None:
+        if not registry_path.is_file():
+            raise ValueError("Mandatory manual-correction registry is missing")
         corrections_csv = registry_path
     if corrections_csv is not None:
         corrections = pd.read_csv(corrections_csv)

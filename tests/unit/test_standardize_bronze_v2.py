@@ -115,3 +115,23 @@ def test_mixed_currencies_preserve_fx_lineage_and_arithmetic_returns():
     assert gold_brl.iloc[1]["ret_simple_close_adjusted_usd"] == pytest.approx(
         (101 / 4.9) / (100 / 5.0) - 1
     )
+
+
+def test_utc_timestamp_conversion_preserves_exchange_session_date():
+    source = bars().query("provider_symbol == 'SPY'").copy()
+    source["source_timestamp"] = ["2026-10-05T00:00:00+09:00",
+                                  "2026-10-06T00:00:00+09:00",
+                                  "2026-10-07T00:00:00+09:00"]
+    result = build_silver_gold_from_bronze(
+        source,
+        pd.DataFrame(columns=["provider_symbol", "session_date", "quote_close"]),
+        calendars={"SPY": "NYSE"}, pairs={},
+    )
+    silver = result["silver"].sort_values("session_date")
+    assert silver.iloc[0]["session_date"] == pd.Timestamp("2026-10-05")
+    assert silver.iloc[0]["source_timestamp_utc"] == pd.Timestamp(
+        "2026-10-04T15:00:00Z"
+    )
+    assert silver.iloc[0]["source_timestamp_semantics"] == (
+        "provider_daily_bar_label_not_close_time"
+    )

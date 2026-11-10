@@ -95,7 +95,9 @@ def test_repaired_return_must_not_bridge_missing_expected_session():
     gold = results["gold"]
     assert len(gold) == 2
     assert pd.isna(gold.iloc[-1]["ret_simple_close_adjusted_usd"])
-    assert gold.iloc[-1]["quality_status"] == "quarantined"
+    assert gold.iloc[-1]["quality_status"] == "accepted"
+    assert gold.iloc[-1]["return_quality_status"] == "unavailable"
+    assert gold.iloc[-1]["close_adjusted_usd"] == pytest.approx(102.)
     assert len(results["session_issues"]) == 1
 
 
@@ -135,3 +137,24 @@ def test_utc_timestamp_conversion_preserves_exchange_session_date():
     assert silver.iloc[0]["source_timestamp_semantics"] == (
         "provider_daily_bar_label_not_close_time"
     )
+
+
+def test_return_recovers_on_next_observed_trading_day_without_fabricating_gap():
+    source = bars().query("provider_symbol == 'SPY'").copy()
+    source = source.loc[source["session_date"].ne("2026-10-06")]
+    extra = source.iloc[-1:].copy()
+    extra["session_date"] = "2026-10-08"
+    extra["open"] = extra["close"] = extra["adj_close"] = 104.0
+    extra["high"], extra["low"] = 105.0, 103.0
+    source = pd.concat([source, extra], ignore_index=True)
+    result = build_silver_gold_from_bronze(
+        source, pd.DataFrame(columns=["provider_symbol", "session_date", "quote_close"]),
+        pairs={}, calendars={"SPY": "NYSE"},
+    )
+    gold = result["gold"].sort_values("session_date").reset_index(drop=True)
+    assert gold["quality_status"].eq("accepted").all()
+    assert gold.loc[1, "return_quality_status"] == "unavailable"
+    assert pd.isna(gold.loc[1, "ret_simple_close_adjusted_usd"])
+    assert gold.loc[2, "return_quality_status"] == "accepted"
+    assert gold.loc[2, "ret_simple_close_adjusted_usd"] == pytest.approx(104 / 102 - 1)
+    assert len(result["session_issues"]) == 1

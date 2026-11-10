@@ -91,6 +91,44 @@ def upload_verified(s3, *, bucket: str, prefix: str,
     return marker
 
 
+def restore_plan_from_archive(s3, *, bucket: str, archive_id: str,
+                              relative_dir: str, destination: Path) -> Path:
+    """Retrieve an already verified archive's plan without persistent local files."""
+    from alpha_edge.market.archive_local_outputs_v2 import archive_prefix
+    from pathlib import PurePosixPath
+    prefix = archive_prefix(archive_id)
+    manifest_blob = _get_remote(s3, bucket, f"{prefix}/_verified_inventory.json")
+    if manifest_blob is None:
+        raise S3BackfillError("No finalized S3 outputs archive")
+    manifest = json.loads(manifest_blob)
+    if manifest.get("schema") != "alpha_edge_local_output_archive_v2_1":
+        raise S3BackfillError("Unexpected archive schema")
+    parts = PurePosixPath(relative_dir).parts
+    if (not parts or any(p in ("", ".", "..") for p in parts)
+            or relative_dir.startswith(("/", "\\")) or "\\" in relative_dir
+            or ":" in relative_dir):
+        raise S3BackfillError("Unsafe S3 plan relative directory")
+    begin = "/".join(parts) + "/"
+    entries = [x for x in manifest["files"] if x["path"].startswith(begin)]
+    if not entries or not any(x["path"] == begin + "manifest.json" for x in entries):
+        raise S3BackfillError("Archive lacks the requested preflight plan")
+    destination.mkdir(parents=True, exist_ok=False)
+    for entry in entries:
+        name = entry["path"][len(begin):]
+        segments = PurePosixPath(name).parts
+        if not segments or any(p in ("", ".", "..") for p in segments):
+            raise S3BackfillError("Unsafe archived plan entry")
+        blob = _get_remote(s3, bucket, f"{prefix}/files/{entry['path']}")
+        if blob is None or _sha_bytes(blob) != entry["sha256"]:
+            raise S3BackfillError(f"Archived plan checksum mismatch: {name}")
+        out = destination.joinpath(*segments)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_bytes(blob)
+    # load_plan validates every manifest-pinned cohort CSV and FX config.
+    load_plan(destination)
+    return destination
+
+
 def run(*, plan_dir: Path, bucket: str, end: str, execute: bool,
         start_cohort: int, max_cohorts: int, s3, retries: int = 2) -> dict:
     if not bucket or not end or not 0 <= retries <= 3:
@@ -169,7 +207,10 @@ def run(*, plan_dir: Path, bucket: str, end: str, execute: bool,
 
 def main():
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--plan-dir", required=True, type=Path)
+    source = p.add_mutually_exclusive_group(required=True)
+    source.add_argument("--plan-dir", type=Path)
+    source.add_argument("--plan-archive-id")
+    p.add_argument("--plan-relative-path", default="full_universe_preflight_v2/first_review")
     p.add_argument("--bucket", required=True)
     p.add_argument("--end", required=True)
     p.add_argument("--region", default="eu-west-1")
@@ -180,10 +221,22 @@ def main():
     args = p.parse_args()
     import boto3
     s3 = boto3.client("s3", region_name=args.region)
-    result = run(plan_dir=args.plan_dir, bucket=args.bucket,
-                 end=args.end, execute=args.execute,
-                 start_cohort=args.start_cohort,
-                 max_cohorts=args.max_cohorts, retries=args.retries, s3=s3)
+    if args.plan_archive_id:
+        with tempfile.TemporaryDirectory(prefix="alpha_edge_preflight_") as temp:
+            plan = restore_plan_from_archive(
+                s3, bucket=args.bucket, archive_id=args.plan_archive_id,
+                relative_dir=args.plan_relative_path,
+                destination=Path(temp) / "plan",
+            )
+            result = run(plan_dir=plan, bucket=args.bucket,
+                         end=args.end, execute=args.execute,
+                         start_cohort=args.start_cohort,
+                         max_cohorts=args.max_cohorts, retries=args.retries, s3=s3)
+    else:
+        result = run(plan_dir=args.plan_dir, bucket=args.bucket,
+                     end=args.end, execute=args.execute,
+                     start_cohort=args.start_cohort,
+                     max_cohorts=args.max_cohorts, retries=args.retries, s3=s3)
     print(json.dumps(result, indent=2))
 
 

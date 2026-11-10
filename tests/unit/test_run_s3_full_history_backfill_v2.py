@@ -109,3 +109,30 @@ def test_full_s3_runner_uses_ephemeral_disk_and_skips_verified_cohort(tmp_path, 
     assert count == {"acquire": 1, "audit": 1, "silver": 1, "acceptance": 1}
     assert all(not path.exists() for path in seen_temp)
     assert not any("/current.json" in path for path in s3.objects)
+
+
+def test_preflight_plan_restored_from_verified_s3_archive(tmp_path):
+    from alpha_edge.market.run_s3_full_history_backfill_v2 import restore_plan_from_archive
+    from alpha_edge.market.archive_local_outputs_v2 import transfer
+    output = tmp_path / "outputs"
+    plan = output / "full_universe_preflight_v2" / "first_review"
+    plan.mkdir(parents=True)
+    (plan / "cohort_0001.csv").write_text(
+        "asset_id,yahoo_ticker,currency,calendar_id\nA,GLD,USD,NYSE\n")
+    (plan / "fx_config.csv").write_text("currency,provider_symbol,direction\n")
+    pinned = {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in plan.iterdir()}
+    (plan / "manifest.json").write_text(json.dumps({
+        "schema": "alpha_edge_lake_v2_universe_preflight_1",
+        "cohorts": 1, "assets_included": 1, "files_sha256": pinned
+    }))
+    s3 = FakeS3()
+    transfer(root=output, bucket="test", archive_id="test-plan",
+             s3=s3, upload=True)
+    restored = restore_plan_from_archive(
+        s3, bucket="test", archive_id="test-plan",
+        relative_dir="full_universe_preflight_v2/first_review",
+        destination=tmp_path / "restored",
+    )
+    assert (restored / "cohort_0001.csv").read_bytes() == (
+        plan / "cohort_0001.csv").read_bytes()
+    assert (restored / "manifest.json").is_file()

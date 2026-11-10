@@ -1,0 +1,64 @@
+name: Market Data Lake v2 - Six Asset Yahoo Bronze Pilot
+
+on:
+  workflow_dispatch:
+    inputs:
+      start_date:
+        description: "Inclusive Yahoo start date (YYYY-MM-DD)"
+        required: true
+        default: "2025-01-01"
+        type: string
+      end_date:
+        description: "Exclusive Yahoo end date (YYYY-MM-DD)"
+        required: true
+        default: "2026-11-10"
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  bronze-pilot:
+    name: Acquire and validate six assets (no AWS)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      PYTHONPATH: src
+      AWS_EC2_METADATA_DISABLED: "true"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - name: Install Poetry
+        run: python -m pip install poetry==2.1.2
+      - name: Install project
+        run: poetry install --no-interaction --no-ansi
+      - name: Download original currency OHLCV and FX quotations
+        shell: bash
+        env:
+          START_DATE: ${{ inputs.start_date }}
+          END_DATE: ${{ inputs.end_date }}
+        run: |
+          set -euo pipefail
+          [[ "$START_DATE" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]
+          [[ "$END_DATE" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]
+          poetry run python -m alpha_edge.market.ingest_bronze_yahoo_v2 \
+            --universe-csv data/quality/market_lake_v2/pilot_six_assets.csv \
+            --fx-symbols 'EURUSD=X;USDBRL=X;USDMXN=X' \
+            --start "$START_DATE" --end "$END_DATE" \
+            --batch-id six_asset_pilot \
+            --output ./outputs/market_bronze_v2
+      - name: Validate observed source histories
+        if: success()
+        run: |
+          poetry run python -m alpha_edge.market.validate_bronze_pilot_v2 \
+            --batch-dir ./outputs/market_bronze_v2/six_asset_pilot
+      - name: Upload raw histories and report for inspection
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bronze-six-asset-pilot
+          path: outputs/market_bronze_v2/
+          if-no-files-found: warn
+          retention-days: 14

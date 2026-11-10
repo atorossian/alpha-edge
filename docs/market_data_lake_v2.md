@@ -451,3 +451,64 @@ cannot be detected using the adjusted/raw ratio. Compare immutable source
 snapshots and obtain independent corporate-action evidence before correcting
 prices. This is a supplemental, manually executed read-only audit;
 it does not turn the existing split table into a mandatory production gate.
+
+## Milestone: versioned corporate-actions acquisition and audit correlation
+
+This milestone adds an **additive, local-only immutable reference candidate**;
+the legacy corporate-actions S3 paths are preserved untouched.
+
+1. Acquire Yahoo \`Dividends\` and \`Stock Splits\` with source session
+   timestamps, currency/value units, retrieval time and ingestion batch IDs.
+2. Preserve all reported events (including those below the ratio-alert
+   threshold), including asset IDs with **zero** reported events in the batch
+   manifest. The manifest pins the exact asset universe and event parquet hash.
+3. Verify batch identity and hashes before correlating event dates with Gold
+   \`Adj Close / Close\` ratio-change alerts.
+4. Emit matched/unmatched flags as **diagnostic evidence only**, not automatic
+   acceptance. Same-day dividend does not prove the provider's adjustment
+   calculation; rights issues and simultaneous scaling of raw and adjusted
+   prices are explicitly unhandled.
+
+Use the six-asset pilot universe, which must include known currency hints:
+
+\`\`\`bash
+poetry run python -m alpha_edge.market.ingest_corporate_actions_v2 \
+  --universe-csv data/quality/market_lake_v2/pilot_six_assets.csv \
+  --start 2025-01-01 \
+  --end 2026-11-10 \
+  --output outputs/market_corporate_actions_v2
+\`\`\`
+
+The acquisition prints its new \`local_path\` (timestamped batch directory).
+Use that exact path in the local correlation:
+
+\`\`\`bash
+poetry run python -m alpha_edge.market.reconcile_corporate_actions_v2 \
+  --candidate-dir outputs/pilot_artifact/market_silver_gold_v2/six_asset_pilot \
+  --actions-dir outputs/market_corporate_actions_v2/<batch-id> \
+  --output outputs/corporate_action_event_matches_v2/six_asset_pilot
+\`\`\`
+
+No S3 permissions are required for this step. The two candidate filesets have
+separate manifests, hashes and provenance. The existing split-only S3 audit is
+still available via \`audit_corporate_actions_v2\`.
+
+### Market Data Lake v2 roadmap snapshot (November 10, 2026)
+
+| Workstream | Current state | Remaining gate |
+| --- | --- | --- |
+| Canonical asset universe and source identifiers | Six-asset pilot implemented | Full-universe contract and scaling |
+| Yahoo Bronze raw acquisition and provenance | Implemented and CI-piloted | Incremental and multi-source support |
+| Silver exchange-session and FX normalization | Implemented in pilot | Explain BRL/MXN 228 shared FX mismatch dates and verify timezone source |
+| Silver price/corporate-action consistency | Split reference audit and dividends/splits candidate implemented | Correlate real batch, rights-issue source evidence, detect provider revisions |
+| Gold USD adjusted prices and returns | Implemented in pilot | Verify return conventions and approve quality gates |
+| Manual correction, quarantine and review | Implemented; ALSEA adjusted close still unknown | Resolve manual provenance before approval |
+| Historical AEA-87 reconciliation | Run locally: 2,758 shared prices, 32 additional v2 sessions | Resolve 917 mismatches across three foreign-currency assets |
+| Explorer and CI | Implemented; six-asset workflow generated artifact | Surface new reference correlations and validate updated CI |
+| Isolated dev publication | Opt-in publisher implemented | Production acceptance and rollback runbook |
+| Full production cutover and daily processing | Not started | End-to-end incremental orchestration, versioning, compatibility and monitoring |
+
+**Important:** the 16 ratio flags were each on a reported dividend date in the
+manual Yahoo diagnostic; this is not yet an independently automated reconciled
+batch result. KESKOB.HE October 28–November 4 raw-price scaling remains
+unexplained. Do not promote the six-asset candidate to production.

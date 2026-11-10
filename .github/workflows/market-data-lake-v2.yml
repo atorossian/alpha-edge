@@ -12,12 +12,14 @@ on:
       - "src/alpha_edge/market/ingest_bronze_yahoo_v2.py"
       - "src/alpha_edge/market/standardize_bronze_v2.py"
       - "src/alpha_edge/market/manual_observations_v2.py"
+      - "src/alpha_edge/market/publish_lake_v2.py"
       - "src/alpha_edge/market/run_standardization_pilot_v2.py"
       - "data/quality/market_lake_v2/manual_ohlcv_corrections.csv"
       - "tests/unit/test_data_lake_v2.py"
       - "tests/unit/test_ingest_bronze_yahoo_v2.py"
       - "tests/unit/test_standardize_bronze_v2.py"
       - "tests/unit/test_manual_observations_v2.py"
+      - "tests/unit/test_publish_lake_v2.py"
       - ".github/workflows/market-data-lake-v2.yml"
   workflow_dispatch:
 
@@ -50,11 +52,13 @@ jobs:
             src/alpha_edge/market/ingest_bronze_yahoo_v2.py \
             src/alpha_edge/market/standardize_bronze_v2.py \
             src/alpha_edge/market/run_standardization_pilot_v2.py \
-            src/alpha_edge/market/manual_observations_v2.py
+            src/alpha_edge/market/manual_observations_v2.py \
+            src/alpha_edge/market/publish_lake_v2.py
       - name: Run offline unit tests
         run: |
           poetry run pytest -v \
             tests/unit/test_data_lake_v2.py \
             tests/unit/test_ingest_bronze_yahoo_v2.py \
             tests/unit/test_standardize_bronze_v2.py \
-            tests/unit/test_manual_observations_v2.py
+            tests/unit/test_manual_observations_v2.py \
+            tests/unit/test_publish_lake_v2.py

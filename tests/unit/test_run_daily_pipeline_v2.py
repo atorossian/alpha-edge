@@ -27,7 +27,7 @@ class S3:
 def test_no_approved_gold_baseline_fails_without_any_writes():
     s3 = S3()
     with pytest.raises(daily.IncrementalError, match="Missing required"):
-        daily.run(s3=s3, bucket="alpha-edge-algo", as_of="2026-11-11",
+        daily.run(s3=s3, bucket="alpha-edge-algo", as_of="2026-11-09",
                   execute=False)
     assert not s3.objects
 
@@ -71,7 +71,7 @@ def test_pinned_current_release_dry_run_never_writes(monkeypatch):
     s3 = S3()
     release_key = "market/lake_v2/releases/candidates/base_release.json"
     release = {"schema": "alpha_edge_v2_release_candidate_1",
-               "release_id": "base_release", "as_of": "2026-11-10",
+               "release_id": "base_release", "as_of": "2026-11-08",
                "expected_cohorts": 1, "expected_assets": 1, "cohorts": []}
     raw = encoded(release)
     s3.objects[release_key] = raw
@@ -85,6 +85,6 @@ def test_pinned_current_release_dry_run_never_writes(monkeypatch):
     state = daily.run(s3=s3, bucket="alpha-edge-algo",
                       as_of="2026-11-11", execute=False)
     assert state["status"] == "dry_run"
-    assert state["retrieval_end_exclusive"] == "2026-11-12"
+    assert state["retrieval_end_exclusive"] == "2026-11-10"
     assert state["gold_activated"] is False
     assert len(s3.objects) == 2

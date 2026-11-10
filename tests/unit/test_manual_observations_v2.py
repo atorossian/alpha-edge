@@ -125,3 +125,23 @@ def test_explicit_close_assertion_rejects_mismatch():
     correction["adj_close_policy"] = "explicit_equal_close"
     with pytest.raises(DataContractError, match="must explicitly equal close"):
         append_manual_observations(sample(), correction)
+
+
+def test_user_assertion_restores_alsea_price_and_return_continuity():
+    correction = corrections()
+    correction.loc[0, "adj_close"] = 51.80
+    correction.loc[0, "verification_status"] = "user_asserted_unverified"
+    correction["adj_close_policy"] = "explicit_equal_close"
+    candidate, _ = append_manual_observations(sample(), correction)
+    gold = build_silver_gold_from_bronze(
+        candidate, fx(), calendars={"ALSEA.MX": "XMEX"},
+        pairs={"MXN": ("USDMXN=X", "inverse")},
+    )
+    assert gold["session_issues"].empty
+    rows = gold["gold"].sort_values("session_date").reset_index(drop=True)
+    assert rows["quality_status"].eq("accepted").all()
+    manual = rows.loc[rows["observation_origin"].eq("user_supplied_manual")].iloc[0]
+    assert manual["adj_close"] == pytest.approx(manual["close"])
+    assert manual["adj_close_origin"] == "user_asserted_equal_close"
+    assert manual["return_quality_status"] == "accepted"
+    assert rows.iloc[-1]["return_quality_status"] == "accepted"

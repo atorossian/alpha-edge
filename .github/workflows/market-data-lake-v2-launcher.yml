@@ -56,7 +56,8 @@ jobs:
             tests/unit/test_data_lake_v2.py \
             tests/unit/test_ingest_bronze_yahoo_v2.py \
             tests/unit/test_standardize_bronze_v2.py \
-            tests/unit/test_manual_observations_v2.py
+            tests/unit/test_manual_observations_v2.py \
+            tests/unit/test_publish_lake_v2.py
       - name: Acquire original Yahoo prices and FX quotes
         shell: bash
         env:
@@ -83,6 +84,10 @@ jobs:
             --bronze-batch-dir ./outputs/market_bronze_v2/six_asset_pilot \
             --output ./outputs/market_silver_gold_v2/six_asset_pilot \
             --corrections-csv data/quality/market_lake_v2/manual_ohlcv_corrections.csv
+      - name: Validate candidate publication contract locally (no S3 writes)
+        run: |
+          poetry run python -m alpha_edge.market.publish_lake_v2 verify-local \
+            --candidate-dir ./outputs/market_silver_gold_v2/six_asset_pilot
       - name: Preserve Bronze and Silver/Gold evidence
         if: always()
         uses: actions/upload-artifact@v4

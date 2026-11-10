@@ -78,12 +78,12 @@ def test_pinned_current_release_dry_run_never_writes(monkeypatch):
     s3.objects[CURRENT] = encoded({
         "schema": "alpha_edge_v2_release_pointer_1",
         "release_id": "base_release", "release_key": release_key,
-        "release_sha256": sha(raw), "as_of": "2026-11-10",
+        "release_sha256": sha(raw), "as_of": "2026-11-08",
     })
     # Acceptance is owned by release controller; fixture omits large S3 tables.
     monkeypatch.setattr(daily, "validate_release", lambda *a, **kw: {"cohorts": 1})
     state = daily.run(s3=s3, bucket="alpha-edge-algo",
-                      as_of="2026-11-11", execute=False)
+                      as_of="2026-11-09", execute=False)
     assert state["status"] == "dry_run"
     assert state["retrieval_end_exclusive"] == "2026-11-10"
     assert state["gold_activated"] is False

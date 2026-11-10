@@ -173,9 +173,22 @@ def main():
         p.error("Archive root must be a directory named outputs")
     if a.prune_verified:
         import subprocess
+        repository = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            capture_output=True, text=True, cwd=Path.cwd(), check=False,
+        )
+        if repository.returncode != 0:
+            p.error("Refusing prune: cannot locate Git repository")
+        git_root = Path(repository.stdout.strip()).resolve()
+        try:
+            relative = root.relative_to(git_root)
+        except ValueError:
+            p.error("Refusing prune outside the Git working tree")
+        if relative.as_posix() != "outputs":
+            p.error("Refusing prune: only repository-root outputs/ is allowed")
         proc = subprocess.run(
-            ["git", "ls-files", "--", str(root)], capture_output=True, text=True,
-            check=False, cwd=Path.cwd(),
+            ["git", "ls-files", "--", relative.as_posix()],
+            capture_output=True, text=True, cwd=git_root, check=False,
         )
         if proc.returncode != 0 or proc.stdout.strip():
             p.error("Refusing prune: Git-tracked output files or Git check failed")

@@ -108,7 +108,7 @@ def normalize_fx(fx: pd.DataFrame) -> pd.DataFrame:
     _require(fx, {"currency_original", "fx_date", "fx_to_usd"}, "FX")
     out = fx.copy()
     out["fx_date"] = _session_dates(out["fx_date"])
-    out["fx_to_usd"] = pd.to_numeric(out["fx_to_usd"], errors="coerce")
+    out["fx_to_usd"] = pd.to_numeric(out["fx_to_usd"], errors="coerce").astype(float)
     if out.duplicated(["currency_original", "fx_date"]).any():
         raise DataContractError("FX contains duplicate currency/date keys")
     if (
@@ -144,7 +144,6 @@ def standardize_bars(
     source["currency_original"] = source["currency_original"].astype(str).str.upper()
     source["session_date"] = _session_dates(source["session_date"])
     rate_table = normalize_fx(fx)
-    currencies = set(source["currency_original"].dropna().unique()) - {"USD"}
     segments = []
     for currency, group in source.groupby("currency_original", dropna=False):
         part = group.copy()

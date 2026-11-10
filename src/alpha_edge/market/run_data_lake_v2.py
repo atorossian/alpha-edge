@@ -71,7 +71,8 @@ def build(args: argparse.Namespace) -> dict:
         "legacy_production_unchanged": True,
     }
     layers = {
-        "bronze/raw_ohlcv.parquet": bronze,
+        "bronze/source_ohlcv.parquet": bars,
+        "bronze/validated_ohlcv.parquet": bronze,
         "bronze/raw_fx.parquet": fx,
         "silver/ohlcv_usd.parquet": silver,
         "gold/returns.parquet": gold,

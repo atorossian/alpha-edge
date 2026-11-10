@@ -150,7 +150,7 @@ def _metadata(ticker: Any) -> dict:
 def acquire_yahoo_bars(
     asset_id: str, symbol: str, *, start: str, end: str | None,
     batch_id: str, ticker_factory: Callable[[str], Any] | None = None,
-    currency_hint: str | None = None,
+    currency_hint: str | None = None, full_history: bool = False,
 ) -> tuple[pd.DataFrame, dict]:
     """Read single-symbol Yahoo history WITHOUT auto-adjust or repair."""
     if ticker_factory is None:
@@ -165,8 +165,10 @@ def acquire_yahoo_bars(
     currency = provider_currency or str(currency_hint or "").strip()
     if not currency or currency.upper() in {"NAN", "NONE", "NULL"}:
         raise ValueError(f"{symbol}: currency unknown; Bronze acquisition quarantined")
-    frame = ticker.history(start=start, end=end, interval="1d",
-                           auto_adjust=False, actions=True, repair=False)
+    query = ({"period": "max", "end": end} if full_history
+             else {"start": start, "end": end})
+    frame = ticker.history(interval="1d", auto_adjust=False,
+                           actions=True, repair=False, **query)
     retrieved = _utc_now()
     bars = raw_bars_from_frame(
         frame, asset_id=asset_id, symbol=symbol, currency=currency,
@@ -179,7 +181,10 @@ def acquire_yahoo_bars(
         "currency_metadata_source": "provider" if provider_currency else "hint",
         "provider_metadata": meta, "start": start, "end_exclusive": end,
         "interval": "1d", "auto_adjust": False, "repair": False,
-        "actions": True, "retrieved_at_utc": retrieved, "row_count": len(bars),
+        "actions": True, "full_history_requested": full_history,
+        "first_observed_session": str(bars["session_date"].min()),
+        "last_observed_session": str(bars["session_date"].max()),
+        "retrieved_at_utc": retrieved, "row_count": len(bars),
         "provider": "yahoo_finance", "client": "yfinance",
     }
     return bars, provenance
@@ -188,6 +193,7 @@ def acquire_yahoo_bars(
 def acquire_yahoo_fx_quote(
     symbol: str, *, start: str, end: str | None, batch_id: str,
     ticker_factory: Callable[[str], Any] | None = None,
+    full_history: bool = False,
 ) -> tuple[pd.DataFrame, dict]:
     """Preserve Yahoo FX quotes, not normalized USD-per-currency rates."""
     if ticker_factory is None:
@@ -195,9 +201,11 @@ def acquire_yahoo_fx_quote(
         ticker_factory = yf.Ticker
     if not symbol.upper().endswith("=X"):
         raise ValueError("FX ticker must be a Yahoo =X quote")
+    query = ({"period": "max", "end": end} if full_history
+             else {"start": start, "end": end})
     frame = ticker_factory(symbol).history(
-        start=start, end=end, interval="1d", auto_adjust=False,
-        actions=False, repair=False,
+        interval="1d", auto_adjust=False, actions=False,
+        repair=False, **query
     )
     if frame.empty:
         raise ValueError(f"{symbol}: empty FX history")
@@ -216,7 +224,11 @@ def acquire_yahoo_fx_quote(
     })
     meta = {"provider_symbol": symbol, "start": start, "end_exclusive": end,
             "interval": "1d", "row_count": len(out),
-            "auto_adjust": False, "repair": False, "retrieved_at_utc": retrieved}
+            "auto_adjust": False, "repair": False,
+            "full_history_requested": full_history,
+            "first_observed_session": str(out["session_date"].min()),
+            "last_observed_session": str(out["session_date"].max()),
+            "retrieved_at_utc": retrieved}
     return out, meta
 
 
@@ -280,7 +292,7 @@ def run_batch(
     end: str | None, batch_id: str, output: str,
     ticker_factory: Callable[[str], Any] | None = None,
     bucket: str | None = None, upload: bool = False,
-    market_root: str = "dev/market",
+    market_root: str = "dev/market", full_history: bool = False,
 ) -> dict:
     """All-or-nothing Bronze batch; any failed symbol prevents publication."""
     if not SAFE_ID.fullmatch(batch_id):
@@ -302,6 +314,7 @@ def run_batch(
             str(row["asset_id"]), symbol, start=start, end=end,
             batch_id=batch_id, ticker_factory=ticker_factory,
             currency_hint=currency_hint,
+            full_history=full_history,
         )
         frames.append(bars)
         metas.append(provenance)
@@ -309,7 +322,7 @@ def run_batch(
     for symbol in fx_symbols:
         fx, provenance = acquire_yahoo_fx_quote(
             symbol, start=start, end=end, batch_id=batch_id,
-            ticker_factory=ticker_factory,
+            ticker_factory=ticker_factory, full_history=full_history,
         )
         fx_frames.append(fx)
         metas.append(provenance)
@@ -332,7 +345,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Yahoo Bronze v2 acquisition (pilot)")
     parser.add_argument("--universe-csv", required=True)
     parser.add_argument("--fx-symbols", default="", help="Semicolon-separated Yahoo FX pairs")
-    parser.add_argument("--start", required=True)
+    parser.add_argument("--start", default=None)
+    parser.add_argument("--full-history", action="store_true")
     parser.add_argument("--end", default=None, help="Exclusive Yahoo end date")
     parser.add_argument("--output", default="./outputs/market_bronze_v2")
     parser.add_argument("--batch-id", default=None)
@@ -340,6 +354,10 @@ def main() -> None:
     parser.add_argument("--upload", action="store_true")
     parser.add_argument("--market-root", default="dev/market")
     args = parser.parse_args()
+    if not args.full_history and not args.start:
+        parser.error("--start is required unless --full-history is set")
+    if args.full_history and not args.end:
+        parser.error("--full-history requires explicit exclusive --end")
     universe = pd.read_csv(args.universe_csv)
     if "include" in universe:
         universe = universe.loc[
@@ -351,7 +369,7 @@ def main() -> None:
         fx_symbols=[s.strip() for s in args.fx_symbols.split(";") if s.strip()],
         start=args.start, end=args.end, batch_id=batch,
         output=args.output, bucket=args.bucket, upload=args.upload,
-        market_root=args.market_root,
+        market_root=args.market_root, full_history=args.full_history,
     ), indent=2))
 
 

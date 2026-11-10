@@ -140,3 +140,52 @@ def test_only_eligible_candidate_promotes_after_explicit_digest_approval(tmp_pat
     with pytest.raises(PublicationError, match="already the current"):
         promote_candidate(s3, "example-bucket", run_id="pilot-1",
                           approval=receipt["candidate_manifest_sha256"])
+
+
+def test_windows_trace_key_validated_and_canonical_staged(tmp_path):
+    local = candidate(tmp_path)
+    trace = local / "asset_traces" / "asset_abc.csv"
+    trace.parent.mkdir()
+    trace.write_text("asset_id,price\nA,1\n", encoding="utf-8")
+    manifest_path = local / "manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    manifest["files_sha256"][r"asset_traces\asset_abc.csv"] = hashlib.sha256(trace.read_bytes()).hexdigest()
+    manifest_path.write_text(json.dumps(manifest))
+    verified, paths = validate_local_candidate(local)
+    assert "asset_traces/asset_abc.csv" in paths
+    # Do not mutate the original immutable manifest; normalize only outbound key.
+    assert r"asset_traces\asset_abc.csv" in verified["files_sha256"]
+    s3 = FakeS3()
+    stage_candidate(s3, "example-bucket", local, run_id="windows-pilot")
+    assert any(key.endswith("/asset_traces/asset_abc.csv") for key in s3.write_keys)
+    verify_staged_candidate(s3, "example-bucket", run_id="windows-pilot")
+
+
+@pytest.mark.parametrize("bad", [
+    r"asset_traces\..\gold.parquet",
+    r"..\outside.csv",
+    r"C:\temp\oops.csv",
+    "asset_traces//file.csv",
+    "asset_traces/./file.csv",
+])
+def test_unsafe_path_rejected_cross_platform(tmp_path, bad):
+    local = candidate(tmp_path)
+    manifest_path = local / "manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    manifest["files_sha256"][bad] = "a" * 64
+    manifest_path.write_text(json.dumps(manifest))
+    with pytest.raises(PublicationError, match="Unsafe"):
+        validate_local_candidate(local)
+
+
+def test_windows_posix_alias_collision_rejected(tmp_path):
+    local = candidate(tmp_path)
+    manifest_path = local / "manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    manifest["files_sha256"][r"asset_traces\asset.csv"] = "a" * 64
+    manifest["files_sha256"]["asset_traces/asset.csv"] = "a" * 64
+    manifest_path.write_text(json.dumps(manifest))
+    (local / "asset_traces").mkdir()
+    (local / "asset_traces" / "asset.csv").write_text("test")
+    with pytest.raises(PublicationError):
+        validate_local_candidate(local)

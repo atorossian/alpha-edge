@@ -927,3 +927,139 @@ at time of initial source inventory). Review and resolve them explicitly.
 This Bronze backfill driver does not yet orchestrate Silver/Gold or final
 provider-independent acceptance, and is not an authorization to promote
 production pointers.
+
+
+## S3-first execution and repository cleanup (2026-11-10)
+
+**Problem:** the earlier local-only backfill wrote runtime Parquet, audit
+CSV, Silver/Gold and diagnostic outputs to \`outputs/\` under the Git
+working tree. These are runtime artifacts and should not be source-controlled
+or stored permanently beside code. \`.gitignore\` now ignores root
+\`/outputs/\`, but this does NOT remove files already on disk or already
+tracked in the Git index.
+
+### A. Preserve existing outputs, verify S3, THEN clean local
+
+From the repository root, first review what is locally present:
+\`\`\`bash
+git status --short
+git ls-files outputs
+du -sh outputs
+\`\`\`
+
+Archive dry run (no S3 writes or local deletion):
+
+\`\`\`bash
+poetry run python -m alpha_edge.market.archive_local_outputs_v2 \
+  --local-root outputs --bucket alpha-edge-algo \
+  --archive-id old-outputs-20261110
+\`\`\`
+
+The archive tool refuses symlinks and obvious secret-key formats.
+**Review what is under outputs/** before uploading sensitive information.
+Then upload each regular file into the isolated
+\`s3://alpha-edge-algo/dev/market/lake_v2/archives/old-outputs-20261110/files/\`
+prefix. Data is copied first; every remote object is downloaded in a
+stream and SHA-256 verified before a final \`_verified_inventory.json\`
+is written. On partial upload failure, retain local files and rerun
+the same --upload command to resume unfinished objects.
+
+\`\`\`bash
+poetry run python -m alpha_edge.market.archive_local_outputs_v2 \
+  --local-root outputs --bucket alpha-edge-algo \
+  --archive-id old-outputs-20261110 --upload
+\`\`\`
+
+Only after \`status: verified_in_s3\`, run a separate explicit
+prune operation. It rechecks the complete local inventory against
+the remote marker and re-downloads every remote object's bytes
+before deleting local copies. It refuses to delete Git-tracked files.
+
+\`\`\`bash
+poetry run python -m alpha_edge.market.archive_local_outputs_v2 \
+  --local-root outputs --bucket alpha-edge-algo \
+  --archive-id old-outputs-20261110 --prune-verified
+\`\`\`
+
+The utility is intentionally limited to a directory named \`outputs\`;
+it is NOT a generic cleanup of \`data/universe\`, \`data/quality\`,
+source code, Git history, or other local folders.
+If \`git ls-files outputs\` has results, remove them from Git
+tracking only in a separately reviewed change **after** archiving.
+Deleting historical Git blobs requires a separate Git-history
+rewrite and coordination; simply updating .gitignore is not enough.
+
+### B. S3-first full-history cohorts (no persistent repo outputs)
+
+\`run_s3_full_history_backfill_v2.py\` replaces the local-only execution
+path for the remaining 79 cohorts. It uses an OS ephemeral temp directory
+to acquire Yahoo full daily history and FX, generates missing-price
+and session audits, builds Silver/Gold and runs independent acceptance.
+It uploads ALL cohort artifacts under:
+
+\`\`\`text
+s3://alpha-edge-algo/dev/market/lake_v2/backfills/
+    <plan-sha-prefix>/end-2026-11-10/cohort-0001/
+        files/execution/bronze_batches/...
+        files/audit/...
+        files/candidate/...
+        files/acceptance/...
+        _committed.json
+\`\`\`
+
+**Default: dry-run.** To plan a single cohort:
+
+\`\`\`bash
+poetry run python -m alpha_edge.market.run_s3_full_history_backfill_v2 \
+  --plan-dir outputs/full_universe_preflight_v2/first_review \
+  --bucket alpha-edge-algo --end 2026-11-10 \
+  --start-cohort 1 --max-cohorts 1
+\`\`\`
+
+To perform the first S3-first end-to-end cohort (after verifying IAM and
+the provider source readiness):
+
+\`\`\`bash
+poetry run python -m alpha_edge.market.run_s3_full_history_backfill_v2 \
+  --plan-dir outputs/full_universe_preflight_v2/first_review \
+  --bucket alpha-edge-algo --end 2026-11-10 \
+  --start-cohort 1 --max-cohorts 1 --execute
+\`\`\`
+
+Then request remaining cohorts (the same plan and end date):
+
+\`\`\`bash
+poetry run python -m alpha_edge.market.run_s3_full_history_backfill_v2 \
+  --plan-dir outputs/full_universe_preflight_v2/first_review \
+  --bucket alpha-edge-algo --end 2026-11-10 \
+  --start-cohort 2 --max-cohorts 78 --execute
+\`\`\`
+
+Each verified cohort is skipped on retry; an uncommitted/incomplete
+S3 cohort is never considered successful. Temporary local bytes
+disappear when the process finishes a cohort. There is no persistent
+\`outputs/\` write by the S3-first runner itself, though the pre-existing
+preflight plan must be supplied as input (and can be held outside
+the repo). Source retrieval remains network-dependent and may fail or
+be rate-limited. A single cohort failure remains visible; source retries
+and consumer migration still need operational testing.
+
+**Security:** S3 permissions should grant write access only to
+\`dev/market/lake_v2/backfills/*\` and
+\`dev/market/lake_v2/archives/*\` for these workflows; do not grant
+production-pointer mutation to the backfill IAM principal.
+
+### C. What this does NOT accomplish automatically
+
+S3-verified research candidate publication is NOT a production
+cutover. Every cohort's acceptance report can still be
+\`blocked\` or \`review_required\`, especially for raw source
+anomalies and missing FX/corporate-action evidence. The canonical
+full-population report currently contains 2,084 included assets,
+1,974 configured and 110 unresolved; this differs from the prior
+2,099 snapshot and requires universe-change reconciliation.
+Remaining deliverables include cross-cohort partition consolidation,
+full-universe price/return/indicator acceptance, reconciliation of
+110 unresolved instruments, immutable production release manifests,
+and consumer cutover with rollback. None should be marked complete
+solely by uploading to S3.

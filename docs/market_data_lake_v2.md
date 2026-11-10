@@ -269,3 +269,64 @@ The default-branch GitHub Actions pilot launcher includes this correction
 overlay, and its offline unit test covers append-only behavior and the
 unavailable adjusted-return boundary. The production daily ingestion and AEA-87
 historical repair pipelines remain unchanged.
+
+## Stage 4: Immutable, versioned Silver/Gold candidate publication
+
+Module: `alpha_edge.market.publish_lake_v2`. Implemented as **opt-in
+shadow publication** only; the default CI launcher runs local verification
+without AWS credentials or network writes.
+
+The candidate manifest records the Bronze manifest hash, row counts,
+manual-correction status, every artifact's SHA-256 checksum, and acceptance
+gates. Local verification rejects missing files, altered hashes, invalid
+schemas, or row-count mismatches.
+
+```bash
+poetry run python -m alpha_edge.market.publish_lake_v2 verify-local \
+  --candidate-dir ./outputs/market_silver_gold_v2/six_asset_pilot
+```
+
+Optional isolated staging (requires explicit AWS credentials and invocation;
+not performed by CI):
+
+```bash
+poetry run python -m alpha_edge.market.publish_lake_v2 stage \
+  --candidate-dir ./outputs/market_silver_gold_v2/six_asset_pilot \
+  --bucket YOUR_DEV_BUCKET --run-id six-asset-v2-001 --root dev/market
+
+poetry run python -m alpha_edge.market.publish_lake_v2 verify-staged \
+  --bucket YOUR_DEV_BUCKET --run-id six-asset-v2-001 --root dev/market
+```
+
+Staged objects live solely under
+`dev/market/lake_v2/candidates/<run-id>/`. Each artifact is written with
+a conditional create; original bytes are re-read and verified, then
+`_committed.json` is written last. A partial upload is never committed,
+and a retry must use a new run ID. Do not infer S3 multi-object atomicity
+from this protocol: consumers must require the final marker.
+
+Optional **dev-only** promotion is separate and requires a manually reviewed
+candidate-manifest SHA-256:
+
+```bash
+poetry run python -m alpha_edge.market.publish_lake_v2 promote-dev \
+  --bucket YOUR_DEV_BUCKET --run-id APPROVED_RUN_ID \
+  --root dev/market --approval REVIEWED_MANIFEST_SHA256
+```
+
+Promotion writes only `dev/market/lake_v2/current.json`, using a
+conditional update. It cannot modify any production reader pointer.
+It rejects a candidate with missing/unexpected sessions, quarantined
+prices, review returns, rejected FX, missing acceptance, or any manual
+correction. **The current ALSEA.MX correction is pending independent
+verification, so its candidate is not eligible for promotion.**
+
+Remaining items before a production-grade publisher:
+- Formal provenance sign-off, fully adjusted-close policy and exchange-
+  session evidence for the ALSEA correction.
+- Remote S3 IAM / bucket policy tests (least-privilege write paths),
+  versioning, incomplete-batch garbage collection and disaster recovery.
+- Reader-side immutable manifest/pointer protocol, rollback drill, golden-
+  dataset reconciliation and consumer compatibility tests.
+- End-to-end CI dry run against an isolated AWS sandbox only after separate
+  approval; no production writes or dev pointer update in routine CI.

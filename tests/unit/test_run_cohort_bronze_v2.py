@@ -82,3 +82,29 @@ def test_failed_cohort_does_not_claim_success(tmp_path):
                  runner=fail, sleeper=lambda _: None)
     assert report["state"] == "partial_failed"
     assert report["failed_cohorts"] == 1
+
+
+def test_start_cohort_two_does_not_repeat_first(tmp_path):
+    folder = plan(tmp_path)
+    calls = []
+    def fake(**kwargs):
+        calls.append(kwargs)
+        assert kwargs["upload"] is False
+        return {"local_path": "fake"}
+    dry = run(plan_dir=folder, output=tmp_path / "dry", batch_prefix="validation",
+              start="2025-01-01", end="2025-01-10", start_cohort=2, runner=fake)
+    assert dry["start_cohort"] == 2 and dry["planned_assets"] == 1
+    assert not calls
+    result = run(plan_dir=folder, output=tmp_path / "second", batch_prefix="validation",
+                 start="2025-01-01", end="2025-01-10", start_cohort=2,
+                 execute=True, retries=0, runner=fake)
+    assert result["attempted_cohorts"] == 1
+    assert calls[0]["batch_id"] == "validation-0002"
+    assert calls[0]["universe"]["asset_id"].tolist() == ["B"]
+
+
+def test_invalid_start_cohort_fails_closed(tmp_path):
+    folder = plan(tmp_path)
+    with pytest.raises(CohortRunError, match="Starting cohort"):
+        run(plan_dir=folder, output=tmp_path / "run", batch_prefix="validation",
+            start="2025-01-01", end="2025-01-10", start_cohort=3)

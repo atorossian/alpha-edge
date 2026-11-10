@@ -15,6 +15,7 @@ on:
       - "src/alpha_edge/market/publish_lake_v2.py"
       - "src/alpha_edge/market/data_quality_explorer_v2.py"
       - "src/alpha_edge/market/reconcile_aea87_lake_v2.py"
+      - "src/alpha_edge/market/export_aea87_for_reconciliation.py"
       - "src/alpha_edge/market/run_standardization_pilot_v2.py"
       - "data/quality/market_lake_v2/manual_ohlcv_corrections.csv"
       - "tests/unit/test_data_lake_v2.py"
@@ -24,6 +25,7 @@ on:
       - "tests/unit/test_publish_lake_v2.py"
       - "tests/unit/test_data_quality_explorer_v2.py"
       - "tests/unit/test_reconcile_aea87_lake_v2.py"
+      - "tests/unit/test_export_aea87_for_reconciliation.py"
       - ".github/workflows/market-data-lake-v2.yml"
   workflow_dispatch:
 
@@ -59,7 +61,8 @@ jobs:
             src/alpha_edge/market/manual_observations_v2.py \
             src/alpha_edge/market/publish_lake_v2.py \
             src/alpha_edge/market/data_quality_explorer_v2.py \
-            src/alpha_edge/market/reconcile_aea87_lake_v2.py
+            src/alpha_edge/market/reconcile_aea87_lake_v2.py \
+            src/alpha_edge/market/export_aea87_for_reconciliation.py
       - name: Run offline unit tests
         run: |
           poetry run pytest -v \
@@ -69,4 +72,5 @@ jobs:
             tests/unit/test_manual_observations_v2.py \
             tests/unit/test_publish_lake_v2.py \
             tests/unit/test_data_quality_explorer_v2.py \
-            tests/unit/test_reconcile_aea87_lake_v2.py
+            tests/unit/test_reconcile_aea87_lake_v2.py \
+            tests/unit/test_export_aea87_for_reconciliation.py

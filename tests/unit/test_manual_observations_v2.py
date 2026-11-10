@@ -103,3 +103,25 @@ def test_reject_unverified_adjusted_close():
     correction.loc[0, "adj_close"] = 51.80
     with pytest.raises(DataContractError, match="adjusted close"):
         append_manual_observations(sample(), correction)
+
+
+def test_explicit_equal_close_preserves_assertion_and_origin():
+    correction = corrections()
+    correction.loc[0, "adj_close"] = 51.80
+    correction.loc[0, "verification_status"] = "user_asserted_unverified"
+    correction["adj_close_policy"] = "explicit_equal_close"
+    candidate, audit = append_manual_observations(sample(), correction)
+    row = candidate.loc[candidate["observation_origin"].eq("user_supplied_manual")].iloc[0]
+    assert row["adj_close"] == pytest.approx(51.80)
+    assert row["adj_close_origin"] == "user_asserted_equal_close"
+    assert row["verification_status"] == "user_asserted_unverified"
+    assert audit.iloc[0]["adj_close_policy"] == "explicit_equal_close"
+
+
+def test_explicit_close_assertion_rejects_mismatch():
+    correction = corrections()
+    correction.loc[0, "adj_close"] = 51.00
+    correction.loc[0, "verification_status"] = "user_asserted_unverified"
+    correction["adj_close_policy"] = "explicit_equal_close"
+    with pytest.raises(DataContractError, match="must explicitly equal close"):
+        append_manual_observations(sample(), correction)

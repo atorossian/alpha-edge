@@ -31,19 +31,23 @@ def report_missing(bars: pd.DataFrame, universe: pd.DataFrame) -> tuple[pd.DataF
     for row in bars.itertuples(index=False):
         for field in FIELDS:
             value = getattr(row, field, None)
-            if pd.isna(value) or not np.isfinite(float(value)):
+            try:
+                numeric = float(value)
+            except (ValueError, TypeError):
+                numeric = float("nan")
+            if not np.isfinite(numeric):
                 findings.append({
                     "asset_id": row.asset_id, "provider_symbol": row.provider_symbol,
                     "session_date": str(row.session_date)[:10],
                     "field": field, "issue": "missing_or_nonfinite",
                 })
-            elif field in ("open", "high", "low", "close", "adj_close") and float(value) <= 0:
+            elif field in ("open", "high", "low", "close", "adj_close") and numeric <= 0:
                 findings.append({
                     "asset_id": row.asset_id, "provider_symbol": row.provider_symbol,
                     "session_date": str(row.session_date)[:10],
                     "field": field, "issue": "nonpositive_price",
                 })
-            elif field == "volume" and float(value) < 0:
+            elif field == "volume" and numeric < 0:
                 findings.append({
                     "asset_id": row.asset_id, "provider_symbol": row.provider_symbol,
                     "session_date": str(row.session_date)[:10],

@@ -51,3 +51,52 @@ def validate_old_only_against_calendar(old_dates, new_dates, calendar_name):
             "sessions": [str(x.date()) for x in sessions],
             "non_sessions": [str(x.date()) for x in non_sessions],
             "status": "PASSED" if len(sessions) == 0 else "REVIEW_REQUIRED"}
+
+
+
+# Explicitly mapped provider exchange identifiers. Unknown venues fail closed:
+# we must not silently use NYSE or weekday calendars for another country.
+# Calendar names are pandas_market_calendars identifiers, checked at runtime.
+AEA87_EXCHANGE_CALENDARS = {
+    "NYQ": "NYSE", "NYE": "NYSE", "NMS": "NASDAQ",
+    "NCM": "NASDAQ", "NGM": "NASDAQ", "ASE": "NYSE",
+    "GER": "XETR", "MUN": "XETR",
+    "PAR": "XPAR", "MIL": "XMIL", "AMS": "XAMS",
+    "MCE": "XMAD", "BRU": "XBRU", "VIE": "XWBO",
+    "HEL": "XHEL", "LIS": "XLIS",
+}
+
+
+def calendar_for_provider(exchange, quote_type, asset_id):
+    """Require a known, equity-like exchange; never guess for other venues."""
+    if str(asset_id).startswith("CRYPTO:"):
+        return None
+    if str(quote_type or "").upper() not in {"EQUITY", "ETF", "FUND"}:
+        return None
+    return AEA87_EXCHANGE_CALENDARS.get(str(exchange or "").upper())
+
+
+def verify_candidate_against_calendar(new_dates, calendar_name):
+    """Return explicit missing-calendar-session evidence without creating rows.
+
+    Calendar validity is checked over the candidate's first/last dates only.
+    Missing sessions may reflect trading suspensions or provider limitations
+    and therefore require manual verification, not invented observations.
+    """
+    import pandas_market_calendars as mcal
+    dates = pd.DatetimeIndex(pd.to_datetime(new_dates, utc=True)).tz_localize(None).normalize()
+    if dates.empty:
+        return {"status": "REVIEW_REQUIRED", "reason": "EMPTY_CANDIDATE", "dates": []}
+    try:
+        calendar = mcal.get_calendar(calendar_name)
+        valid = pd.DatetimeIndex(
+            calendar.valid_days(start_date=dates.min(), end_date=dates.max())
+        ).tz_localize(None).normalize()
+    except (ValueError, KeyError) as exc:
+        return {"status": "REVIEW_REQUIRED", "reason": "UNKNOWN_OR_INVALID_EXCHANGE_CALENDAR",
+                "calendar": calendar_name, "error": str(exc), "dates": []}
+    outside = dates.difference(valid)
+    return {"status": "PASSED" if outside.empty else "REVIEW_REQUIRED",
+            "reason": None if outside.empty else "SOURCE_DATES_OUTSIDE_EXCHANGE_CALENDAR",
+            "calendar": calendar_name, "dates": [str(d.date()) for d in outside],
+            "candidate_sessions": len(dates), "valid_exchange_sessions": len(valid)}

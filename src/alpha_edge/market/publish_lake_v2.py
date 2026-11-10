@@ -13,7 +13,7 @@ import argparse
 import hashlib
 import json
 import re
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 from botocore.exceptions import ClientError
@@ -64,7 +64,29 @@ def _run_id(value: str) -> str:
     return value
 
 
-def _manifest_paths(local: Path, manifest: dict) -> list[str]:
+def _canonical_manifest_name(name: str) -> str:
+    """Canonical portable artifact key; tolerate existing Windows candidates.
+
+    Legacy manifests may use Windows separators. Normalize only after
+    rejecting traversal, absolute paths, drive letters, empty segments and
+    ambiguous keys. New manifests are always emitted with POSIX separators.
+    """
+    if not isinstance(name, str):
+        raise PublicationError(f"Unsafe artifact filename: {name}")
+    portable = name.replace("\\", "/")
+    segments = portable.split("/")
+    if (
+        not SAFE_FILE.fullmatch(portable)
+        or portable.startswith("/")
+        or any(segment in ("", ".", "..") for segment in segments)
+        or ":" in portable
+    ):
+        raise PublicationError(f"Unsafe artifact filename: {name}")
+    return PurePosixPath(portable).as_posix()
+
+
+def _verified_artifacts(local: Path, manifest: dict) -> dict[str, tuple[str, Path]]:
+    """Map canonical S3 keys to (original manifest key, verified local file)."""
     declared = manifest.get("files_sha256")
     if not isinstance(declared, dict) or not REQUIRED_FILES.issubset(declared):
         raise PublicationError("Candidate manifest lacks required file checksums")
@@ -84,24 +106,30 @@ def _manifest_paths(local: Path, manifest: dict) -> list[str]:
         or manifest.get("silver_rows") != manifest.get("gold_rows")
     ):
         raise PublicationError("Bronze/Silver/Gold row count mismatch")
-    paths = []
-    for name, digest in declared.items():
-        if (
-            not isinstance(name, str) or not SAFE_FILE.fullmatch(name)
-            or name.startswith("/") or ".." in Path(name).parts
-            or "\\" in name
-        ):
-            raise PublicationError(f"Unsafe artifact filename: {name}")
+    assets = {}
+    for original, digest in declared.items():
+        canonical = _canonical_manifest_name(original)
+        if canonical in assets:
+            raise PublicationError(f"Ambiguous duplicate artifact key: {canonical}")
         if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
-            raise PublicationError(f"Invalid artifact digest: {name}")
-        path = local / name
-        if not path.is_file() or path.is_symlink():
-            raise PublicationError(f"Missing or unsafe artifact file: {name}")
+            raise PublicationError(f"Invalid artifact digest: {original}")
+        path = local.joinpath(*canonical.split("/"))
+        # Reject symlink parents as well as final files.
+        current = local
+        for part in canonical.split("/"):
+            current = current / part
+            if current.is_symlink():
+                raise PublicationError(f"Unsafe symlink artifact: {original}")
+        if not path.is_file():
+            raise PublicationError(f"Missing artifact file: {original}")
         if _sha(path.read_bytes()) != digest:
-            raise PublicationError(f"Artifact SHA-256 mismatch: {name}")
-        paths.append(name)
-    return sorted(paths)
+            raise PublicationError(f"Artifact SHA-256 mismatch: {original}")
+        assets[canonical] = (original, path)
+    return assets
 
+
+def _manifest_paths(local: Path, manifest: dict) -> list[str]:
+    return sorted(_verified_artifacts(local, manifest))
 
 def validate_local_candidate(local: Path) -> tuple[dict, list[str]]:
     manifest_file = local / "manifest.json"
@@ -144,6 +172,7 @@ def stage_candidate(
 ) -> dict:
     """Upload once. No overwrite, retry needs a *new* run ID after failure."""
     manifest, paths = validate_local_candidate(local)
+    artifacts = _verified_artifacts(local, manifest)
     prefix = _candidate_prefix(root, run_id)
     commit_key = f"{prefix}/_committed.json"
     if _read(s3, bucket, commit_key) is not None:
@@ -153,7 +182,7 @@ def stage_candidate(
         if _read(s3, bucket, f"{prefix}/{name}") is not None:
             raise PublicationError("Candidate run ID already partially staged; use a new ID")
     for name in paths:
-        data = (local / name).read_bytes()
+        data = artifacts[name][1].read_bytes()
         _put_once(
             s3, bucket, f"{prefix}/{name}", data,
             "text/csv" if name.endswith(".csv") else "application/octet-stream",
@@ -164,7 +193,7 @@ def stage_candidate(
     # Re-read all artifacts from S3 before publishing the final commit marker.
     for name in paths:
         value = _read(s3, bucket, f"{prefix}/{name}")
-        if value is None or _sha(value) != manifest["files_sha256"][name]:
+        if value is None or _sha(value) != manifest["files_sha256"][artifacts[name][0]]:
             raise PublicationError(f"Staged artifact mismatch: {name}")
     persisted_manifest = _read(s3, bucket, f"{prefix}/manifest.json")
     if persisted_manifest != source_manifest:
@@ -204,10 +233,13 @@ def verify_staged_candidate(
         raise PublicationError("Staged manifest missing mandatory tables")
     if len(files) != receipt.get("file_count"):
         raise PublicationError("Staged file count differs from receipt")
+    canonical_names = set()
     for name, digest in files.items():
-        if not isinstance(name, str) or not SAFE_FILE.fullmatch(name) or ".." in Path(name).parts:
-            raise PublicationError("Unsafe stored file path")
-        data = _read(s3, bucket, f"{prefix}/{name}")
+        canonical = _canonical_manifest_name(name)
+        if canonical in canonical_names:
+            raise PublicationError("Ambiguous stored artifact keys")
+        canonical_names.add(canonical)
+        data = _read(s3, bucket, f"{prefix}/{canonical}")
         if data is None or _sha(data) != digest:
             raise PublicationError(f"Published data integrity failure: {name}")
     return receipt, manifest

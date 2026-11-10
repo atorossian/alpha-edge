@@ -12,7 +12,7 @@ from dataclasses import dataclass
 
 import pandas as pd
 
-from alpha_edge.market.production_gold_release_v2 import CURRENT, ROOT, get, sha, verify_object
+from alpha_edge.market.production_gold_release_v2 import CURRENT, ROOT, get, sha, verify_object, ReleaseError
 
 
 class ActiveMarketDataError(RuntimeError):
@@ -62,7 +62,10 @@ class ActiveLakeV2:
         reference = cohort.get(layer)
         if not isinstance(reference, dict):
             raise ActiveMarketDataError(f"No pinned {layer} artifact in release")
-        blob = verify_object(self.s3, self.bucket, reference)
+        try:
+            blob = verify_object(self.s3, self.bucket, reference)
+        except ReleaseError as exc:
+            raise ActiveMarketDataError(f"Corrupt active release artifact: {exc}") from exc
         frame = pd.read_parquet(io.BytesIO(blob))
         if "asset_id" not in frame:
             raise ActiveMarketDataError("Release artifact missing asset_id")

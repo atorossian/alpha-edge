@@ -36,7 +36,7 @@ class S3:
 def candidate(s3):
     root = "market/lake_v2/releases/data/fixture"
     files = {}
-    for field in ("bronze", "silver", "gold", "fx"):
+    for field in ("bronze", "silver", "gold", "fx", "indicator_candidate"):
         key = f"{root}/{field}.parquet"
         blob = field.encode()
         s3.objects[key] = blob

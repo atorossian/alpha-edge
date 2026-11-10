@@ -32,6 +32,7 @@ on:
       - "src/alpha_edge/market/publish_production_bronze_v2.py"
       - "src/alpha_edge/market/production_gold_release_v2.py"
       - "src/alpha_edge/market/run_daily_pipeline_v2.py"
+      - "src/alpha_edge/market/prepare_initial_gold_v2.py"
       - ".gitignore"
       - "data/quality/market_lake_v2/exchange_calendar_mapping_v2.csv"
       - "src/alpha_edge/market/run_standardization_pilot_v2.py"
@@ -62,6 +63,7 @@ on:
       - "tests/unit/test_publish_production_bronze_v2.py"
       - "tests/unit/test_production_gold_release_v2.py"
       - "tests/unit/test_run_daily_pipeline_v2.py"
+      - "tests/unit/test_prepare_initial_gold_v2.py"
       - ".github/workflows/market-data-lake-v2.yml"
   workflow_dispatch:
 
@@ -114,7 +116,8 @@ jobs:
             src/alpha_edge/market/archive_local_outputs_v2.py \
             src/alpha_edge/market/publish_production_bronze_v2.py \
             src/alpha_edge/market/production_gold_release_v2.py \
-            src/alpha_edge/market/run_daily_pipeline_v2.py
+            src/alpha_edge/market/run_daily_pipeline_v2.py \
+            src/alpha_edge/market/prepare_initial_gold_v2.py
       - name: Run offline unit tests
         run: |
           poetry run pytest -v \
@@ -140,4 +143,5 @@ jobs:
             tests/unit/test_archive_local_outputs_v2.py \
             tests/unit/test_publish_production_bronze_v2.py \
             tests/unit/test_production_gold_release_v2.py \
-            tests/unit/test_run_daily_pipeline_v2.py
+            tests/unit/test_run_daily_pipeline_v2.py \
+            tests/unit/test_prepare_initial_gold_v2.py

@@ -11,3 +11,8 @@ logs/
 bulk_logs/
 .DS_Store
 data/outputs/**
+
+# Runtime artifacts and generated market-data files (never versioned)
+/outputs/
+/data/outputs/
+/.alpha_edge_runs/

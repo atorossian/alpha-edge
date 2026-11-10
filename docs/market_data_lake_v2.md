@@ -100,3 +100,64 @@ python -m alpha_edge.market.run_data_lake_v2 \
 
 **Current state:** PR 1 is a pilot only. No live Yahoo fetching, production
 S3 pipeline promotion or daily pipeline integration is claimed.
+
+## Stage 2: Yahoo Bronze acquisition (initial implementation)
+
+Module: `alpha_edge.market.ingest_bronze_yahoo_v2`.
+This is a **standalone shadow ingestion pilot**, not a replacement of
+`ingest_market_data.py`. The legacy AEA-87 repair and publishing jobs remain
+unchanged. No historical data has been modified.
+
+The Stage-2 source contract records:
+
+- Original OHLC, adjusted close, volume and Yahoo dividend/split columns
+  without USD conversion, return calculation, price repair or deduplication.
+- Original index timestamp representation, source timezone, local session date,
+  provider symbol, exchange, reported original currency and batch metadata.
+- Unmodified Yahoo FX quote prices (`quote_close`) under the requested
+  provider symbol; these are **not yet** the Silver `fx_to_usd` rates.
+- Immutable local per-run Parquet data plus manifest and SHA-256 checksums.
+  Optional S3 output is under `dev/market/lake_v2/bronze/batches/<batch-id>`
+  by default. The legacy `market/` root is refused.
+
+Run a small asset sample using a CSV with `asset_id,yahoo_ticker` and optional
+`currency` / `include` columns:
+
+```bash
+python -m alpha_edge.market.ingest_bronze_yahoo_v2 \
+  --universe-csv ./samples/bronze_universe.csv \
+  --fx-symbols 'EURUSD=X;USDEUR=X' \
+  --start 2026-10-01 --end 2026-10-31 \
+  --output ./outputs/market_bronze_v2
+```
+
+To stage to S3 as well, add `--upload --bucket alpha-edge-algo
+--market-root dev/market`. Use a unique batch ID. The process fails the
+entire batch on a failed provider response or missing currency; this is
+intentional for the initial small-pilot contract. It must evolve to preserve
+per-symbol failures and successful responses independently for large universes.
+
+**Important source caveats:** Yahoo/yfinance does not expose exact raw HTTP
+payload bytes via this adapter. Parquet contains the original numerical
+values returned by yfinance plus the index time representation, not a
+byte-for-byte provider payload. Yahoo currency units such as GBp versus GBP
+require an explicit future Silver quote-unit normalization policy; do not
+treat them as equivalent. These new raw FX quote tables must not be passed
+directly to `run_data_lake_v2`, which currently requires already oriented
+USD-per-unit FX values. A validated FX normalization adapter is still needed.
+
+Run tests:
+```bash
+pytest tests/unit/test_ingest_bronze_yahoo_v2.py tests/unit/test_data_lake_v2.py -q
+```
+
+**Remaining before Stage 2 production acceptance:**
+- Implement Yahoo retry/rate limiting and per-asset response failure manifests,
+  reusing the tested AEA-87 mechanisms where appropriate.
+- Extend the ingest metadata with explicit native quote-unit conventions,
+  provider/library version and source exchange timezone confidence.
+- Introduce object immutability enforcement / conditional writes for S3
+  and robust orphaned-batch cleanup. A manifest-last publication on its own
+  is not a multi-object atomic transaction.
+- Validate full-history run performance and compare with existing AEA-87
+  source extracts; do not enable daily scheduling yet.

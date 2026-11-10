@@ -57,7 +57,8 @@ jobs:
             tests/unit/test_ingest_bronze_yahoo_v2.py \
             tests/unit/test_standardize_bronze_v2.py \
             tests/unit/test_manual_observations_v2.py \
-            tests/unit/test_publish_lake_v2.py
+            tests/unit/test_publish_lake_v2.py \
+            tests/unit/test_data_quality_explorer_v2.py
       - name: Acquire original Yahoo prices and FX quotes
         shell: bash
         env:
@@ -88,7 +89,12 @@ jobs:
         run: |
           poetry run python -m alpha_edge.market.publish_lake_v2 verify-local \
             --candidate-dir ./outputs/market_silver_gold_v2/six_asset_pilot
-      - name: Preserve Bronze and Silver/Gold evidence
+      - name: Build read-only Data Quality Explorer snapshot
+        run: |
+          poetry run python -m alpha_edge.market.data_quality_explorer_v2 \
+            --candidate-dir ./outputs/market_silver_gold_v2/six_asset_pilot \
+            --output ./outputs/market_explorer_v2/index.html
+      - name: Preserve Bronze, Silver/Gold and Explorer evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -96,5 +102,6 @@ jobs:
           path: |
             outputs/market_bronze_v2/
             outputs/market_silver_gold_v2/
+            outputs/market_explorer_v2/
           if-no-files-found: warn
           retention-days: 14

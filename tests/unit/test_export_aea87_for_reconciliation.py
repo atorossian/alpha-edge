@@ -97,3 +97,46 @@ def test_export_six_assets_requires_readonly_and_writes_only_local(tmp_path):
             s3=s3, bucket="example", universe_csv=universe, start="2025-01-01",
             end_exclusive="2025-01-04", output=out,
         )
+
+
+def test_active_aea87_repair_part_is_accepted_without_broad_s3_access():
+    s3 = S3Fake()
+    original_part, manifest_key = populate(s3, aid="EQH4561ad9433b2a662", year=2025)
+    repaired = (
+        "market/repairs/aea87/rebuild_publications/v1/"
+        "aea87_rebuild_20261103T140216Z_57fb3b66_EQH4561ad9433b2a662/"
+        "parts/ohlcv_usd/asset_id=EQH4561ad9433b2a662/year=2025/data.parquet"
+    )
+    s3.data[repaired] = s3.data[original_part]
+    s3.data[manifest_key] = json.dumps({
+        "asset_id": "EQH4561ad9433b2a662", "year": 2025,
+        "parts": [repaired],
+    }).encode()
+    frame, evidence = fetch_table(
+        s3, bucket="example", root="market", version="v1",
+        table="ohlcv_usd", asset_ids=["EQH4561ad9433b2a662"],
+        years=[2025], start="2025-01-01", end_exclusive="2025-01-04",
+    )
+    assert len(frame) == 2
+    assert evidence[0]["parts"][0]["key"] == repaired
+    assert ("get", original_part) not in s3.requests
+
+
+@pytest.mark.parametrize("replacement", [
+    "parts/returns_usd/",
+    "parts/ohlcv_usd/asset_id=OTHER/",
+    "parts/ohlcv_usd/asset_id=EQH4561ad9433b2a662/year=2026/",
+    "../parts/ohlcv_usd/",
+])
+def test_malformed_aea87_repair_part_fails_closed(replacement):
+    from alpha_edge.market.export_aea87_for_reconciliation import _approved_active_part
+    valid = (
+        "market/repairs/aea87/rebuild_publications/v1/"
+        "aea87_rebuild_20261103T140216Z_57fb3b66_EQH4561ad9433b2a662/"
+        "parts/ohlcv_usd/asset_id=EQH4561ad9433b2a662/year=2025/data.parquet"
+    )
+    invalid = valid.replace("parts/ohlcv_usd/asset_id=EQH4561ad9433b2a662/year=2025/", replacement)
+    assert not _approved_active_part(
+        invalid, root="market", version="v1", table="ohlcv_usd",
+        asset_id="EQH4561ad9433b2a662", year=2025,
+    )

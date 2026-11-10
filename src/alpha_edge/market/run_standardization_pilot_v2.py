@@ -13,6 +13,7 @@ from pathlib import Path
 import pandas as pd
 
 from alpha_edge.market.standardize_bronze_v2 import build_silver_gold_from_bronze
+from alpha_edge.market.manual_observations_v2 import append_manual_observations
 
 
 def _sha256(path: Path) -> str:
@@ -34,8 +35,18 @@ def _source_inputs(batch_dir: Path) -> tuple[pd.DataFrame, pd.DataFrame, dict]:
     )
 
 
-def generate(batch_dir: Path, *, output: Path) -> dict:
+def generate(
+    batch_dir: Path, *, output: Path, corrections_csv: Path | None = None
+) -> dict:
     bars, quotes, source = _source_inputs(batch_dir)
+    source_row_count = len(bars)
+    correction_audit = None
+    correction_sha256 = None
+    if corrections_csv is not None:
+        correction_sha256 = _sha256(corrections_csv)
+        corrections = pd.read_csv(corrections_csv)
+        if len(corrections):
+            bars, correction_audit = append_manual_observations(bars, corrections)
     outputs = build_silver_gold_from_bronze(bars, quotes)
     if len(outputs["bronze_validated"]) != len(bars) or len(outputs["silver"]) != len(bars):
         raise ValueError("Bronze-to-Silver row count mismatch")
@@ -46,6 +57,10 @@ def generate(batch_dir: Path, *, output: Path) -> dict:
     # Work in a local candidate folder; manifest last.
     output.mkdir(parents=True)
     artifacts = {}
+    if correction_audit is not None:
+        target = output / "manual_corrections_audit.parquet"
+        correction_audit.to_parquet(target, index=False)
+        artifacts[target.name] = _sha256(target)
     for name, table in outputs.items():
         filename = name + ".parquet"
         target = output / filename
@@ -88,7 +103,14 @@ def generate(batch_dir: Path, *, output: Path) -> dict:
         "schema": "market_data_lake_v2_silver_gold_candidate_1",
         "bronze_batch_id": source.get("batch_id"),
         "bronze_manifest_sha256": _sha256(batch_dir / "manifest.json"),
-        "source_rows": len(bars),
+        "source_rows": source_row_count,
+        "manual_correction_rows": len(bars) - source_row_count,
+        "candidate_input_rows": len(bars),
+        "manual_corrections_csv_sha256": correction_sha256,
+        "manual_correction_approval": (
+            "pending_independent_verification"
+            if correction_audit is not None else "not_applicable"
+        ),
         "silver_rows": len(outputs["silver"]),
         "gold_rows": len(outputs["gold"]),
         "fx_quote_rows": len(quotes),
@@ -106,8 +128,10 @@ def generate(batch_dir: Path, *, output: Path) -> dict:
         "files_sha256": artifacts,
         "publication_state": "candidate_only",
         "legacy_production_unchanged": True,
-        "acceptance": "review_required" if any(
-            a["quarantined_prices"] or a["review_returns"] for a in summary
+        "acceptance": "review_required" if (
+            correction_audit is not None
+            or len(outputs["session_issues"]) > 0
+            or any(a["quarantined_prices"] or a["review_returns"] for a in summary)
         ) else "initial_contract_pass",
         "warning": "Calendar audit covers only first-to-last observed sessions; "
                    "no official-close-time or corporate-action verification yet.",
@@ -120,8 +144,11 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--bronze-batch-dir", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--corrections-csv", type=Path, default=None)
     args = parser.parse_args()
-    print(json.dumps(generate(args.bronze_batch_dir, output=args.output), indent=2))
+    print(json.dumps(generate(
+        args.bronze_batch_dir, output=args.output, corrections_csv=args.corrections_csv
+    ), indent=2))
 
 
 if __name__ == "__main__":

@@ -243,14 +243,20 @@ def run(*, s3, bucket: str, as_of: str, execute: bool,
             required_fx = cohort.get("fx_mapping", [])
             if not isinstance(required_fx, list):
                 raise IncrementalError("Missing FX mapping")
+            needed_currencies = {
+                row["currency"] for row in registry if row["currency"] != "USD"
+            }
             rates = {}
             symbols = {}
             for entry in required_fx:
                 currency = entry["currency"]
                 if currency in rates or entry["direction"] not in {"direct", "inverse"}:
                     raise IncrementalError("Duplicate/invalid FX mapping")
-                rates[currency] = (entry["provider_symbol"], entry["direction"])
-                symbols[entry["provider_symbol"]] = entry
+                if currency in needed_currencies:
+                    rates[currency] = (entry["provider_symbol"], entry["direction"])
+                    symbols[entry["provider_symbol"]] = entry
+            if set(rates) != needed_currencies:
+                raise IncrementalError("Missing explicit native-currency FX mapping")
             fresh = []
             provenance = []
             for asset in registry:

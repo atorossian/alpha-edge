@@ -752,3 +752,137 @@ poetry run python -m alpha_edge.market.source_evidence_v2 \
 **Status:** readiness scaffolding and local cohort workflow implemented;
 safeguarded full-universe **Bronze implementation** can begin with verified
 registry cohorts. Full-universe **Gold publication/cutover is not authorized**.
+
+
+## Full population and maximum available history backfill (v2)
+
+The canonical universe is \`data/universe/universe.csv\`. As inspected
+2026-11-10, it contains 2,206 records and 2,099 included rows; **this is not
+the original six-asset pilot or the historical ~1,700-asset estimate**.
+Among included rows, at least 16 lack Yahoo exchange/currency metadata,
+one uses the Munich exchange without an approved mapping, and several
+Yahoo tickers occur under multiple asset IDs. These MUST be visible in
+\`requires_review.csv\`, not silently excluded or counted as successfully
+backfilled.
+
+### 1. Resolve universe configuration
+
+\`\`\`bash
+poetry run python -m alpha_edge.market.prepare_full_universe_registry_v2 \
+  --universe-csv data/universe/universe.csv \
+  --exchange-map-csv data/quality/market_lake_v2/exchange_calendar_mapping_v2.csv \
+  --fx-csv data/quality/market_lake_v2/pilot_fx_registry_v2.csv \
+  --output outputs/full_universe_registry_v2/first_review
+\`\`\`
+
+Inspect \`requires_review.csv\` and \`all_included_audit.csv\` carefully.
+\`ready_registry.csv\` only means configuration-ready. The exchange map
+represents the source's listed exchange metadata; generic US equity
+holiday sessions use the NYSE calendar as an **explicit provisional
+US-session proxy** for NASDAQ, Cboe and NYSE Arca, not a certification
+of venue-specific closing times. Cryptocurrency instruments use 24/7
+sessions. Additional exchange mappings should be researched and
+validated; do not infer missing currency as USD.
+
+Create immutable cohort plan from explicitly configured eligible assets:
+
+\`\`\`bash
+poetry run python -m alpha_edge.market.preflight_universe_v2 \
+  --universe-csv outputs/full_universe_registry_v2/first_review/ready_registry.csv \
+  --fx-csv data/quality/market_lake_v2/pilot_fx_registry_v2.csv \
+  --cohort-size 25 \
+  --output outputs/full_universe_preflight_v2/first_review
+\`\`\`
+
+Until the unresolved assets are adjudicated, this plan deliberately
+covers the **configuration-ready subset**, *not* the full population.
+Use \`requires_review.csv\` as an outstanding coverage ledger.
+
+### 2. Full historical Yahoo data, rather than 2025 onward
+
+\`--full-history\` requests \`period=max\` per source asset and FX
+symbol, with \`--end\` as the exclusive request bound. It preserves the
+first and last observed session in each source's manifest provenance,
+and does **not** claim access before Yahoo's available first date.
+The full-backfill mode is supported in both the direct Bronze ingestion
+and cohort runner; it remains local-only and explicitly opt-in.
+
+First dry-run:
+
+\`\`\`bash
+poetry run python -m alpha_edge.market.run_cohort_bronze_v2 \
+  --plan-dir outputs/full_universe_preflight_v2/first_review \
+  --batch-prefix historical-v2 \
+  --full-history --end 2026-11-10 \
+  --max-cohorts 1 \
+  --output outputs/full_history_bronze_v2/dry
+\`\`\`
+
+Then execute one representative cohort:
+
+\`\`\`bash
+poetry run python -m alpha_edge.market.run_cohort_bronze_v2 \
+  --plan-dir outputs/full_universe_preflight_v2/first_review \
+  --batch-prefix historical-v2 \
+  --full-history --end 2026-11-10 \
+  --max-cohorts 1 --start-cohort 1 --execute \
+  --output outputs/full_history_bronze_v2/first
+\`\`\`
+
+To process subsequent cohorts, increase \`--start-cohort\` and choose a
+**new output directory** for each immutable execution. The bounded
+runner records failures and never authorizes production writes. It
+currently acquires each cohort atomically: a single provider failure
+can leave a whole cohort failed, requiring a reviewed retry. It is NOT
+a completed automated asset-level backfill/recovery system.
+
+### 3. Missing OHLCV coverage and exception handling
+
+For every locally acquired Bronze cohort:
+
+\`\`\`bash
+poetry run python -m alpha_edge.market.audit_missing_ohlcv_v2 \
+  --bronze-dir outputs/full_history_bronze_v2/first/bronze_batches/historical-v2-0001 \
+  --asset-registry-csv outputs/full_universe_preflight_v2/first_review/cohort_0001.csv \
+  --fx-registry-csv outputs/full_universe_preflight_v2/first_review/fx_config.csv \
+  --output outputs/full_history_missing_audit_v2/first
+\`\`\`
+
+Results:
+- \`missing_price_fields.csv\`: null/nonfinite/nonpositive OHLCV.
+- \`missing_exchange_sessions.csv\`: missing and unexpected sessions
+  between first and last observed dates per asset.
+- \`asset_coverage.csv\`: first/last observed dates, count and gap totals.
+
+Do NOT interpret first observed date as exchange listing/inception
+confirmation. An asset with no Yahoo records fails acquisition and is
+recorded as a cohort failure; it will not appear in the successful
+Bronze missing-price audit. Explicit endpoint/inception verification
+is a separate outstanding acceptance gate.
+
+### 4. ALSEA.MX April 22 manual observation
+
+\`manual_ohlcv_corrections.csv\` records original OHLCV
+O=51.50, H=52.06, L=51.10, C=51.80, V=140975 MXN;
+the user explicitly asserted Adj Close = Close = 51.80.
+\`verification_status=user_asserted_unverified\` and
+\`adj_close_policy=explicit_equal_close\` retain this origin.
+The standardization runner automatically reconciles relevant
+manual correction records for the cohort by asset ID.
+The original provider Bronze batch is NEVER modified. This user
+assertion is usable in a candidate, but remains an independent
+verification blocker for production approval.
+
+### Remaining work for true 2,099-asset historical completion
+
+- Resolve unmapped or duplicate symbols and missing currency/exchange
+  metadata; reconcile 2,099 included rows to acquired, failed, or
+  explicitly reviewed exceptions without silently dropping anything.
+- Provider rate limits, persistent per-asset checkpoint/resume,
+  asset-level retries and retryable historical download failures.
+- Per-cohort Silver/Gold, independent acceptance and FX synchronization
+  over full history; enforce independent corporate-action factor evidence
+  and FX observation-timing policy before promotion.
+- Aggregate cohort validation and lake publication with immutable
+  manifests, strict date coverage and rollback; no production cutover
+  without separate authorization.

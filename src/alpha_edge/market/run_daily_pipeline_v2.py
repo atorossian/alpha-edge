@@ -33,7 +33,7 @@ from alpha_edge.market.independent_daily_quality_v2 import review as independent
 from alpha_edge.market.indicator_calculations import compute_market_indicators_for_asset
 from alpha_edge.market.production_gold_release_v2 import (
     CURRENT, ROOT, get, sha, encoded, immutable_put, verify_object,
-    validate_release, ReleaseError,
+    validate_release, stage, ReleaseError,
 )
 
 MANDATORY = ("asset_id", "provider_symbol", "currency_original", "session_date")
@@ -356,15 +356,22 @@ def run(*, s3, bucket: str, as_of: str, execute: bool,
         # Immutable snapshots and the complete aggregate manifest live in S3.
         receipt = _put_json(s3, bucket, prefix + "/release_candidate.json", candidate)
         output_keys.append(receipt["key"])
+        # Stage under the canonical immutable release catalog, without
+        # publishing current.json. Arithmetic failures fail closed.
+        staged = stage(s3, bucket=bucket, release=candidate, execute=True)
+        output_keys.append(staged["release_key"])
         writer = audit_writer or _audit
         writer(cfg, run_id=run_id, as_of=as_of, status="review_required",
                keys=output_keys, metadata={
-                   "candidate": receipt, "cohorts": len(records),
+                   "candidate": receipt, "staged_release": staged,
+                   "cohorts": len(records),
                    "previous_release_id": prior["release_id"],
                    "s3_only": True, "gold_activated": False,
                })
         return {
             "status": "review_required", "candidate_manifest": receipt,
+            "release_manifest": staged["release_key"],
+            "release_sha256": staged["release_sha256"],
             "cohorts_staged": len(records), "gold_activated": False,
             "persistent_local_files": 0,
         }

@@ -202,6 +202,16 @@ def build_silver_gold_from_bronze(
         )
     flagged.loc[missing_flag | unexpected_flag, "quality_status"] = "quarantined"
     silver = standardize_bars(flagged, rates, policy=policy)
+    # Convert genuine offset-aware provider index labels to UTC instants,
+    # without reinterpreting their exchange session dates as UTC dates.
+    # A Yahoo daily bar label is NOT an independently verified close time.
+    if "source_timestamp" in silver.columns:
+        strings = silver["source_timestamp"].astype("string")
+        aware = strings.str.contains(r"(?:Z|[+-]\\d{2}:\\d{2})$", regex=True, na=False)
+        silver["source_timestamp_utc"] = pd.to_datetime(
+            strings.where(aware), errors="coerce", utc=True, format="mixed"
+        )
+        silver["source_timestamp_semantics"] = "provider_daily_bar_label_not_close_time"
     # Preserve FX lineage through the conversion, including original quote,
     # quote direction and source symbol. Never substitute an unaccepted quote.
     fx_lineage = rates[

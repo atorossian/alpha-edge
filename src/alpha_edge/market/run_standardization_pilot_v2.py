@@ -14,6 +14,7 @@ import pandas as pd
 
 from alpha_edge.market.standardize_bronze_v2 import build_silver_gold_from_bronze
 from alpha_edge.market.manual_observations_v2 import append_manual_observations
+from alpha_edge.market.preflight_universe_v2 import prepare_registry
 
 
 def _sha256(path: Path) -> str:
@@ -36,7 +37,8 @@ def _source_inputs(batch_dir: Path) -> tuple[pd.DataFrame, pd.DataFrame, dict]:
 
 
 def generate(
-    batch_dir: Path, *, output: Path, corrections_csv: Path | None = None
+    batch_dir: Path, *, output: Path, corrections_csv: Path | None = None,
+    asset_registry_csv: Path | None = None, fx_registry_csv: Path | None = None,
 ) -> dict:
     bars, quotes, source = _source_inputs(batch_dir)
     source_row_count = len(bars)
@@ -47,7 +49,33 @@ def generate(
         corrections = pd.read_csv(corrections_csv)
         if len(corrections):
             bars, correction_audit = append_manual_observations(bars, corrections)
-    outputs = build_silver_gold_from_bronze(bars, quotes)
+    if (asset_registry_csv is None) != (fx_registry_csv is None):
+        raise ValueError("Both asset and FX registries must be supplied together")
+    config_hashes = None
+    if asset_registry_csv is not None:
+        u, fx_registry = prepare_registry(
+            pd.read_csv(asset_registry_csv), pd.read_csv(fx_registry_csv)
+        )
+        source_identity = bars.groupby("asset_id")[["provider_symbol", "currency_original"]].first()
+        expected_identity = u.set_index("asset_id")
+        if set(source_identity.index) != set(expected_identity.index):
+            raise ValueError("Bronze cohort does not match explicit asset registry")
+        for aid in expected_identity.index:
+            if (source_identity.loc[aid, "provider_symbol"] != expected_identity.loc[aid, "yahoo_ticker"]
+                    or source_identity.loc[aid, "currency_original"] != expected_identity.loc[aid, "currency"]):
+                raise ValueError(f"{aid}: Bronze identity or native currency inconsistent with registry")
+        calendars = dict(zip(u["yahoo_ticker"], u["calendar_id"]))
+        pairs = {r.currency: (r.provider_symbol, r.direction)
+                 for r in fx_registry.itertuples(index=False)}
+        config_hashes = {
+            "asset_registry_sha256": _sha256(asset_registry_csv),
+            "fx_registry_sha256": _sha256(fx_registry_csv),
+        }
+    else:
+        calendars, pairs = None, None
+    outputs = build_silver_gold_from_bronze(
+        bars, quotes, calendars=calendars, pairs=pairs
+    )
     if len(outputs["bronze_validated"]) != len(bars) or len(outputs["silver"]) != len(bars):
         raise ValueError("Bronze-to-Silver row count mismatch")
     if len(outputs["gold"]) != len(bars):
@@ -125,6 +153,7 @@ def generate(
             outputs["session_issues"]["issue"].eq("unexpected_session").sum()
         ),
         "assets": summary,
+        "source_config_hashes": config_hashes,
         "files_sha256": artifacts,
         "publication_state": "candidate_only",
         "legacy_production_unchanged": True,
@@ -145,9 +174,12 @@ def main() -> None:
     parser.add_argument("--bronze-batch-dir", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--corrections-csv", type=Path, default=None)
+    parser.add_argument("--asset-registry-csv", type=Path, default=None)
+    parser.add_argument("--fx-registry-csv", type=Path, default=None)
     args = parser.parse_args()
     print(json.dumps(generate(
-        args.bronze_batch_dir, output=args.output, corrections_csv=args.corrections_csv
+        args.bronze_batch_dir, output=args.output, corrections_csv=args.corrections_csv,
+        asset_registry_csv=args.asset_registry_csv, fx_registry_csv=args.fx_registry_csv,
     ), indent=2))
 
 

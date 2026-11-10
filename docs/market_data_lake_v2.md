@@ -364,3 +364,56 @@ asset service or production-facing website. It does not yet fetch arbitrary
 historical revisions from S3 or independently compare AEA-87 and lake-v2
 history: historical reconciliation is a separate milestone. Source and
 corporate-action verification are still required for manual corrections.
+
+## Historical reconciliation: AEA-87 versus Lake v2 (read-only)
+
+Module: `alpha_edge.market.reconcile_aea87_lake_v2`.
+
+The reconciler compares candidate Gold against **explicitly supplied**
+local AEA-87 history extracts; it does not fetch or write S3 objects.
+It requires the legacy price series and return series, each containing
+`asset_id`, a `date` or `session_date` session label, and their
+corresponding values:
+
+- prices: `close_adjusted_usd`
+- returns: `ret_close_adjusted_usd`
+
+Input CSV or Parquet files must be exported from the AEA-87 repaired
+dataset and retain asset IDs/dates without reinterpretation. The tool
+verifies the lake-v2 candidate manifest and records SHA-256 hashes of
+both supplied AEA-87 files. Comparison is a full outer join on
+`(asset_id, session_date)`, not a potentially lossy inner join.
+
+Example:
+
+```bash
+poetry run python -m alpha_edge.market.reconcile_aea87_lake_v2 \
+  --candidate-dir ./outputs/market_silver_gold_v2/six_asset_pilot \
+  --legacy-prices ./evidence/aea87_prices.parquet \
+  --legacy-returns ./evidence/aea87_returns.parquet \
+  --legacy-return-kind unknown \
+  --output ./outputs/aea87_v2_reconciliation/six_asset_pilot
+```
+
+Outputs: `session_differences.csv`, `asset_reconciliation_summary.csv`
+and `manifest.json`. The output directory is created once, with no
+overwrite. Daily session presence, missing/invalid adjusted USD prices,
+return comparison eligibility, price/return discrepancies, quarantines
+and manual corrections are recorded separately.
+
+**Crucial return convention:** AEA-87 legacy returns may have been
+stored as log values under an ambiguously named `ret_close_adjusted_usd`
+column. The default `--legacy-return-kind unknown` deliberately
+marks returns NOT COMPARABLE rather than assuming arithmetic returns.
+Use `simple` or `log` only after independently verifying the specific
+legacy extract's provenance. Do not infer the return kind from a ticker,
+filename or the numeric values alone.
+
+No AEA-87 source extracts have been supplied to this implementation yet:
+the unit tests exercise synthetic fixtures only. Genuine historical
+equivalence is **not** claimed and the current ALSEA.MX manual
+adjusted-close gap remains an explicit review item.
+
+Next: obtain read-only AEA-87 extracts for the same six asset IDs and
+date interval, run the reconciler, review differences and add its
+results as a separate comparison view in the Explorer.

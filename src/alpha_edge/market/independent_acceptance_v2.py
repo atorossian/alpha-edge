@@ -21,6 +21,7 @@ import pandas as pd
 from alpha_edge.market.publish_lake_v2 import validate_local_candidate
 from alpha_edge.market.ingest_corporate_actions_v2 import load_verified_batch
 from alpha_edge.market.standardize_bronze_v2 import PILOT_FX_PAIRS
+from alpha_edge.market.preflight_universe_v2 import prepare_registry
 
 
 class AcceptanceError(ValueError):
@@ -69,8 +70,27 @@ def _event(events: list[dict], *, check: str, frame: pd.DataFrame, mask, reason:
 
 def validate(
     *, candidate_dir: Path, bronze_dir: Path, action_batch_dir: Path | None = None,
+    asset_registry_csv: Path | None = None, fx_registry_csv: Path | None = None,
 ) -> tuple[pd.DataFrame, dict]:
     manifest, _ = validate_local_candidate(candidate_dir)
+    configured = manifest.get("source_config_hashes")
+    if configured:
+        if asset_registry_csv is None or fx_registry_csv is None:
+            raise AcceptanceError("Candidate requires original source configuration")
+        if (_sha(asset_registry_csv) != configured.get("asset_registry_sha256")
+                or _sha(fx_registry_csv) != configured.get("fx_registry_sha256")):
+            raise AcceptanceError("Configuration hash mismatch")
+        u, fx_config = prepare_registry(
+            pd.read_csv(asset_registry_csv), pd.read_csv(fx_registry_csv)
+        )
+        if set(u["asset_id"]) != {item["asset_id"] for item in manifest["assets"]}:
+            raise AcceptanceError("Configured asset registry differs from candidate")
+        approved_pairs = {r.currency: (r.provider_symbol, r.direction)
+                          for r in fx_config.itertuples(index=False)}
+    else:
+        if asset_registry_csv is not None or fx_registry_csv is not None:
+            raise AcceptanceError("Candidate has no bound source configuration")
+        approved_pairs = PILOT_FX_PAIRS
     bars, quotes, bronze_manifest = _bronze(bronze_dir)
     if _sha(bronze_dir / "manifest.json") != manifest.get("bronze_manifest_sha256"):
         raise AcceptanceError("Candidate Bronze manifest digest differs from supplied source")
@@ -191,14 +211,14 @@ def validate(
     invalid_direction = ~quoted["fx_quote_direction"].isin(["direct", "inverse"])
     if invalid_direction.any() or not _equal(pd.Series(expected_rate), normalized_rate).all():
         raise AcceptanceError("FX inversion/direct quote arithmetic inconsistency")
-    for currency, (symbol, direction) in PILOT_FX_PAIRS.items():
+    for currency, (symbol, direction) in approved_pairs.items():
         subset = quoted.loc[quoted["currency_original"].eq(currency)]
         if not subset.empty and (
             subset["fx_quote_symbol"].ne(symbol).any()
             or subset["fx_quote_direction"].ne(direction).any()
         ):
             raise AcceptanceError(f"Unexpected FX quote mapping for {currency}")
-    if set(gold["currency_original"].astype(str)) - {"USD", *PILOT_FX_PAIRS}:
+    if set(gold["currency_original"].astype(str)) - {"USD", *approved_pairs}:
         raise AcceptanceError("Unconfigured original currency in pilot")
     rates = fx_native[["currency_original", "fx_date", "fx_to_usd"]].copy()
     if rates.duplicated(["currency_original", "fx_date"]).any():
@@ -310,12 +330,15 @@ def validate(
 
 
 def generate(*, candidate_dir: Path, bronze_dir: Path, output: Path,
-             action_batch_dir: Path | None = None) -> dict:
+             action_batch_dir: Path | None = None,
+             asset_registry_csv: Path | None = None,
+             fx_registry_csv: Path | None = None) -> dict:
     if output.exists():
         raise FileExistsError(f"Refusing to overwrite audit: {output}")
     failures, report = validate(
         candidate_dir=candidate_dir, bronze_dir=bronze_dir,
         action_batch_dir=action_batch_dir,
+        asset_registry_csv=asset_registry_csv, fx_registry_csv=fx_registry_csv,
     )
     output.mkdir(parents=True, exist_ok=False)
     target = output / "integrity_findings.csv"
@@ -330,11 +353,15 @@ def main() -> None:
     parser.add_argument("--candidate-dir", type=Path, required=True)
     parser.add_argument("--bronze-dir", type=Path, required=True)
     parser.add_argument("--actions-dir", type=Path)
+    parser.add_argument("--asset-registry-csv", type=Path)
+    parser.add_argument("--fx-registry-csv", type=Path)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     print(json.dumps(generate(candidate_dir=args.candidate_dir,
                               bronze_dir=args.bronze_dir,
                               action_batch_dir=args.actions_dir,
+                              asset_registry_csv=args.asset_registry_csv,
+                              fx_registry_csv=args.fx_registry_csv,
                               output=args.output), indent=2))
 
 

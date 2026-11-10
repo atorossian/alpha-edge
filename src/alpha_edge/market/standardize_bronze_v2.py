@@ -28,7 +28,7 @@ PILOT_CALENDARS = {
     "SPY": "NYSE",
     "B3SA3.SA": "BMF",
     "KESKOB.HE": "XHEL",
-    "ALSEA.MX": "BMV",
+    "ALSEA.MX": "XMEX",
 }
 
 
@@ -92,12 +92,18 @@ def normalize_bronze_fx_quotes(
         subset["fx_quote_change_abs"] = movement
         subset["fx_gap_calendar_days"] = days
         results.append(subset)
-    evidence = pd.concat(results, ignore_index=True)
+    evidence = pd.concat(results, ignore_index=True) if results else pd.DataFrame(columns=[
+        *q.columns, "currency_original", "fx_quote_direction", "fx_quote_symbol",
+        "fx_to_usd", "fx_validation_status", "fx_quote_change_abs", "fx_gap_calendar_days",
+    ])
     accepted = evidence.loc[
         evidence["fx_validation_status"].eq("accepted"),
         ["currency_original", "fx_date", "fx_to_usd",
          "fx_quote_symbol", "fx_quote_direction", "quote_close"],
     ].copy()
+    if accepted.empty:
+        accepted["fx_date"] = pd.to_datetime(accepted["fx_date"])
+        accepted["fx_to_usd"] = pd.to_numeric(accepted["fx_to_usd"]).astype(float)
     return accepted.reset_index(drop=True), evidence
 
 

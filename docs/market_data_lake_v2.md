@@ -1125,3 +1125,136 @@ Silver/Gold partitions and atomically update a versioned v2 release
 pointer. Source observations with unresolved missing exchange sessions,
 adjusted-return anomalies and externally unverified provider revisions
 must not be silently accepted for consumer use.
+
+
+## S3-only daily pipeline + versioned production Gold release (2026-11-10)
+
+This implementation reuses:
+- \`ingest_bronze_yahoo_v2.acquire_yahoo_bars/acquire_yahoo_fx_quote\` for
+  immutable source-native OHLCV/FX capture
+- \`standardize_bronze_v2.build_silver_gold_from_bronze\` for validated
+  exchange sessions, adjusted USD prices and returns
+- \`manual_observations_v2.append_manual_observations\` for pinned corrections
+- \`indicator_calculations.compute_market_indicators_for_asset\` for indicators
+- \`independent_acceptance_v2\` numerical/date comparators for separate
+  in-memory arithmetic checks
+- \`core.audit.build_audit_event/write_audit_event\` for S3 audit events
+- \`core.runtime\` for production-write confirmation
+
+**No persistent local data:** the daily and initial Gold release candidate
+builders use S3 reads/writes and in-memory Parquet buffers only. Existing
+\`outputs/\` files are not read by these new jobs.
+
+### 1. Initial baseline from fully completed historical backfill
+
+First, complete and audit all **79 research cohort S3 commits** and
+promote their unchanged raw captures to immutable production Bronze using
+\`publish_production_bronze_v2\`. The 110 unresolved universe entries
+remain an explicit global reconciliation obligation.
+
+Initial readiness check, without S3 writes:
+
+\`\`\`bash
+poetry run python -m alpha_edge.market.prepare_initial_gold_v2 \
+  --bucket alpha-edge-algo \
+  --plan-archive-id old-outputs-20261110 \
+  --plan-hash-prefix 764b62e3a94f92b5ce07c4bf \
+  --end 2026-11-10
+\`\`\`
+
+If it reports \`blocked_missing_cohorts\`, resolve each missing research
+or production Bronze cohort; do not create a partial initial Gold release.
+
+To store immutable **candidate** Silver, Gold, indicators, correction
+evidence, and a complete release manifest (not an active pointer):
+
+\`\`\`bash
+poetry run python -m alpha_edge.market.prepare_initial_gold_v2 \
+  --bucket alpha-edge-algo \
+  --plan-archive-id old-outputs-20261110 \
+  --plan-hash-prefix 764b62e3a94f92b5ce07c4bf \
+  --end 2026-11-10 \
+  --run-id initial_lake_v2_20261110 \
+  --execute --confirm-prod-write
+\`\`\`
+
+Source Bronze stays immutable; candidate Silver/Gold/indicator files are
+stored under \`market/lake_v2/releases/data/<release_id>/\`. The initial
+candidate manifests are staged at \`market/lake_v2/releases/candidates/\`.
+No consumer is changed. The source independent acceptance reports remain
+review/blocked as appropriate and **cannot be auto-approved**.
+
+### 2. Daily incremental source ingestion and candidate stage
+
+Only after the initial Gold release was independently approved and
+\`market/lake_v2/releases/current.json\` activated:
+
+\`\`\`bash
+poetry run python -m alpha_edge.market.run_daily_pipeline_v2 \
+  --as-of 2026-11-11 --bucket alpha-edge-algo \
+  --lookback-days 10
+\`\`\`
+
+Production execution (on 12 Nov, after the target session is final):
+
+\`\`\`bash
+poetry run python -m alpha_edge.market.run_daily_pipeline_v2 \
+  --as-of 2026-11-11 --bucket alpha-edge-algo \
+  --lookback-days 10 \
+  --execute --confirm-prod-write
+\`\`\`
+
+The job independently records **daily immutable provider Bronze first**,
+retrieves pinned prior raw history from the active release, detects
+overlapping Yahoo revisions, replays approved-path manual correction
+records from S3, and reuses the Silver/Gold calculators. It computes
+indicators with windows reset at unavailable/review return boundaries
+and checks source lineage, price/FX arithmetic and adjusted returns.
+All snapshots and quality evidence are immutable S3 objects. The
+complete new version is staged in the canonical release catalog.
+The current Gold release pointer is **not** updated automatically.
+
+If the initial release pointer is missing, the day is in the future,
+or the historical gap exceeds the overlap window, the job fails closed.
+No download can be called "daily Gold production" until release
+approval and consumer compatibility checks are satisfied.
+
+### 3. Gold release gating and audited activation
+
+\`production_gold_release_v2.py\` validates the *entire* cohort inventory,
+each input S3 SHA-256, independent internal arithmetic reports, the
+per-cohort external evidence status and explicit reviewer signatures.
+Activation requires evidence-backed acceptance, indicator validation,
+universe reconciliation, consumer schema validation and final signoff.
+It does **not** turn "review_required" into "accepted".
+
+Proposed activation command **only after these prerequisites have
+actually been satisfied and the signed release candidate exists**:
+
+\`\`\`bash
+poetry run python -m alpha_edge.market.production_gold_release_v2 activate \
+  --bucket alpha-edge-algo \
+  --release-key market/lake_v2/releases/candidates/<release_id>.json \
+  --approval-sha256 <64-character-approved-release-hash>
+\`\`\`
+
+Add \`--execute --confirm-prod-write\` only after approval.
+Activation writes \`market/lake_v2/releases/current.json\` with optimistic
+concurrency; the prior release identifier is preserved for rollback.
+Both successful/failed executions use the existing
+\`engine/v1/audit_trail/\` S3 audit-event schema.
+
+### Critical outstanding operational validation
+
+- Independently obtain/approve external provider, corporate-action,
+  revision, FX-timing, and endpoint quality evidence. Existing independent
+  reports do **not** assert these gates are passed.
+- Reconcile excluded, unresolved and duplicate-symbol assets before
+  treating the 1,974-asset ready subset as the complete 2,084 intended
+  universe.
+- Add a tested production consumer adapter that reads only the active
+  v2 pointer, and migrate all returns/price/indicator consumers after
+  schema acceptance. Existing \`MarketStore\` consumers still use v1.
+- Define explicit S3 release rollback and safe inventory-based cleanup.
+  Do not delete v1, dev historical evidence, or locally archived files
+  while the backfill or release validation is in progress.

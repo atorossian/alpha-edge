@@ -11,6 +11,7 @@ is required by production_gold_release_v2.
 from __future__ import annotations
 
 import argparse
+from dataclasses import replace
 import hashlib
 import io
 import json
@@ -93,7 +94,12 @@ def _merge(base: pd.DataFrame, fresh: pd.DataFrame, *,
            keys: tuple[str, ...], overlap_start: str) -> tuple[pd.DataFrame, int]:
     if not set(keys).issubset(base) or not set(keys).issubset(fresh):
         raise IncrementalError("Missing incremental merge key(s)")
+    base = base.copy()
+    fresh = fresh.copy()
     for source in (base, fresh):
+        source["session_date"] = pd.to_datetime(
+            source["session_date"].astype(str).str[:10], errors="raise"
+        ).dt.strftime("%Y-%m-%d")
         if source.duplicated(list(keys)).any():
             raise IncrementalError("Duplicate source observations in daily merge")
     if fresh.empty:
@@ -109,7 +115,7 @@ def _merge(base: pd.DataFrame, fresh: pd.DataFrame, *,
     revisions = 0
     for key in common:
         left, right = base_key.loc[key], new_key.loc[key]
-        fields = set(["open", "high", "low", "close", "adj_close", "volume"]) & set(left) & set(right)
+        fields = set(["open", "high", "low", "close", "adj_close", "volume"]) & set(left.index) & set(right.index)
         if any(
             not (pd.isna(left[c]) and pd.isna(right[c]))
             and not np.isclose(float(left[c]), float(right[c]),

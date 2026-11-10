@@ -23,7 +23,10 @@ from botocore.exceptions import ClientError
 from alpha_edge import paths
 from alpha_edge.core.market_store import MarketStore
 from alpha_edge.market.aea87_publication_transaction import fetch, checksum, put_once
-from alpha_edge.market.aea87_publication_validation import validate_candidate, validate_old_only_against_calendar
+from alpha_edge.market.aea87_publication_validation import (
+    validate_candidate, validate_old_only_against_calendar,
+    calendar_for_provider, verify_candidate_against_calendar,
+)
 
 ROOT = "market/repairs/aea87/rebuilds/v1/runs"
 PREPARED = "market/repairs/aea87/rebuild_publications/v1"
@@ -184,15 +187,45 @@ def prepare(s3, store, bucket, source_run, asset_id, end, publication_id):
                 return {"asset_id": asset_id, "status": "BLOCKED_COVERAGE",
                         "blockers": ["UNEXPLAINED_POST_INCEPTION_OLD_DATES"], "operations": []}
         elif len(extras):
-            exchange = str(provider.get("exchange") or "").upper()
-            if exchange in {"NYQ", "NYE", "NMS", "NCM", "NGM", "ASE"}:
-                audit = validate_old_only_against_calendar(previous, fresh, "NYSE")
-                if audit["status"] != "PASSED":
-                    return {"asset_id": asset_id, "status": "BLOCKED_COVERAGE",
-                            "blockers": ["MISSING_LEGITIMATE_EXCHANGE_SESSIONS"], "operations": []}
-            else:
+            calendar_name = calendar_for_provider(
+                provider.get("exchange"), provider.get("quote_type"), asset_id)
+            if calendar_name is None:
                 return {"asset_id": asset_id, "status": "BLOCKED_COVERAGE",
-                        "blockers": ["OLD_ONLY_DATES_NEED_VERIFIED_EXCHANGE_CALENDAR"], "operations": []}
+                        "blockers": ["UNKNOWN_EXCHANGE_CALENDAR_OR_ASSET_CLASS"],
+                        "operations": []}
+            # The old and candidate histories may disagree about inception,
+            # holidays, or identity. Only exchange non-sessions can be retired.
+            try:
+                audit = validate_old_only_against_calendar(previous, fresh, calendar_name)
+            except (ValueError, KeyError) as exc:
+                return {"asset_id": asset_id, "status": "BLOCKED_COVERAGE",
+                        "blockers": ["EXCHANGE_CALENDAR_UNAVAILABLE:" + str(exc)],
+                        "operations": []}
+            if audit["status"] != "PASSED":
+                return {"asset_id": asset_id, "status": "BLOCKED_COVERAGE",
+                        "blockers": ["MISSING_LEGITIMATE_EXCHANGE_SESSIONS"],
+                        "calendar": calendar_name,
+                        "missing_sessions_sample": audit["sessions"][:15],
+                        "missing_session_count": len(audit["sessions"]),
+                        "operations": []}
+    # A recognized exchange calendar is required for any candidate equity
+    # history, including new assets that had no legacy rows to compare.
+    calendar_name = calendar_for_provider(
+        provider.get("exchange"), provider.get("quote_type"), asset_id)
+    if calendar_name is not None:
+        calendar_audit = verify_candidate_against_calendar(
+            frames["ohlcv_usd"]["date"], calendar_name)
+        if calendar_audit["status"] != "PASSED":
+            return {"asset_id": asset_id, "status": "BLOCKED_COVERAGE",
+                    "blockers": [calendar_audit["reason"]],
+                    "calendar": calendar_name,
+                    "invalid_candidate_session_sample": calendar_audit["dates"][:15],
+                    "invalid_candidate_session_count": len(calendar_audit["dates"]),
+                    "operations": []}
+    elif not asset_id.startswith("CRYPTO:"):
+        return {"asset_id": asset_id, "status": "BLOCKED_COVERAGE",
+                "blockers": ["UNKNOWN_EXCHANGE_CALENDAR_OR_ASSET_CLASS"],
+                "operations": []}
     # Production may have advanced after the staged Yahoo run. A full-history
     # replacement must never discard later live market sessions.
     current_day = datetime.now(timezone.utc).date().isoformat()

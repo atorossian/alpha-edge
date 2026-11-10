@@ -41,6 +41,19 @@ REQUIRED = {
 }
 
 
+def equity_session_date_issues(prices, asset_id, provider_metadata):
+    """Block obviously wrong daily session dates before any live publication."""
+    asset_class = str((provider_metadata or {}).get("quote_type") or "").upper()
+    if asset_id.startswith("CRYPTO:") or asset_class not in {"EQUITY", "ETF", "FUND"}:
+        return []
+    dates = pd.to_datetime(prices["date"], errors="coerce")
+    # Existing candidate validation already rejects invalid/missing dates.
+    weekend = dates.dt.dayofweek.ge(5)
+    if weekend.any():
+        return ["NONTRADING_WEEKEND_EQUITY_SESSIONS:" + str(int(weekend.sum()))]
+    return []
+
+
 def publication_schema_issues(candidate, active, table):
     missing = sorted(REQUIRED[table] - set(candidate.columns))
     issues = ["MISSING_REQUIRED_COLUMN:" + col for col in missing]
@@ -155,6 +168,7 @@ def prepare(s3, store, bucket, source_run, asset_id, end, publication_id):
     # command is deliberately NOT part of deployment.
     inception = "2024-11-29" if asset_id == "CRYPTO:HYPE-USD" else None
     problems = validate_candidate(frames["ohlcv_usd"], frames["returns_usd"], inception)
+    problems.extend(equity_session_date_issues(frames["ohlcv_usd"], asset_id, provider))
     if problems:
         return {"asset_id": asset_id, "status": "BLOCKED_CANDIDATE",
                 "blockers": problems, "operations": []}

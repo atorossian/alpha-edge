@@ -42,4 +42,5 @@ jobs:
             tests/test_aea87_two_command_workflow.py \
             tests/test_aea87_repaired_returns_cache.py \
             tests/test_aea87_resume.py \
-            tests/test_aea87_session_date_p0.py
+            tests/test_aea87_session_date_p0.py \
+            tests/test_aea87_p1.py

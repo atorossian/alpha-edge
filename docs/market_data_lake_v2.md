@@ -1063,3 +1063,65 @@ full-universe price/return/indicator acceptance, reconciliation of
 110 unresolved instruments, immutable production release manifests,
 and consumer cutover with rollback. None should be marked complete
 solely by uploading to S3.
+
+
+## 2026-11-10: Separate production **raw Bronze storage** from Gold approval
+
+The research runner stores full source and validated candidates in
+\`dev/market/lake_v2/backfills/<plan>/end-<exclusive-end>/cohort-NNNN\`.
+These files are NOT production. Raw provider data may be stored in a
+production Bronze namespace even if the independent quality report
+blocks Silver/Gold release. The immutable raw manifest is not repaired,
+filled or changed by publication.
+
+After research S3 cohort commit, the new
+\`publish_production_bronze_v2\` performs SHA verification of the
+acquisition manifest and both source Parquet objects, then conditionally
+copies them to:
+\`\`\`
+s3://alpha-edge-algo/market/lake_v2/bronze/full_history/
+    <24-hex-plan-hash>/end-2026-11-10/cohort-NNNN/
+      manifest.json
+      source_ohlcv.parquet
+      source_fx_quotes.parquet
+      _bronze_committed.json
+\`\`\`
+The commit receipt is last. This operation is idempotent and does
+**not** change a production consumer pointer or authorize Silver/Gold.
+
+Run a non-mutating validation of cohort 1:
+\`\`\`bash
+poetry run python -m alpha_edge.market.publish_production_bronze_v2 \
+  --bucket alpha-edge-algo \
+  --plan-hash-prefix 764b62e3a94f92b5ce07c4bf \
+  --end 2026-11-10 --start-cohort 1 --max-cohorts 1
+\`\`\`
+Then append \`--execute\` for the immutable Bronze copy.
+
+Full research acquisition of remaining cohorts, with resume and no
+persistent local repo output:
+\`\`\`bash
+poetry run python -m alpha_edge.market.run_s3_full_history_backfill_v2 \
+  --plan-archive-id old-outputs-20261110 --bucket alpha-edge-algo \
+  --end 2026-11-10 --start-cohort 2 --max-cohorts 78 --execute
+\`\`\`
+After the 78 cohorts have been verified, the corresponding immutable
+raw Bronze copies can be committed with:
+\`\`\`bash
+poetry run python -m alpha_edge.market.publish_production_bronze_v2 \
+  --bucket alpha-edge-algo \
+  --plan-hash-prefix 764b62e3a94f92b5ce07c4bf \
+  --end 2026-11-10 --start-cohort 2 --max-cohorts 78 --execute
+\`\`\`
+Note a source-not-committed cohort is reported without being copied.
+Production Bronze is NOT \`market/ohlcv_usd/v1\`; the old production
+series remain untouched.
+
+**Silver/Gold promotion is separate and NOT yet implemented.**
+A later release controller must consume exact production Bronze receipt
+hashes, apply provenance-tracked corrections, verify FX and corporate
+actions, enforce per-row quality and global acceptance, write immutable
+Silver/Gold partitions and atomically update a versioned v2 release
+pointer. Source observations with unresolved missing exchange sessions,
+adjusted-return anomalies and externally unverified provider revisions
+must not be silently accepted for consumer use.

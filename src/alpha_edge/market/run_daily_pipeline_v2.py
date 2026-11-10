@@ -178,30 +178,36 @@ def run(*, s3, bucket: str, as_of: str, execute: bool,
     if not bucket or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9.-]{2,62}", bucket):
         raise IncrementalError("Invalid target bucket")
     cfg = replace(load_runtime_config("prod"), bucket=bucket)
-    if execute:
-        require_prod_confirmation(cfg, confirm_prod_write)
-    if not 3 <= lookback_days <= 35:
-        raise IncrementalError("Overlap must be 3..35 calendar days")
-    target = _day(as_of)
-    if target > datetime.now(timezone.utc).date():
-        raise IncrementalError("Cannot ingest future market sessions")
-    pointer = _json(s3, bucket, CURRENT)
-    if pointer.get("schema") != "alpha_edge_v2_release_pointer_1":
-        raise IncrementalError("Missing approved v2 production pointer")
-    release_raw = get(s3, bucket, pointer["release_key"])
-    if release_raw is None or sha(release_raw) != pointer.get("release_sha256"):
-        raise IncrementalError("Current v2 Gold pointer is corrupt")
-    prior = json.loads(release_raw)
-    validate_release(s3, bucket, prior, require_approval=True)
-    prior_date = _day(prior["as_of"])
-    if target <= prior_date:
-        raise IncrementalError("Daily as_of is not newer than current production Gold")
-    if (target - prior_date).days > lookback_days:
-        raise IncrementalError("Daily run exceeds bounded overlap; backfill missing interval first")
-
     run_id = run_id or make_run_id("lake_v2_daily")
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{1,100}", run_id):
         raise IncrementalError("Unsafe immutable run ID")
+    try:
+        if execute:
+            require_prod_confirmation(cfg, confirm_prod_write)
+        if not 3 <= lookback_days <= 35:
+            raise IncrementalError("Overlap must be 3..35 calendar days")
+        target = _day(as_of)
+        if target > datetime.now(timezone.utc).date():
+            raise IncrementalError("Cannot ingest future market sessions")
+        pointer = _json(s3, bucket, CURRENT)
+        if pointer.get("schema") != "alpha_edge_v2_release_pointer_1":
+            raise IncrementalError("Missing approved v2 production pointer")
+        release_raw = get(s3, bucket, pointer["release_key"])
+        if release_raw is None or sha(release_raw) != pointer.get("release_sha256"):
+            raise IncrementalError("Current v2 Gold pointer is corrupt")
+        prior = json.loads(release_raw)
+        validate_release(s3, bucket, prior, require_approval=True)
+        prior_date = _day(prior["as_of"])
+        if target <= prior_date:
+            raise IncrementalError("Daily as_of is not newer than current production Gold")
+        if (target - prior_date).days > lookback_days:
+            raise IncrementalError("Daily run exceeds bounded overlap; backfill missing interval first")
+    except Exception as exc:
+        if execute:
+            writer = audit_writer or _audit
+            writer(cfg, run_id=run_id, as_of=as_of, status="failed",
+                   error=f"{type(exc).__name__}: {exc}")
+        raise
     start = (target - timedelta(days=lookback_days)).isoformat()
     end = (target + timedelta(days=1)).isoformat()
     prefix = f"{ROOT}/daily/candidates/dt={as_of}/run={run_id}"

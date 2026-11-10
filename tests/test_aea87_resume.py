@@ -51,6 +51,7 @@ def _setup(tmp_path):
         prefix + "provider_metadata.json": b'{"currency":"USD"}',
     }
     summary = {"run_id":run, "status":"STAGING_ONLY",
+               "schema":"aea87_full_history_rebuild_v2_local_session_dates",
                "active_histories_modified": False, "start":"2010-01-01",
                "end_exclusive":"2026-11-03",
                "assets":{aid:{"status":"STAGED_FOR_REVIEW","yahoo_ticker":"AAVE-USD"}}}
@@ -77,6 +78,15 @@ def test_reject_candidate_with_bad_checksum(tmp_path):
     s3,run,aid,args = _setup(tmp_path)
     s3.objects[f"{SOURCE_ROOT}/{run}/assets/CRYPTO_AAVE_USD/candidate_ohlcv_usd.parquet"] = b"tampered"
     assert find_reusable_source(s3,"bucket",[aid],args) is None
+
+
+def test_reject_pre_fix_utc_shifted_source_history(tmp_path):
+    s3, run, aid, args = _setup(tmp_path)
+    key = f"{SOURCE_ROOT}/{run}/summary.json"
+    summary = json.loads(s3.objects[key])
+    summary["schema"] = "aea87_full_history_rebuild_v1"
+    s3.objects[key] = json.dumps(summary).encode()
+    assert find_reusable_source(s3, "bucket", [aid], args) is None
 
 
 def test_reject_outdated_source_window(tmp_path):

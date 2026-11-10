@@ -23,6 +23,8 @@ on:
       - "src/alpha_edge/market/compare_bronze_revisions_v2.py"
       - "src/alpha_edge/market/preflight_universe_v2.py"
       - "src/alpha_edge/market/source_evidence_v2.py"
+      - "src/alpha_edge/market/run_cohort_bronze_v2.py"
+      - "src/alpha_edge/market/run_standardization_pilot_v2.py"
       - "data/quality/market_lake_v2/pilot_asset_registry_v2.csv"
       - "data/quality/market_lake_v2/pilot_fx_registry_v2.csv"
       - "src/alpha_edge/market/run_standardization_pilot_v2.py"
@@ -41,6 +43,7 @@ on:
       - "tests/unit/test_compare_bronze_revisions_v2.py"
       - "tests/unit/test_preflight_universe_v2.py"
       - "tests/unit/test_source_evidence_v2.py"
+      - "tests/unit/test_run_cohort_bronze_v2.py"
       - ".github/workflows/market-data-lake-v2.yml"
   workflow_dispatch:
 
@@ -84,7 +87,8 @@ jobs:
             src/alpha_edge/market/independent_acceptance_v2.py \
             src/alpha_edge/market/compare_bronze_revisions_v2.py \
             src/alpha_edge/market/preflight_universe_v2.py \
-            src/alpha_edge/market/source_evidence_v2.py
+            src/alpha_edge/market/source_evidence_v2.py \
+            src/alpha_edge/market/run_cohort_bronze_v2.py
       - name: Run offline unit tests
         run: |
           poetry run pytest -v \
@@ -101,4 +105,5 @@ jobs:
             tests/unit/test_independent_acceptance_v2.py \
             tests/unit/test_compare_bronze_revisions_v2.py \
             tests/unit/test_preflight_universe_v2.py \
-            tests/unit/test_source_evidence_v2.py
+            tests/unit/test_source_evidence_v2.py \
+            tests/unit/test_run_cohort_bronze_v2.py

@@ -35,8 +35,32 @@ def parquet_bytes(frame):
 
 
 def normalize_dates(frame):
+    """Retain the exchange-local session date of each Yahoo *daily* candle.
+
+    Yahoo provides timezone-aware midnight-at-exchange dates. Converting these
+    to UTC first shifts many European session dates to the previous Sunday.
+    Never use this normalization for intraday bars (which are instants).
+    """
     out = frame.copy()
-    out["date"] = pd.to_datetime(out["date"], errors="coerce", utc=True).dt.tz_localize(None).dt.normalize()
+    dates = out["date"]
+    try:
+        parsed = pd.to_datetime(dates, errors="coerce")
+        if isinstance(parsed.dtype, pd.DatetimeTZDtype):
+            # Discard the timezone while retaining the provider's wall date.
+            parsed = parsed.dt.tz_localize(None)
+        elif not pd.api.types.is_datetime64_any_dtype(parsed):
+            # Mixed timezone offsets (e.g. around DST) can produce object
+            # dtype. Preserve each element's own local date, not its UTC day.
+            parsed = dates.map(
+                lambda v: pd.Timestamp(v).date() if pd.notna(v) else pd.NaT
+            )
+            parsed = pd.to_datetime(parsed, errors="coerce")
+    except (TypeError, ValueError):
+        parsed = dates.map(
+            lambda v: pd.Timestamp(v).date() if pd.notna(v) else pd.NaT
+        )
+        parsed = pd.to_datetime(parsed, errors="coerce")
+    out["date"] = parsed.dt.normalize()
     return out.dropna(subset=["date"]).sort_values("date").drop_duplicates("date", keep="last")
 
 

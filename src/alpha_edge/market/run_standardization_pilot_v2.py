@@ -123,7 +123,7 @@ def generate(
         filename = "asset_" + hashlib.sha256(str(aid).encode()).hexdigest()[:16] + ".csv"
         target = traces / filename
         g.sort_values("session_date").to_csv(target, index=False)
-        artifacts[str(target.relative_to(output))] = _sha256(target)
+        artifacts[target.relative_to(output).as_posix()] = _sha256(target)
 
     pd.DataFrame(summary).to_csv(output / "asset_quality_summary.csv", index=False)
     artifacts["asset_quality_summary.csv"] = _sha256(output / "asset_quality_summary.csv")

@@ -112,6 +112,7 @@ def find_reusable_source(s3, bucket, batch, args):
             manifest = json.loads(manifest_bytes)
             if (summary.get("run_id") != run_id
                     or summary.get("status") != "STAGING_ONLY"
+                    or summary.get("schema") != "aea87_full_history_rebuild_v2_local_session_dates"
                     or summary.get("active_histories_modified") is not False
                     or summary.get("start") != args.start
                     or summary.get("end_exclusive") != args.end_exclusive

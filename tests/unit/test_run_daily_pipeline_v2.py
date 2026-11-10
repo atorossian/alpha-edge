@@ -171,3 +171,17 @@ def test_real_daily_pipeline_writes_only_s3_candidates_and_audit(monkeypatch):
     assert report["internal_integrity_status"] == "passed"
     assert report["acceptance"] == "review_required"
     assert "market/lake_v2/releases/candidates/daily_test_001.json" in s3.objects
+
+
+def test_production_preflight_failure_is_recorded_as_s3_audit_event():
+    s3 = S3()
+    events = []
+    def recorder(cfg, **kw):
+        events.append(kw)
+    with pytest.raises(daily.IncrementalError, match="Missing required"):
+        daily.run(s3=s3, bucket="alpha-edge-algo", as_of="2026-11-09",
+                  execute=True, confirm_prod_write=True,
+                  run_id="daily_audit_failure_01", audit_writer=recorder)
+    assert events and events[-1]["status"] == "failed"
+    assert events[-1]["run_id"] == "daily_audit_failure_01"
+    assert not s3.objects

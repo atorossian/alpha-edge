@@ -29,6 +29,7 @@ from alpha_edge.market.ingest_bronze_yahoo_v2 import (
 )
 from alpha_edge.market.standardize_bronze_v2 import build_silver_gold_from_bronze
 from alpha_edge.market.manual_observations_v2 import append_manual_observations
+from alpha_edge.market.independent_daily_quality_v2 import review as independent_quality_review
 from alpha_edge.market.indicator_calculations import compute_market_indicators_for_asset
 from alpha_edge.market.production_gold_release_v2 import (
     CURRENT, ROOT, get, sha, encoded, immutable_put, verify_object,
@@ -320,30 +321,19 @@ def run(*, s3, bucket: str, as_of: str, execute: bool,
                 "indicator_candidate": _put_parquet(s3, bucket, c_prefix + "/indicators.parquet",
                                                      _indicators(gold)),
             }
-            quality = {
-                "schema": "alpha_edge_daily_quality_candidate_v2_1",
+            quality = independent_quality_review(
+                tables, manual_corrections=(
+                    len(correction_evidence) if correction_evidence is not None else 0
+                ),
+            )
+            quality.update({
                 "as_of": as_of, "cohort": idx,
-                "integrity_findings": None,
-                "internal_integrity_status": "not_independently_verified",
-                "acceptance": "review_required",
-                "blocker_counts": {
-                    "quarantined_prices": int(gold["quality_status"].ne("accepted").sum()),
-                    "review_returns": int(gold["return_quality_status"].eq("review").sum()),
-                    "exchange_calendar_issues": len(tables["session_issues"]),
-                    "fx_quote_rejections": int(tables["fx_evidence"]["fx_validation_status"].ne("accepted").sum()),
-                },
-                "open_external_evidence_gates": [
-                    "independent_source_observation_verification",
-                    "corporate_action_adjustment_factor_validation",
-                    "historical_provider_revision_comparison",
-                    "exchange_specific_fx_observation_timing_policy",
-                    "endpoints_and_market_close_completeness",
-                ],
-                "price_revisions_in_overlap": revisions, "fx_revisions_in_overlap": fx_revisions,
+                "price_revisions_in_overlap": revisions,
+                "fx_revisions_in_overlap": fx_revisions,
                 "bronze_daily_capture": capture,
                 "source_gold_snapshot": snapshot["gold"],
-                "notes": "Full snapshot recomputed from pinned prior raw Bronze and bounded recent sources",
-            }
+                "indicator_candidate": snapshot["indicator_candidate"],
+            })
             snapshot["acceptance"] = _put_json(s3, bucket, c_prefix + "/acceptance.json", quality)
             snapshot.update({
                 "cohort": idx, "assets": assets, "registry": registry,

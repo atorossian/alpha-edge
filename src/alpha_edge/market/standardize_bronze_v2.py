@@ -207,7 +207,7 @@ def build_silver_gold_from_bronze(
     # A Yahoo daily bar label is NOT an independently verified close time.
     if "source_timestamp" in silver.columns:
         strings = silver["source_timestamp"].astype("string")
-        aware = strings.str.contains(r"(?:Z|[+-]\\d{2}:\\d{2})$", regex=True, na=False)
+        aware = strings.str.contains(r"(?:Z|[+-]\d{2}:\d{2})$", regex=True, na=False)
         silver["source_timestamp_utc"] = pd.to_datetime(
             strings.where(aware), errors="coerce", utc=True, format="mixed"
         )

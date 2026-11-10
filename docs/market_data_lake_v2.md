@@ -1258,3 +1258,42 @@ Both successful/failed executions use the existing
 - Define explicit S3 release rollback and safe inventory-based cleanup.
   Do not delete v1, dev historical evidence, or locally archived files
   while the backfill or release validation is in progress.
+
+
+### 4. Shared read-only active v2 consumer adapter
+
+\`alpha_edge.market.active_lake_v2.ActiveLakeV2\` reads the active
+\`market/lake_v2/releases/current.json\` pointer and exact, SHA-256 pinned
+Silver/Gold/indicator objects. It refuses unknown assets, missing active
+releases, missing table schemas or corrupted bytes. It does not silently
+fall back to v1 data:
+
+\`\`\`python
+import boto3
+from alpha_edge.market.active_lake_v2 import ActiveLakeV2
+
+s3 = boto3.client("s3", region_name="eu-west-1")
+reader = ActiveLakeV2.open(s3, "alpha-edge-algo")
+prices = reader.prices("CRYPTO:BTC-USD", start="2026-01-01")
+returns = reader.returns("CRYPTO:BTC-USD", start="2026-01-01")
+indicators = reader.indicators("CRYPTO:BTC-USD", start="2026-01-01")
+\`\`\`
+
+This is a shared migration adapter, **not yet a completed rewiring** of
+the existing \`MarketStore\` consumers. Production users remain on v1
+until the consumer integration, return semantics, risk indicator
+reconciliation, and rollback tests pass. Activating a candidate is
+forbidden while quality gates or source-evidence obligations remain
+unresolved.
+
+### Post-migration cleanup
+
+Perform no S3 deletions during active backfill. First inventory all
+\`dev/market/lake_v2/backfills/\`, \`dev/market/lake_v2/archives/\`,
+\`market/lake_v2/bronze/\`, superseded candidate release manifests, and
+legacy \`market/*/v1\` usage. Retention must follow a per-key
+dependency graph, pinned release receipts and audit history; storage
+cost alone does not authorize removing source evidence. For the Git
+repository, archive/checksum runtime outputs in S3 first and then
+prune only verified untracked root \`outputs/\` files, as specified in
+the earlier cleanup section.

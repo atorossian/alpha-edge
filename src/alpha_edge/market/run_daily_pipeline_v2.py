@@ -162,10 +162,9 @@ def _audit(cfg, *, run_id, as_of, status, metadata=None, error=None, keys=()):
 def run(*, s3, bucket: str, as_of: str, execute: bool,
         confirm_prod_write: bool = False, lookback_days: int = 10,
         run_id: str | None = None, ticker_factory=None, audit_writer=None) -> dict:
-    cfg = load_runtime_config("prod")
-    if bucket != cfg.bucket:
-        # Audit writer's runtime config and the data bucket must agree.
-        raise IncrementalError("Bucket differs from Alpha Edge runtime config")
+    if not bucket or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9.-]{2,62}", bucket):
+        raise IncrementalError("Invalid target bucket")
+    cfg = replace(load_runtime_config("prod"), bucket=bucket)
     if execute:
         require_prod_confirmation(cfg, confirm_prod_write)
     if not 3 <= lookback_days <= 35:

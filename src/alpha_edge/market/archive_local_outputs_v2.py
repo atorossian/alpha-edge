@@ -73,9 +73,8 @@ def _read_remote_sha(s3, bucket: str, key: str) -> str | None:
         raise
     sha = hashlib.sha256()
     with response["Body"] as body:
-        for chunk in body.iter_chunks(chunk_size=8 * 1024 * 1024):
-            if chunk:
-                sha.update(chunk)
+        for chunk in iter(lambda: body.read(8 * 1024 * 1024), b""):
+            sha.update(chunk)
     return sha.hexdigest()
 
 

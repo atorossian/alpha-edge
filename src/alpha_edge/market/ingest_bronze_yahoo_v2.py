@@ -100,6 +100,8 @@ def raw_bars_from_frame(
         raise ValueError("Bronze v2 pilot supports 1d bars only")
     if not asset_id or not symbol or not currency:
         raise ValueError("asset_id, provider symbol and currency are required")
+    if currency.strip().upper() in {"NAN", "NONE", "NULL"}:
+        raise ValueError(f"{symbol}: currency metadata unknown")
     df = _single_symbol_columns(frame, symbol)
     source_ts, session_date, zones = _original_index_fields(df.index)
     values: dict[str, Any] = {
@@ -161,7 +163,7 @@ def acquire_yahoo_bars(
     if provider_currency and currency_hint and provider_currency.upper() != currency_hint.upper():
         raise ValueError(f"{symbol}: provider currency {provider_currency} conflicts with hint {currency_hint}")
     currency = provider_currency or str(currency_hint or "").strip()
-    if not currency:
+    if not currency or currency.upper() in {"NAN", "NONE", "NULL"}:
         raise ValueError(f"{symbol}: currency unknown; Bronze acquisition quarantined")
     frame = ticker.history(start=start, end=end, interval="1d",
                            auto_adjust=False, actions=True, repair=False)
@@ -228,8 +230,14 @@ def _save_batch(
     *, destination: str, batch_id: str, tables: dict[str, pd.DataFrame],
     provenance: list[dict], bucket: str | None = None,
     region: str = "eu-west-1", upload: bool = False,
+    market_root: str = "dev/market",
 ) -> dict:
     """Store immutable stage-local objects, manifest last. No legacy writes."""
+    if upload and not bucket:
+        raise ValueError("S3 upload requires a bucket")
+    root = market_root.strip("/")
+    if upload and (not root or root == "market"):
+        raise ValueError("Refusing legacy production market root; select isolated namespace")
     base = Path(destination) / batch_id
     base.mkdir(parents=True, exist_ok=False)
     payloads = {f"{name}.parquet": _parquet_bytes(table) for name, table in tables.items()}
@@ -247,11 +255,9 @@ def _save_batch(
     manifest_bytes = json.dumps(manifest, indent=2).encode("utf-8")
     (base / "manifest.json").write_bytes(manifest_bytes)
     if upload:
-        if not bucket:
-            raise ValueError("S3 upload requires a bucket")
         import boto3
         s3 = boto3.client("s3", region_name=region)
-        prefix = f"market/lake_v2/bronze/batches/{batch_id}"
+        prefix = f"{root}/lake_v2/bronze/batches/{batch_id}"
         manifest_key = f"{prefix}/manifest.json"
         try:
             s3.head_object(Bucket=bucket, Key=manifest_key)
@@ -274,6 +280,7 @@ def run_batch(
     end: str | None, batch_id: str, output: str,
     ticker_factory: Callable[[str], Any] | None = None,
     bucket: str | None = None, upload: bool = False,
+    market_root: str = "dev/market",
 ) -> dict:
     """All-or-nothing Bronze batch; any failed symbol prevents publication."""
     if not SAFE_ID.fullmatch(batch_id):
@@ -317,6 +324,7 @@ def run_batch(
                 "source_fx_quotes": pd.concat(fx_frames, ignore_index=True)
                 if fx_frames else empty_fx},
         provenance=metas, bucket=bucket, upload=upload,
+        market_root=market_root,
     )
 
 
@@ -330,6 +338,7 @@ def main() -> None:
     parser.add_argument("--batch-id", default=None)
     parser.add_argument("--bucket", default=None)
     parser.add_argument("--upload", action="store_true")
+    parser.add_argument("--market-root", default="dev/market")
     args = parser.parse_args()
     universe = pd.read_csv(args.universe_csv)
     if "include" in universe:
@@ -342,6 +351,7 @@ def main() -> None:
         fx_symbols=[s.strip() for s in args.fx_symbols.split(";") if s.strip()],
         start=args.start, end=args.end, batch_id=batch,
         output=args.output, bucket=args.bucket, upload=args.upload,
+        market_root=args.market_root,
     ), indent=2))
 
 

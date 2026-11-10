@@ -31,7 +31,8 @@ def _latest_attempt(root: Path, index: int) -> tuple[int, Path | None, dict | No
         raise ValueError(f"Unexpected attempt directory: {last}")
     manifest_file = last / "manifest.json"
     if not manifest_file.is_file():
-        raise ValueError(f"Incomplete attempt; requires manual inspection: {last}")
+        # Preserve interrupted attempt immutably; create a new attempt on resume.
+        return int(suffix), last, {"state": "interrupted"}
     return int(suffix), last, json.loads(manifest_file.read_text())
 
 

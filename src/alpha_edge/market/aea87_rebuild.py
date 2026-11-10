@@ -92,13 +92,19 @@ def select_p1_assets(s3, bucket, latest_selected, release=P1_SOURCE_RELEASE):
         item["asset_id"] for item in report["exceptions"]
         if item.get("reason") in P1_REASONS
     }
-    candidates = unresolved | P1_DATE_REPAIR_ASSETS
-    selected = sorted(candidates.intersection(latest_selected))
-    if len(unresolved) != 287 or not P1_DATE_REPAIR_ASSETS.issubset(latest_selected):
-        raise RuntimeError("P1 baseline is inconsistent with latest universe validation")
-    if set(selected) != candidates:
-        raise RuntimeError("P1 selection incomplete; validate source records and universe")
-    return selected
+    # Weekend-only corruption can pass the numerical screen. Confirm these
+    # exceptional overrides exist in the latest complete universe report
+    # rather than silently expanding the normal implicated selection.
+    pointer = json.loads(fetch(s3, bucket, VALIDATION_LATEST))
+    validation = json.loads(fetch(s3, bucket, pointer["report_key"]))
+    all_known = {row["asset_id"] for row in validation["assets"]}
+    if not validation.get("complete_universe") or validation["scanned"] != validation["universe_count"]:
+        raise RuntimeError("P1 requires complete-universe validation")
+    if len(unresolved) != 287 or not unresolved.issubset(latest_selected):
+        raise RuntimeError("P1 original exceptions no longer match latest validation")
+    if not P1_DATE_REPAIR_ASSETS.issubset(all_known):
+        raise RuntimeError("P1 date-defect asset not in canonical universe")
+    return sorted(unresolved | P1_DATE_REPAIR_ASSETS)
 
 
 SOURCE_ROOT = "market/repairs/aea87/rebuilds/v1/runs"

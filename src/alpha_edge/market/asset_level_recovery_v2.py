@@ -7,17 +7,14 @@ production release pointers. A successful acquisition is NOT price approval.
 from __future__ import annotations
 
 import argparse
-import hashlib
 import io
 import json
 import re
-from collections import Counter
 from datetime import date
 
 import boto3
 import pandas as pd
 
-from alpha_edge.market.asset_level_planning_v2 import ROOT as RECONCILIATION_ROOT
 from alpha_edge.market.ingest_bronze_yahoo_v2 import acquire_yahoo_bars
 from alpha_edge.market.universe_registry_v2 import (
     _get,
@@ -103,7 +100,7 @@ def recover_asset(
     if not execute:
         return {"status": "dry_run", "source_contract": base, "s3_writes": 0}
     bars, provider_meta = acquire_yahoo_bars(
-        symbol, asset_id=asset_id, start=None, end=end,
+        asset_id, symbol, start=None, end=end,
         batch_id=f"aea87-recovery-{cohort:04d}", ticker_factory=ticker_factory,
         currency_hint=currency, full_history=True,
     )

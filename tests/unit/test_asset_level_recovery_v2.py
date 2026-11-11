@@ -1,7 +1,6 @@
 """Single-asset acquisition is immutable, isolated and never auto-approved."""
 
 import io
-import json
 
 import pandas as pd
 import pytest

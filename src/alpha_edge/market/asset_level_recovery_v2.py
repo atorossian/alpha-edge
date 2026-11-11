@@ -80,14 +80,17 @@ def _result_bytes(
 
 def recover_asset(
     s3, bucket: str, archive_id: str, asset_id: str, end: str, *,
-    execute: bool = False, ticker_factory=None,
+    execute: bool = False, ticker_factory=None, _context=None,
 ) -> dict:
     """Acquire a failed-cohort asset using its ORIGINAL pinned identity.
 
     The run cannot silently adopt current ticker mappings or legacy v1 values.
     One failing asset does not affect any other asset or completed cohort.
     """
-    row, info, states = _original_asset(s3, bucket, archive_id, asset_id, end)
+    if _context is None:
+        row, info, states = _original_asset(s3, bucket, archive_id, asset_id, end)
+    else:
+        row, info, states = _original_asset(s3, bucket, archive_id, asset_id, end, context=_context)
     cohort = int(row["original_cohort"])
     if states[cohort] != "missing":
         raise AssetRecoveryError("Asset's original cohort is not missing; refusing duplicate acquisition")
@@ -310,10 +313,14 @@ def audit_sessions_and_actions(
 
 
 def audit_existing_asset(
-    s3, bucket: str, archive_id: str, asset_id: str, end: str, *, publish: bool = False
+    s3, bucket: str, archive_id: str, asset_id: str, end: str, *,
+    publish: bool = False, _context=None, _source_cache=None,
 ) -> dict:
     """Read original committed Bronze (or recovery evidence), never v1 OHLCV."""
-    row, info, states = _original_asset(s3, bucket, archive_id, asset_id, end)
+    if _context is None:
+        row, info, states = _original_asset(s3, bucket, archive_id, asset_id, end)
+    else:
+        row, info, states = _original_asset(s3, bucket, archive_id, asset_id, end, context=_context)
     cohort = int(row["original_cohort"])
     if states[cohort] != "marker_present_unverified":
         raise AssetRecoveryError("Original committed cohort unavailable for audit")
@@ -328,10 +335,17 @@ def audit_existing_asset(
     entries = {item["path"]: item["sha256"] for item in commit.get("files", [])}
     if relative not in entries:
         raise AssetRecoveryError("Committed raw Bronze not listed in original marker")
-    original = _get(s3, bucket, f"{prefix}/files/{relative}")
+    if _source_cache is not None and cohort in _source_cache:
+        original, bars = _source_cache[cohort]
+    else:
+        original = _get(s3, bucket, f"{prefix}/files/{relative}")
+        if _sha(original) != entries[relative]:
+            raise AssetRecoveryError("Original Bronze bytes failed marker SHA verification")
+        bars = pd.read_parquet(io.BytesIO(original))
+        if _source_cache is not None:
+            _source_cache[cohort] = (original, bars)
     if _sha(original) != entries[relative]:
         raise AssetRecoveryError("Original Bronze bytes failed marker SHA verification")
-    bars = pd.read_parquet(io.BytesIO(original))
     findings, summary = audit_sessions_and_actions(
         bars, asset_id=asset_id, calendar_id=str(row["calendar_id"])
     )

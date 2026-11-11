@@ -188,6 +188,13 @@ def _seed_batch_queue(store, *, mode, plan_id="a" * 64, reconciliation_id="b" * 
     ] = json.dumps(
         {"source_fingerprints": {"original_plan": {"plan_sha256": "f" * 64}}}
     ).encode()
+    upstream_key = f"dev/market/lake_v2/reconciliation/run-{reconciliation_id}/manifest.json"
+    plan_manifest_key = f"dev/market/lake_v2/asset_plans/run-{plan_id}/manifest.json"
+    plan_manifest = json.loads(store.objects[plan_manifest_key])
+    plan_manifest["source_fingerprints"]["reconciliation_manifest_sha256"] = _sha(
+        store.objects[upstream_key]
+    )
+    store.objects[plan_manifest_key] = json.dumps(plan_manifest).encode()
     return plan_id
 
 

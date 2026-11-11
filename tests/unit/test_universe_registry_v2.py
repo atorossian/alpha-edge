@@ -129,3 +129,73 @@ def test_commit_marker_identity_invalid_is_not_success():
 
     states = cohort_commit_presence(Fake(), "bucket", "a" * 64, "2026-11-10", 1)
     assert states == {1: "invalid_marker"}
+
+
+def test_recovery_plan_contains_every_historical_candidate():
+    from alpha_edge.market.universe_registry_v2 import build_evidence
+
+    cfg = config()
+    rows, report = reconcile(
+        cfg, plan(), {1: "marker_present_unverified", 2: "missing"}, legacy_asset_ids={"Z"}
+    )
+    report.update(
+        inputs_sha256={"universe.csv": "0" * 64},
+        original_plan={"plan_sha256": "1" * 64, "expected_cohorts": 2},
+        end_exclusive="2026-11-10",
+        cohort_by_number={"1": "marker_present_unverified", "2": "missing"},
+        legacy_inventory_scanned=True,
+    )
+    files, manifest = build_evidence(rows, report)
+    registry = [json.loads(line) for line in files["asset_registry.jsonl"].splitlines()]
+    recovery = [json.loads(line) for line in files["recovery_plan.jsonl"].splitlines()]
+    assert len(registry) == len(rows)
+    assert len(recovery) == len(rows)
+    actions = {r["asset_id"]: r["action"] for r in recovery}
+    assert actions["A"] == "verify_observations_and_sessions"
+    assert actions["B"] == "recover_source_history"
+    assert actions["Z"] == "resolve_historical_identity"
+    assert all(not r["historical_prices_approved"] for r in recovery)
+    assert all(not r["can_execute_automatically"] for r in recovery)
+    assert manifest["recovery_records"] == len(rows)
+
+
+def test_immutable_s3_publication_reuses_existing_and_refuses_conflicts():
+    from alpha_edge.market.universe_registry_v2 import publish_evidence
+
+    from botocore.exceptions import ClientError
+
+    class Store:
+        def __init__(self):
+            self.data = {}
+
+        def get_object(self, Bucket, Key):
+            if Key not in self.data:
+                raise ClientError({"Error": {"Code": "NoSuchKey"}}, "GetObject")
+            return {"Body": io.BytesIO(self.data[Key])}
+
+        def put_object(self, Bucket, Key, Body, IfNoneMatch, ContentType):
+            assert IfNoneMatch == "*"
+            if Key in self.data:
+                raise ClientError({"Error": {"Code": "PreconditionFailed"}}, "PutObject")
+            self.data[Key] = Body
+
+    store = Store()
+    manifest = {"run_id": "a" * 64}
+    artifacts = {"asset_registry.jsonl": b'{"asset_id": "A"}\\n', "manifest.json": b'{"run_id": "A"}\\n'}
+    result = publish_evidence(store, "bucket", artifacts, manifest)
+    assert result["status"] == "verified_immutable_s3"
+    assert len(store.data) == 2
+    assert publish_evidence(store, "bucket", artifacts, manifest) == result
+    store.data[next(key for key in store.data if key.endswith("asset_registry.jsonl"))] = b"changed"
+    with pytest.raises(UniverseRegistryError, match="Immutable evidence differs"):
+        publish_evidence(store, "bucket", artifacts, manifest)
+
+
+def test_dry_run_does_not_publish():
+    from alpha_edge.market.universe_registry_v2 import build_recovery_plan
+
+    rows, _ = reconcile(config(), plan(), {1: "invalid_marker", 2: "missing"})
+    recovery = build_recovery_plan(rows).set_index("asset_id")
+    assert recovery.loc["A", "action"] == "investigate_commit_marker"
+    assert recovery.loc["E", "action"] == "review_historical_eligibility"
+    assert not bool(recovery["can_execute_automatically"].any())

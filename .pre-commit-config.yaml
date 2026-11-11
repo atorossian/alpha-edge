@@ -11,6 +11,6 @@ repos:
     hooks:
       - id: pytest-fast
         name: pytest fast suite
-        entry: poetry run pytest tests/unit tests/integration tests/smoke -q
+        entry: poetry run python -B -m pytest tests/unit tests/integration tests/smoke -q
         language: system
         pass_filenames: false

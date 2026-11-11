@@ -19,6 +19,7 @@ import boto3
 from alpha_edge.market.build_release_inventory_v2 import run as release_inventory
 from alpha_edge.market.reprocess_committed_bronze_v2 import run as reprocess_committed
 from alpha_edge.market.standardize_recovered_assets_v2 import run as recover_candidates
+from alpha_edge.market.retain_legacy_history_v2 import run as retain_legacy
 
 
 def run(
@@ -54,6 +55,7 @@ def run(
         s3, bucket, universe_csv=universe_csv,
         fx_csv=fx_config, execute=execute,
     )
+    stages["historical_retention"] = retain_legacy(s3, bucket, execute=execute)
     stages["release_inventory"] = release_inventory(
         s3, bucket, archive_id=archive_id,
         universe_csv=universe_csv, original_end=end, execute=execute,
@@ -81,7 +83,10 @@ def main() -> None:
         archive_id=args.archive_id, end=args.end, execute=args.execute,
     )
     print(json.dumps(result, indent=2))
-    if args.execute and result["recovered_assets"]["outcomes"].get("processing_failed", 0):
+    if args.execute and (
+        result["recovered_assets"]["outcomes"].get("processing_failed", 0)
+        or any(x["status"] == "retention_failed" for x in result["historical_retention"]["results"])
+    ):
         raise SystemExit(2)
 
 

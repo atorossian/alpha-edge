@@ -495,10 +495,11 @@ def run_asset_batch(
                 }
                 recovery_id = _sha(_json_bytes({"schema": "aea87_recovery_identity_v1", **base}))
                 try:
-                    s3.get_object(
+                    response = s3.get_object(
                         Bucket=bucket,
                         Key=f"{RECOVERY_ROOT}/run-{recovery_id}/manifest.json",
                     )
+                    response["Body"].close()
                 except ClientError as exc:
                     if exc.response.get("Error", {}).get("Code") not in {"NoSuchKey", "404", "NotFound"}:
                         raise

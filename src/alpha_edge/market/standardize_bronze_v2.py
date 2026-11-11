@@ -146,11 +146,21 @@ def audit_asset_sessions(
         observed = _dates(group["session_date"]).dropna()
         if observed.empty:
             raise DataContractError(f"{symbol}: no valid session dates")
-        expected = (
-            pd.DatetimeIndex(calendar.valid_days(start_date=observed.min(), end_date=observed.max()))
-            .tz_localize(None)
-            .normalize()
-        )
+        if calendar_id == "FOREX":
+            # Yahoo daily FX bars use Monday-Friday session-date labels.
+            # pandas_market_calendars' FOREX calendar includes Sunday sessions,
+            # which creates spurious missing-Sunday findings (1,197 for EURUSD=X
+            # over 2003-2026). This is a source-specific daily-bar policy;
+            # intraday FX session opening on Sunday is not being denied.
+            expected = pd.date_range(
+                observed.min(), observed.max(), freq="B"
+            ).normalize()
+        else:
+            expected = (
+                pd.DatetimeIndex(calendar.valid_days(start_date=observed.min(), end_date=observed.max()))
+                .tz_localize(None)
+                .normalize()
+            )
         observed_set = set(observed.dt.normalize())
         expected_set = set(expected)
         missing_days = sorted(expected_set - observed_set)

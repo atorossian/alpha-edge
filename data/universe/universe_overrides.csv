@@ -147,3 +147,4 @@ A17CD4A39DA129F8,CA,CA.PA,1,Carrefour S.A.,triage:add_suffix_by_region_hint;conf
 00B5174861BDA51D,FDP,DMC,1,Del Monte Corp.,Asset changed ticker and name
 A4FD41DC5078668D,EQR,VMRK,1,Vivmark Residential,Asset changed ticker and name
 2E7800C32FE1BF6C,PSTG,P,1,Everpure Inc.,Asset changed ticker and name
+F2D913BE93641079,EUR-USD,EURUSD=X,1,Euro US Dollar,Use Yahoo FX instrument symbol rather than broker-style EUR-USD

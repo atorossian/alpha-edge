@@ -397,7 +397,10 @@ def publish_evidence(s3, bucket: str, artifacts: dict[str, bytes], manifest: dic
             try:
                 s3.put_object(
                     Bucket=bucket, Key=key, Body=artifacts[name],
-                    ContentType="application/json" if name.endswith(".json") else "application/x-ndjson",
+                    ContentType=(
+                        "application/octet-stream" if name.endswith(".parquet") else
+                        "application/x-ndjson" if name.endswith(".jsonl") else "application/json"
+                    ),
                     IfNoneMatch="*",
                 )
             except ClientError as put_error:

@@ -28,6 +28,7 @@ UNIVERSE_CSV = paths.universe_dir() / "universe.csv"
 MANUAL_CSV = paths.universe_dir() / "universe_manual_additions.csv"
 OVERRIDES_CSV = paths.universe_dir() / "universe_overrides.csv"
 ASSET_EXCLUDED_CSV = paths.universe_dir() / "asset_excluded.csv"
+DUPLICATE_SUPPRESSIONS_CSV = paths.universe_dir() / "duplicate_row_suppressions.csv"
 
 QF_PAGES = {
     "etf": "https://help.quantfury.com/en/articles/5448760-etfs",
@@ -480,6 +481,47 @@ def apply_asset_exclusions_patch(universe: pd.DataFrame, excluded_df: pd.DataFra
     return u.reset_index(drop=True)
 
 
+def suppress_noncanonical_duplicate_rows(universe: pd.DataFrame, mapping: pd.DataFrame) -> pd.DataFrame:
+    """Remove explicitly reviewed duplicate rows without changing canonical IDs.
+
+    Fail closed when a duplicate appears without its keeper; this prevents a
+    future full scrape from silently resurrecting or misidentifying an asset.
+    """
+    if mapping.empty:
+        return universe.reset_index(drop=True)
+    needed = {"duplicate_row_id", "canonical_row_id"}
+    if missing := needed - set(mapping.columns):
+        raise ValueError(f"Duplicate suppression registry missing columns: {sorted(missing)}")
+    rules = mapping.copy()
+    for column in needed:
+        rules[column] = rules[column].fillna("").astype(str).str.strip().str.upper()
+    if rules["duplicate_row_id"].eq("").any() or rules["canonical_row_id"].eq("").any():
+        raise ValueError("Duplicate suppression registry contains blank row IDs")
+    if rules["duplicate_row_id"].duplicated().any() or (
+        rules["duplicate_row_id"] == rules["canonical_row_id"]
+    ).any():
+        raise ValueError("Ambiguous duplicate suppression mapping")
+
+    u = universe.copy()
+    ids = u["row_id"].fillna("").astype(str).str.strip().str.upper()
+    present = set(ids)
+    for item in rules.itertuples(index=False):
+        if item.duplicate_row_id in present and item.canonical_row_id not in present:
+            raise ValueError(
+                f"Cannot suppress {item.duplicate_row_id}: missing keeper {item.canonical_row_id}"
+            )
+    removed = set(rules["duplicate_row_id"])
+    return u.loc[~ids.isin(removed)].reset_index(drop=True)
+
+
+def apply_duplicate_suppressions(universe: pd.DataFrame) -> pd.DataFrame:
+    if not DUPLICATE_SUPPRESSIONS_CSV.is_file():
+        raise FileNotFoundError(f"Missing duplicate registry: {DUPLICATE_SUPPRESSIONS_CSV}")
+    return suppress_noncanonical_duplicate_rows(
+        universe, pd.read_csv(DUPLICATE_SUPPRESSIONS_CSV, dtype=str)
+    )
+
+
 def apply_overrides_patch(
     universe: pd.DataFrame, overrides: pd.DataFrame, *, affected_tickers: set[str]
 ) -> pd.DataFrame:
@@ -880,6 +922,7 @@ def _main_impl() -> None:
         universe = apply_asset_exclusions_patch(universe, exclusions)
         affected_tickers = set(universe["ticker"].astype(str).str.strip().str.upper().tolist())
         universe = apply_overrides_patch(universe, overrides, affected_tickers=affected_tickers)
+        universe = apply_duplicate_suppressions(universe)
 
         universe = dedup_by_row_id(
             universe,
@@ -996,6 +1039,7 @@ def _main_impl() -> None:
 
             universe = apply_asset_exclusions_patch(universe, exclusions)
             universe = apply_overrides_patch(universe, overrides, affected_tickers=affected_tickers)
+            universe = apply_duplicate_suppressions(universe)
 
             universe = dedup_by_row_id(
                 universe,

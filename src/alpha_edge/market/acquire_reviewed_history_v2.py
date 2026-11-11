@@ -97,7 +97,18 @@ def run(
             universe_csv=source_path, fx_csv=fx_csv,
             output=plan_dir, cohort_size=1,
         )
-        plan_sha = hashlib.sha256((plan_dir / "manifest.json").read_bytes()).hexdigest()
+        # Extend the existing preflight manifest with pinned Git configuration
+        # provenance. The backfill runner accepts additional manifest fields and
+        # hashes the resulting bytes as the immutable plan identity.
+        manifest_path = plan_dir / "manifest.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest["reviewed_source"] = source
+        manifest["end_exclusive"] = end
+        manifest["minimum_expected_first_date"] = minimum_expected_first_date
+        manifest_path.write_text(
+            json.dumps(manifest, sort_keys=True, indent=2) + "\n", encoding="utf-8"
+        )
+        plan_sha = hashlib.sha256(manifest_path.read_bytes()).hexdigest()
         prefix = f"dev/market/lake_v2/backfills/{plan_sha[:24]}/end-{end}/cohort-0001"
         if not execute:
             return {

@@ -7,8 +7,6 @@ prices, modifies old cohorts, or publishes production data.
 from __future__ import annotations
 
 import argparse
-import hashlib
-import io
 import json
 from collections import Counter, defaultdict
 from pathlib import Path
@@ -128,6 +126,13 @@ def supplementary_preflight(
     crosswalk_current: set[str] = set()
     for x in crosswalk_rows.to_dict("records"):
         crosswalk_current.update(x["candidate_current_asset_ids"])
+    planned_symbols = set(
+        registry.loc[registry["in_original_plan"], "historical_yahoo_ticker"].dropna().astype(str)
+    ) - {""}
+    new_rows = registry.loc[
+        registry["current_universe_present"] & ~registry["in_original_plan"]
+    ]
+    new_symbol_counts = Counter(new_rows["current_yahoo_ticker"].dropna().astype(str))
     ready, blocked = [], []
     for row in registry.to_dict("records"):
         if not row["current_universe_present"] or row["in_original_plan"]:
@@ -135,6 +140,10 @@ def supplementary_preflight(
         meta, missing = _explicit_metadata(row, exchange_map)
         if row["asset_id"] in crosswalk_current:
             missing.append("historical_asset_id_collision_requires_review")
+        if meta["yahoo_ticker"] in planned_symbols:
+            missing.append("original_plan_provider_symbol_collision")
+        if meta["yahoo_ticker"] and new_symbol_counts[meta["yahoo_ticker"]] > 1:
+            missing.append("supplementary_provider_symbol_collision")
         ccy = meta["currency"]
         if ccy and ccy != "USD":
             fx = fx_map.get(ccy)

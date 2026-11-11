@@ -77,6 +77,13 @@ def make_inventory(
             if key.endswith("/_committed.json") and "/asset_id=" in key:
                 aid = key.rsplit("/asset_id=", 1)[1].split("/", 1)[0]
                 reprocessed_markers.setdefault(aid, []).append(key)
+    retained_markers = {}
+    for page in paginator.paginate(Bucket=bucket, Prefix="dev/market/lake_v2/historical_retention/"):
+        for item in page.get("Contents", []):
+            key = item["Key"]
+            if key.endswith("/_committed.json") and "/asset_id=" in key:
+                aid = key.rsplit("/asset_id=", 1)[1].split("/", 1)[0]
+                retained_markers.setdefault(aid, []).append(key)
     records = []
     all_ids = sorted(set(original["asset_id"]) | set(current["asset_id"]) | set(HISTORICAL_RETAIN))
     original_by_id = original.set_index("asset_id")
@@ -145,6 +152,14 @@ def make_inventory(
             record["historical_symbol"] = HISTORICAL_RETAIN[aid]
             record["legacy_history_retained_in_v1"] = True
             record["historical_data_migration_complete"] = False
+            if aid in retained_markers:
+                record["historical_retention_state"] = "legacy_bytes_copied_to_v2_marker_unverified"
+                record["legacy_history_preserved_in_v2_quarantine"] = True
+                record["historical_retention_markers"] = [
+                    f"s3://{bucket}/{key}" for key in sorted(retained_markers[aid])
+                ]
+            else:
+                record["historical_retention_state"] = "legacy_bytes_not_copied_to_v2"
         records.append(record)
     summary = {
         "schema": "aea87_release_inventory_v2_1",
@@ -152,7 +167,15 @@ def make_inventory(
         "source_states": dict(Counter(r["source_state"] for r in records)),
         "candidate_states": dict(Counter(r["candidate_state"] for r in records)),
         "current_eligible": sum(r["current_eligible"] for r in records),
-        "historical_retention_pending": sum(r.get("legacy_history_retained_in_v1", False) for r in records),
+        "historical_retention_pending": sum(
+            r.get("legacy_history_retained_in_v1", False)
+            and not r.get("legacy_history_preserved_in_v2_quarantine", False)
+            for r in records
+        ),
+        "historical_retention_markers_present": sum(
+            r.get("legacy_history_preserved_in_v2_quarantine", False)
+            for r in records
+        ),
         "original_plan_sha256": info["plan_sha256"],
         "original_end_exclusive": original_end,
         "current_universe_sha256": hashlib.sha256(universe_csv.read_bytes()).hexdigest(),

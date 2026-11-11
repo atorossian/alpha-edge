@@ -31,7 +31,7 @@ FILES = (
 )
 PLAN_DIR = "full_universe_preflight_v2/first_review"
 RECONCILIATION_ROOT = "dev/market/lake_v2/reconciliation"
-_SAFE_DATE = re.compile(r"^\\d{4}-\\d{2}-\\d{2}$")
+_SAFE_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
 class UniverseRegistryError(ValueError):

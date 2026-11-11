@@ -123,3 +123,5 @@ D3E80C938B6208F6,VXU6,derivative,Not tradable in Quantfury app,Contract expired
 4FBCDA48AB2A79BB,WBD,equity,Asset not publicly traded anymore,Acquired by Paramount Skydance Corp (PSKY)
 BAF4E1F985BF6FC6,QRVO,equity,Asset not publicly traded anymore,Acquired by Skyworks Solutions Inc. (SWKS)
 C2030DA0D3808CDA,CSAN,equity,Not tradable in Quantfury app,Asset delisted from NYSE
+670A9138B424DB13,PPLI,equity,Duplicate of IAC row 5E262727DC314688,Original IAC record carries locked Yahoo symbol PPLI
+DEA19FC8D266CFE2,KMB,equity,Duplicate of KMB row C73EB54227724B75,Keep canonical current KMB identity

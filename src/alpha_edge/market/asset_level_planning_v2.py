@@ -76,7 +76,13 @@ def crosswalk(registry: pd.DataFrame, historical_symbols: dict[str, str]) -> pd.
             "evidence_key": PROVIDER_STATE,
             "source_price_verified": False,
         })
-    return pd.DataFrame(output).sort_values("historical_asset_id").reset_index(drop=True)
+    columns = [
+        "historical_asset_id", "historical_provider_symbol",
+        "candidate_current_asset_ids", "candidate_count", "state",
+        "identity_confirmed", "canonical_asset_id", "evidence_key",
+        "source_price_verified",
+    ]
+    return pd.DataFrame(output, columns=columns).sort_values("historical_asset_id").reset_index(drop=True)
 
 
 def _explicit_metadata(row: dict, exchange_map: dict[str, str]) -> tuple[dict, list[str]]:

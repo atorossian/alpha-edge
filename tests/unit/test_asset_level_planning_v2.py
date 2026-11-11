@@ -136,3 +136,21 @@ def test_planning_bundle_contains_five_reconciled_artifacts_and_zero_approvals()
     assert manifest["counts"]["historical_coverage_tasks"] == 2
     assert manifest["market_data_approved"] is False
     assert manifest["acquisitions_executed"] == 0
+
+
+
+def test_supplementary_symbol_already_in_original_plan_is_blocked():
+    data = registry()
+    data.loc[data["asset_id"].eq("CURRENT-B"), "current_yahoo_ticker"] = "A"
+    mapping = crosswalk(data, {"HIST-A": "UNKNOWN", "HIST-B": "DIFFERENT"})
+    _, blocked = supplementary_preflight(data, mapping, exchange_mapping(), fx_config())
+    assert "original_plan_provider_symbol_collision" in blocked.iloc[0]["blockers"]
+
+
+def test_empty_legacy_crosswalk_has_stable_columns():
+    data = registry()
+    data = data.loc[data["identity_source"].ne("legacy_key_only")]
+    mapping = crosswalk(data, {})
+    assert mapping.empty
+    assert "historical_asset_id" in mapping.columns
+    assert "state" in mapping.columns

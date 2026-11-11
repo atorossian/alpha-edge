@@ -299,7 +299,11 @@ def build_recovery_plan(registry: pd.DataFrame) -> pd.DataFrame:
         else:
             action = "resolve_historical_identity"
             reason = "legacy_only_asset_id_without_verified_source_mapping"
-        if item["in_original_plan"] and item["current_yahoo_ticker"] != item["historical_yahoo_ticker"] and item["current_universe_present"]:
+        if (
+            item["in_original_plan"]
+            and item["current_yahoo_ticker"] != item["historical_yahoo_ticker"]
+            and item["current_universe_present"]
+        ):
             action = "review_provider_identity"
             reason = "original_and_current_provider_symbols_differ"
         if item["in_original_plan"] and not item["current_universe_present"]:
@@ -374,7 +378,9 @@ def build_evidence(registry: pd.DataFrame, summary: dict) -> tuple[dict[str, byt
     return artifacts, manifest
 
 
-def publish_evidence(s3, bucket: str, artifacts: dict[str, bytes], manifest: dict, *, root: str = RECONCILIATION_ROOT) -> dict:
+def publish_evidence(
+    s3, bucket: str, artifacts: dict[str, bytes], manifest: dict, *, root: str = RECONCILIATION_ROOT
+) -> dict:
     """Immutable S3 publication with per-object read-back SHA and manifest-last.
 
     Existing identical objects are idempotent; mismatches fail closed. This
@@ -383,7 +389,12 @@ def publish_evidence(s3, bucket: str, artifacts: dict[str, bytes], manifest: dic
     run_id = manifest["run_id"]
     if not re.fullmatch(r"[a-f0-9]{64}", run_id):
         raise UniverseRegistryError("Invalid evidence run identity")
-    if root not in {RECONCILIATION_ROOT, "dev/market/lake_v2/asset_plans", "dev/market/lake_v2/asset_recovery", "dev/market/lake_v2/asset_audits"}:
+    if root not in {
+        RECONCILIATION_ROOT,
+        "dev/market/lake_v2/asset_plans",
+        "dev/market/lake_v2/asset_recovery",
+        "dev/market/lake_v2/asset_audits",
+    }:
         raise UniverseRegistryError("Unapproved S3 evidence namespace")
     prefix = f"{root}/run-{run_id}"
     for name in sorted(name for name in artifacts if name != "manifest.json") + ["manifest.json"]:
@@ -404,7 +415,9 @@ def publish_evidence(s3, bucket: str, artifacts: dict[str, bytes], manifest: dic
                     IfNoneMatch="*",
                 )
             except ClientError as put_error:
-                if put_error.response.get("Error", {}).get("Code") not in {"412", "PreconditionFailed", "409", "ConditionalRequestConflict"}:
+                if put_error.response.get("Error", {}).get("Code") not in {
+                    "412", "PreconditionFailed", "409", "ConditionalRequestConflict"
+                }:
                     raise
             existing = s3.get_object(Bucket=bucket, Key=key)["Body"].read()
         if _sha(existing) != expected:
@@ -441,7 +454,11 @@ def run(
     report["evidence_run_id"] = manifest["run_id"]
     report["evidence"] = (
         publish_evidence(s3, bucket, artifacts, manifest)
-        if publish else {"status": "dry_run_no_writes", "planned_prefix": f"s3://{bucket}/{RECONCILIATION_ROOT}/run-{manifest['run_id']}/"}
+        if publish
+        else {
+            "status": "dry_run_no_writes",
+            "planned_prefix": f"s3://{bucket}/{RECONCILIATION_ROOT}/run-{manifest['run_id']}/",
+        }
     )
     report["s3_writes"] = 4 if publish else 0
     return report
@@ -456,7 +473,9 @@ def main() -> None:
         "--universe-dir", type=Path, default=Path("data/universe"), help="Git-tracked input configuration only"
     )
     parser.add_argument("--skip-legacy-inventory", action="store_true")
-    parser.add_argument("--publish", action="store_true", help="Publish immutable evidence under dev S3; no production writes")
+    parser.add_argument(
+        "--publish", action="store_true", help="Publish immutable evidence under dev S3; no production writes"
+    )
     parser.add_argument("--region", default="eu-west-1")
     args = parser.parse_args()
     inputs = {name: (args.universe_dir / name).read_bytes() for name in FILES}

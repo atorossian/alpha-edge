@@ -70,6 +70,13 @@ def make_inventory(
                 continue
             aid = key.rsplit("/asset_id=", 1)[1].split("/", 1)[0]
             recovered_candidate_markers.setdefault(aid, []).append(key)
+    reprocessed_markers = {}
+    for page in paginator.paginate(Bucket=bucket, Prefix="dev/market/lake_v2/reprocessed_candidates/"):
+        for item in page.get("Contents", []):
+            key = item["Key"]
+            if key.endswith("/_committed.json") and "/asset_id=" in key:
+                aid = key.rsplit("/asset_id=", 1)[1].split("/", 1)[0]
+                reprocessed_markers.setdefault(aid, []).append(key)
     records = []
     all_ids = sorted(set(original["asset_id"]) | set(current["asset_id"]) | set(HISTORICAL_RETAIN))
     original_by_id = original.set_index("asset_id")
@@ -129,6 +136,11 @@ def make_inventory(
                 record["reviewed_symbol"] = symbol
                 record["source_manifest"] = f"s3://{bucket}/{key}"
                 record["source_manifest_sha256"] = digest
+        if aid in reprocessed_markers:
+            record["candidate_state"] = "reprocessed_candidate_marker_unverified"
+            record["reprocessed_candidate_markers"] = [
+                f"s3://{bucket}/{key}" for key in sorted(reprocessed_markers[aid])
+            ]
         if aid in HISTORICAL_RETAIN:
             record["historical_symbol"] = HISTORICAL_RETAIN[aid]
             record["legacy_history_retained_in_v1"] = True

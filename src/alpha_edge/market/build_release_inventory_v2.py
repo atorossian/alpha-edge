@@ -59,6 +59,17 @@ def make_inventory(
     if current["asset_id"].duplicated().any():
         raise ValueError("Duplicate asset_id in current universe")
     configured = current.set_index("asset_id")
+    # Discover already-committed per-asset candidates by their immutable marker.
+    # No Parquet objects are downloaded. Presence is NOT approval.
+    recovered_candidate_markers = {}
+    paginator = s3.get_paginator("list_objects_v2")
+    for page in paginator.paginate(Bucket=bucket, Prefix="dev/market/lake_v2/recovered_candidates/"):
+        for item in page.get("Contents", []):
+            key = item["Key"]
+            if not key.endswith("/_committed.json") or "/asset_id=" not in key:
+                continue
+            aid = key.rsplit("/asset_id=", 1)[1].split("/", 1)[0]
+            recovered_candidate_markers.setdefault(aid, []).append(key)
     records = []
     all_ids = sorted(set(original["asset_id"]) | set(current["asset_id"]) | set(HISTORICAL_RETAIN))
     original_by_id = original.set_index("asset_id")
@@ -101,6 +112,12 @@ def make_inventory(
                     )
                     record["source_manifest"] = f"s3://{bucket}/{key}"
                     record["source_manifest_sha256"] = digest
+        if aid in recovered_candidate_markers:
+            markers = recovered_candidate_markers[aid]
+            record["candidate_state"] = "recovered_candidate_marker_unverified"
+            record["recovered_candidate_markers"] = [
+                f"s3://{bucket}/{key}" for key in sorted(markers)
+            ]
         if aid in REVIEWED:
             symbol, prefix_hash, end = REVIEWED[aid]
             key = (f"dev/market/lake_v2/backfills/{prefix_hash}/"

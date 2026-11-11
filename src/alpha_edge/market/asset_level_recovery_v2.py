@@ -14,6 +14,7 @@ from datetime import date
 
 import boto3
 import pandas as pd
+from botocore.exceptions import ClientError
 
 from alpha_edge.market.ingest_bronze_yahoo_v2 import acquire_yahoo_bars
 from alpha_edge.market.universe_registry_v2 import (
@@ -51,13 +52,15 @@ def _original_asset(s3, bucket: str, archive_id: str, asset_id: str, end: str):
     return subset.iloc[0].to_dict(), info, states
 
 
-def _result_bytes(payloads: dict[str, bytes], metadata: dict) -> tuple[dict[str, bytes], dict]:
+def _result_bytes(
+    payloads: dict[str, bytes], metadata: dict, *, run_id: str | None = None
+) -> tuple[dict[str, bytes], dict]:
     fingerprint = {
         "schema": "aea87_asset_recovery_candidate_v1",
         "source": metadata,
         "sha256": {name: _sha(blob) for name, blob in sorted(payloads.items())},
     }
-    run_id = _sha(_json_bytes(fingerprint))
+    run_id = run_id or _sha(_json_bytes(fingerprint))
     manifest = {
         "schema": fingerprint["schema"],
         "run_id": run_id,
@@ -99,6 +102,28 @@ def recover_asset(
     }
     if not execute:
         return {"status": "dry_run", "source_contract": base, "s3_writes": 0}
+    # Stable immutable address for this acquisition contract, independent of
+    # provider timestamps. Replays verify existing bytes before any download.
+    recovery_id = _sha(_json_bytes({"schema": "aea87_recovery_identity_v1", **base}))
+    recovery_prefix = f"{RECOVERY_ROOT}/run-{recovery_id}"
+    try:
+        existing = json.loads(_get(s3, bucket, recovery_prefix + "/manifest.json"))
+    except ClientError as exc:
+        if exc.response.get("Error", {}).get("Code") not in {"NoSuchKey", "404", "NotFound"}:
+            raise
+        existing = None
+    except ValueError as exc:
+        raise AssetRecoveryError("Existing recovery manifest is invalid") from exc
+    if existing is not None:
+        if existing.get("run_id") != recovery_id or existing.get("source", {}).get("asset_id") != asset_id:
+            raise AssetRecoveryError("Existing recovery contract mismatch")
+        name = "source_ohlcv.parquet"
+        blob = _get(s3, bucket, f"{recovery_prefix}/{name}")
+        if _sha(blob) != existing.get("artifact_sha256", {}).get(name):
+            raise AssetRecoveryError("Existing recovery Bronze SHA mismatch")
+        return {"status": "verified_existing_research_candidate", "asset_id": asset_id,
+                "run_id": recovery_id, "production_eligible": False,
+                "evidence": {"s3_uri": f"s3://{bucket}/{recovery_prefix}/manifest.json"}}
     bars, provider_meta = acquire_yahoo_bars(
         asset_id, symbol, start=None, end=end,
         batch_id=f"aea87-recovery-{cohort:04d}", ticker_factory=ticker_factory,
@@ -112,7 +137,7 @@ def recover_asset(
     bars.to_parquet(buffer, index=False)
     files, manifest = _result_bytes(
         {"source_ohlcv.parquet": buffer.getvalue()},
-        {**base, "provider_provenance": provider_meta},
+        {**base, "provider_provenance": provider_meta}, run_id=recovery_id,
     )
     location = publish_evidence(s3, bucket, files, manifest, root=RECOVERY_ROOT)
     return {
@@ -253,6 +278,37 @@ def audit_existing_asset(
     return {**summary, "findings": len(findings), "evidence": location}
 
 
+def audit_recovered_asset(
+    s3, bucket: str, asset_id: str, recovery_id: str, *, publish: bool = False
+) -> dict:
+    """Audit an immutable individual recovery candidate, not legacy v1 data."""
+    if not SAFE_ASSET_ID.fullmatch(asset_id) or not re.fullmatch(r"[a-f0-9]{64}", recovery_id):
+        raise AssetRecoveryError("Invalid recovery audit selection")
+    prefix = f"{RECOVERY_ROOT}/run-{recovery_id}"
+    source_manifest = json.loads(_get(s3, bucket, f"{prefix}/manifest.json"))
+    metadata = source_manifest.get("source", {})
+    if source_manifest.get("run_id") != recovery_id or metadata.get("asset_id") != asset_id:
+        raise AssetRecoveryError("Recovery manifest identity mismatch")
+    source_raw = _get(s3, bucket, f"{prefix}/source_ohlcv.parquet")
+    if _sha(source_raw) != source_manifest.get("artifact_sha256", {}).get("source_ohlcv.parquet"):
+        raise AssetRecoveryError("Recovery source Bronze SHA mismatch")
+    frame = pd.read_parquet(io.BytesIO(source_raw))
+    findings, summary = audit_sessions_and_actions(
+        frame, asset_id=asset_id, calendar_id=str(metadata["calendar_id"])
+    )
+    artifacts, manifest = _result_bytes(
+        {
+            "findings.jsonl": b"".join(_json_bytes(record) for record in findings.to_dict("records")),
+            "coverage.json": _json_bytes(summary),
+        },
+        {"asset_id": asset_id, "recovery_run_id": recovery_id, "source_sha256": _sha(source_raw)},
+    )
+    location = publish_evidence(s3, bucket, artifacts, manifest, root=AUDIT_ROOT) if publish else {
+        "status": "dry_run_no_writes"
+    }
+    return {**summary, "findings": len(findings), "evidence": location}
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--bucket", required=True)
@@ -261,6 +317,7 @@ def main() -> None:
     parser.add_argument("--end", default="2026-11-10")
     parser.add_argument("--mode", choices=("recover", "audit"), required=True)
     parser.add_argument("--execute", action="store_true", help="Explicit single-asset provider acquisition")
+    parser.add_argument("--recovery-run-id", help="Audit existing individual recovery candidate instead of cohort")
     parser.add_argument("--publish", action="store_true", help="Publish immutable audit evidence")
     parser.add_argument("--region", default="eu-west-1")
     args = parser.parse_args()
@@ -274,9 +331,14 @@ def main() -> None:
     else:
         if args.execute:
             parser.error("Audit does not acquire prices; use --publish only")
-        result = audit_existing_asset(
-            s3, args.bucket, args.archive_id, args.asset_id, args.end, publish=args.publish
-        )
+        if args.recovery_run_id:
+            result = audit_recovered_asset(
+                s3, args.bucket, args.asset_id, args.recovery_run_id, publish=args.publish
+            )
+        else:
+            result = audit_existing_asset(
+                s3, args.bucket, args.archive_id, args.asset_id, args.end, publish=args.publish
+            )
     print(json.dumps(result, indent=2, sort_keys=True))
 
 

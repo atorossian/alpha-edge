@@ -56,7 +56,10 @@ def test_archive_rejects_symlinks_and_secret_keys(tmp_path):
         inventory(root)
     (root / "private.key").unlink()
     (root / "real.csv").write_text("rows")
-    (root / "link.csv").symlink_to(root / "real.csv")
+    try:
+        (root / "link.csv").symlink_to(root / "real.csv")
+    except OSError as exc:
+        pytest.skip(f"Operating system does not permit symlinks: {exc}")
     with pytest.raises(ArchiveError, match="Non-regular"):
         inventory(root)
 

@@ -25,7 +25,6 @@ from alpha_edge.market.universe_registry_v2 import (
 
 ROOT = "dev/market/lake_v2/reconciliation"
 PROVIDER_STATE = "market/state/v1/provider_symbol_by_asset_id.json"
-CURRENCY_REQUIRED = {"asset_id", "yahoo_ticker", "currency", "calendar_id"}
 VALID_FX_DIRECTION = {"direct", "inverse"}
 
 
@@ -45,7 +44,7 @@ def crosswalk(registry: pd.DataFrame, historical_symbols: dict[str, str]) -> pd.
     historical_counts = Counter(
         value.strip() for row in registry.to_dict("records")
         if row["identity_source"] == "legacy_key_only"
-        for value in [str(historical_symbols.get(row["asset_id"], ""))]
+        for value in [str(historical_symbols.get(row["asset_id"]) or "")]
         if value.strip()
     )
     output = []
@@ -53,7 +52,7 @@ def crosswalk(registry: pd.DataFrame, historical_symbols: dict[str, str]) -> pd.
         if row["identity_source"] != "legacy_key_only":
             continue
         source_id = row["asset_id"]
-        provider = str(historical_symbols.get(source_id, "")).strip()
+        provider = str(historical_symbols.get(source_id) or "").strip()
         candidates = sorted(by_symbol.get(provider, [])) if provider else []
         if not provider:
             state = "missing_historical_provider_mapping"
@@ -296,7 +295,11 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--bucket", required=True)
     parser.add_argument("--reconciliation-id", required=True)
-    parser.add_argument("--exchange-map", type=Path, default=Path("data/quality/market_lake_v2/exchange_calendar_mapping_v2.csv"))
+    parser.add_argument(
+        "--exchange-map",
+        type=Path,
+        default=Path("data/quality/market_lake_v2/exchange_calendar_mapping_v2.csv"),
+    )
     parser.add_argument("--fx-config", type=Path, default=Path("data/quality/market_lake_v2/pilot_fx_registry_v2.csv"))
     parser.add_argument("--region", default="eu-west-1")
     parser.add_argument("--publish", action="store_true")

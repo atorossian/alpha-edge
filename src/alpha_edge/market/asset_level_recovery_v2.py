@@ -256,16 +256,27 @@ def audit_sessions_and_actions(
         findings.append({"asset_id": asset_id, "session_date": "",
                          "issue": "missing_adjusted_close_provenance"})
     action_events = {}
+    action_missing_counts = {}
     for field in ("dividends", "stock_splits"):
         if field in selected:
             value = pd.to_numeric(selected[field], errors="coerce")
+            missing_values = value.isna() | value.map(
+                lambda x: pd.notna(x) and abs(x) == float("inf")
+            )
+            action_missing_counts[field] = int(missing_values.sum())
+            if missing_values.any():
+                findings.append({
+                    "asset_id": asset_id, "session_date": "",
+                    "issue": f"missing_or_nonfinite_{field}_observations",
+                })
             action_events[field] = int(value.fillna(0).ne(0).sum())
-            suspicious = value.lt(0) | value.map(lambda x: pd.notna(x) and abs(x) == float("inf"))
+            suspicious = value.lt(0)
             for session in selected.loc[suspicious, "session_date"].tolist():
                 findings.append({"asset_id": asset_id, "session_date": str(session)[:10],
                                  "issue": f"implausible_{field}"})
         else:
             action_events[field] = None
+            action_missing_counts[field] = len(selected)
             findings.append({"asset_id": asset_id, "session_date": "", "issue": f"missing_{field}_provenance"})
     endpoints_verified = bool(declared_listing_start and declared_listing_end)
     if endpoints_verified:
@@ -284,6 +295,7 @@ def audit_sessions_and_actions(
         "missing_internal_sessions": len(missing_sessions),
         "unexpected_sessions": len(unexpected),
         "action_observation_counts": action_events,
+        "action_missing_or_nonfinite_counts": action_missing_counts,
         "listed_history_endpoints_declared": endpoints_verified,
         "listing_dates_independently_verified": False,
         "corporate_actions_independently_verified": False,

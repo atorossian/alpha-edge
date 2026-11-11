@@ -2154,7 +2154,7 @@ EFDFF8927AA7A133,OSCR,OSCR,OSCR,Oscar Health Inc,equity,stock,NYSE,0.25,0.0,1,EQ
 4D351AC620ACBD41,NEOEN,NEOEN,NEOEN,Neoen SA,equity,stock,Cboe Europe,0.25,0.0,0,EQHe73417b51253ef53,0,NEOEN,,,,,,,,,,,,,
 2AFCF292D60964F2,CRS,CRS,CRS,Carpenter Technology Corp,equity,stock,NYSE,0.25,0.0,1,EQHe76566c77a0e8902,0,,,,,,,,,,,,,,
 6CDA13F2176E1915,SEE,SEE,SEE,Sealed Air Corp.,equity,stock,NYSE,0.25,0.0,0,EQHe8134fdc7806f4bb,0,,,,,,,,,,,,,,
-F2D913BE93641079,EUR-USD,EUR-USD,EUR-USD,Euro US Dollar,fx,fx_pair,Forex,0.25,0.0,1,EQHe874aca04f607837,1,,,,,,,,USD,,,,,,
+F2D913BE93641079,EUR-USD,EUR-USD,EURUSD=X,Euro US Dollar,fx,fx_pair,Forex,0.25,0.0,1,EQHe874aca04f607837,1,,,,,,CCY,,USD,,,,,,FOREX
 A3F26D596155F536,IDCC,IDCC,IDCC,InterDigital Inc.,equity,stock,NASDAQ,0.25,0.0,1,EQHe87d83aaacebbf1c,0,,,,,,,,,,,,,,
 EEF5FEF6B9EB7F09,BLCO,BLCO,BLCO,Bausch + Lomb Corp.,equity,stock,NYSE,0.25,0.0,1,EQHe8b1813444c2e6dd,0,BLCO,,,,,,,,,,,,,
 7053A316894FE77A,DESP,DESP,DESP,Despegar.com Corp,equity,stock,NYSE,0.25,0.0,0,EQHe8cff132aac1d601,0,DESP,,,,,,,,,,,,,

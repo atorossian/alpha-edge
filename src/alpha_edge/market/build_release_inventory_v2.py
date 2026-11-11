@@ -169,6 +169,9 @@ def make_inventory(
             if aid in retained_markers:
                 record["historical_retention_state"] = "legacy_bytes_copied_to_v2_marker_unverified"
                 record["legacy_history_preserved_in_v2_quarantine"] = True
+                if record["source_state"] == "not_acquired_in_v2":
+                    record["source_state"] = "legacy_history_retained_unapproved"
+                    record["candidate_state"] = "historical_quarantine_not_standardized"
                 record["historical_retention_markers"] = [
                     f"s3://{bucket}/{key}" for key in sorted(retained_markers[aid])
                 ]

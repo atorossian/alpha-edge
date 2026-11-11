@@ -5,6 +5,7 @@ acceptance module, reusing its equality and date normalization helpers.
 Never claims independent provider accuracy, corporate-action verification
 or external evidence-gate completion.
 """
+
 from __future__ import annotations
 
 import numpy as np
@@ -21,9 +22,17 @@ def review(tables: dict[str, pd.DataFrame], *, manual_corrections: int = 0) -> d
     flags = tables["session_flags"].copy()
     fx_evidence = tables["fx_evidence"]
     required = {
-        "asset_id", "session_date", "close", "adj_close", "currency_original",
-        "quality_status", "return_quality_status", "close_raw_usd",
-        "close_adjusted_usd", "fx_to_usd", "ret_simple_close_adjusted_usd",
+        "asset_id",
+        "session_date",
+        "close",
+        "adj_close",
+        "currency_original",
+        "quality_status",
+        "return_quality_status",
+        "close_raw_usd",
+        "close_adjusted_usd",
+        "fx_to_usd",
+        "ret_simple_close_adjusted_usd",
         "ret_log_close_adjusted_usd",
     }
     if missing := required - set(gold):
@@ -42,10 +51,9 @@ def review(tables: dict[str, pd.DataFrame], *, manual_corrections: int = 0) -> d
         ):
             raise ValueError(f"{label} asset/date coverage differs from Gold")
     ordered = gold.sort_values(keys).reset_index(drop=True)
-    aligned = source.merge(ordered, on=keys, validate="one_to_one",
-                           suffixes=("_source", "_gold"))
+    aligned = source.merge(ordered, on=keys, validate="one_to_one", suffixes=("_source", "_gold"))
     for col in ("open", "high", "low", "close", "adj_close", "volume"):
-        if not _equal(aligned[f"{col}_source"], aligned[f"{col}_gold"] ).all():
+        if not _equal(aligned[f"{col}_source"], aligned[f"{col}_gold"]).all():
             findings.append(f"source_lineage_{col}")
     known = ordered["quality_status"].eq("accepted")
     fx = pd.to_numeric(ordered["fx_to_usd"], errors="coerce")
@@ -58,9 +66,7 @@ def review(tables: dict[str, pd.DataFrame], *, manual_corrections: int = 0) -> d
         observed = pd.to_numeric(ordered[col], errors="coerce")
         if not _equal(observed.where(known), expected.where(known)).all():
             findings.append(f"usd_arithmetic_{col}")
-    good_price = (known & np.isfinite(
-        pd.to_numeric(ordered["close_adjusted_usd"], errors="coerce")
-    ))
+    good_price = known & np.isfinite(pd.to_numeric(ordered["close_adjusted_usd"], errors="coerce"))
     safe = pd.to_numeric(ordered["close_adjusted_usd"], errors="coerce").where(good_price)
     previous = safe.groupby(ordered["asset_id"]).shift()
     expected_simple = safe.div(previous).sub(1).where(previous.gt(0))
@@ -70,7 +76,9 @@ def review(tables: dict[str, pd.DataFrame], *, manual_corrections: int = 0) -> d
         raise ValueError("Calendar evidence duplicates asset/date")
     matched = ordered[keys].merge(
         flags[keys + ["previous_expected_session_missing"]],
-        on=keys, how="left", validate="one_to_one",
+        on=keys,
+        how="left",
+        validate="one_to_one",
     )
     if matched["previous_expected_session_missing"].isna().any():
         raise ValueError("Missing exchange calendar evidence")

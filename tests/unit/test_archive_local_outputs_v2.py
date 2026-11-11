@@ -1,4 +1,5 @@
 """Local data archives require remote byte verification before deletion."""
+
 import io
 from pathlib import Path
 
@@ -6,7 +7,9 @@ import pytest
 from botocore.exceptions import ClientError
 
 from alpha_edge.market.archive_local_outputs_v2 import (
-    transfer, inventory, ArchiveError,
+    transfer,
+    inventory,
+    ArchiveError,
 )
 
 
@@ -33,8 +36,7 @@ def test_archive_requires_verified_remote_copy_before_prune(tmp_path):
     (root / "nested").mkdir(parents=True)
     (root / "nested" / "gold.parquet").write_bytes(b"gold v2")
     s3 = FakeS3()
-    kwargs = {"root": root, "bucket": "test-bucket",
-              "archive_id": "20261110-local", "s3": s3}
+    kwargs = {"root": root, "bucket": "test-bucket", "archive_id": "20261110-local", "s3": s3}
     assert transfer(**kwargs)["status"] == "dry_run"
     assert (root / "nested" / "gold.parquet").exists()
     with pytest.raises(ClientError):

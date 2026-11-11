@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, Tuple
 
 import numpy as np
 import pandas as pd
@@ -371,12 +371,24 @@ def tune_lambdas_by_optimization(
                 "executable_aware_candidate_pool": bool(executable_aware),
                 "best_valid_score": float(max((mm.score for mm in valid_metrics), default=float("-inf"))),
                 "best_valid_ruin": float(min((mm.ruin_prob_1y for mm in valid_metrics), default=float("nan"))),
-                "best_valid_stability_energy": float(getattr(best_valid, "stability_energy", float("nan"))) if best_valid is not None else float("nan"),
-                "best_valid_path_mdd_mean": float(getattr(best_valid, "path_mdd_mean", float("nan"))) if best_valid is not None else float("nan"),
-                "best_valid_cdar_95": float(getattr(best_valid, "cdar_95", float("nan"))) if best_valid is not None else float("nan"),
-                "best_valid_p_dd_breach": float(getattr(best_valid, "p_dd_breach", float("nan"))) if best_valid is not None else float("nan"),
-                "best_valid_underwater_mean": float(getattr(best_valid, "underwater_mean", float("nan"))) if best_valid is not None else float("nan"),
-                "best_valid_ttr_mean_days": float(getattr(best_valid, "ttr_mean_days", float("nan"))) if best_valid is not None else float("nan"),
+                "best_valid_stability_energy": float(getattr(best_valid, "stability_energy", float("nan")))
+                if best_valid is not None
+                else float("nan"),
+                "best_valid_path_mdd_mean": float(getattr(best_valid, "path_mdd_mean", float("nan")))
+                if best_valid is not None
+                else float("nan"),
+                "best_valid_cdar_95": float(getattr(best_valid, "cdar_95", float("nan")))
+                if best_valid is not None
+                else float("nan"),
+                "best_valid_p_dd_breach": float(getattr(best_valid, "p_dd_breach", float("nan")))
+                if best_valid is not None
+                else float("nan"),
+                "best_valid_underwater_mean": float(getattr(best_valid, "underwater_mean", float("nan")))
+                if best_valid is not None
+                else float("nan"),
+                "best_valid_ttr_mean_days": float(getattr(best_valid, "ttr_mean_days", float("nan")))
+                if best_valid is not None
+                else float("nan"),
                 "objective_alphas": {
                     "alpha_ruin": float(alpha_ruin),
                     "alpha_stability": float(alpha_stability),

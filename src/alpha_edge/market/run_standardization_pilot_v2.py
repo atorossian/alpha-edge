@@ -3,6 +3,7 @@
 Standalone local-only stage. No Yahoo fetches, no AWS writes, and no changes
 to legacy MarketStore manifests, snapshots or production returns cache.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -37,8 +38,12 @@ def _source_inputs(batch_dir: Path) -> tuple[pd.DataFrame, pd.DataFrame, dict]:
 
 
 def generate(
-    batch_dir: Path, *, output: Path, corrections_csv: Path | None = None,
-    asset_registry_csv: Path | None = None, fx_registry_csv: Path | None = None,
+    batch_dir: Path,
+    *,
+    output: Path,
+    corrections_csv: Path | None = None,
+    asset_registry_csv: Path | None = None,
+    fx_registry_csv: Path | None = None,
 ) -> dict:
     bars, quotes, source = _source_inputs(batch_dir)
     source_row_count = len(bars)
@@ -46,10 +51,7 @@ def generate(
     correction_sha256 = None
     # Never silently omit registered manual observations during cohort runs.
     # Filter the global registry by cohort asset, preserving original file hash.
-    registry_path = (
-        Path(__file__).resolve().parents[3]
-        / "data/quality/market_lake_v2/manual_ohlcv_corrections.csv"
-    )
+    registry_path = Path(__file__).resolve().parents[3] / "data/quality/market_lake_v2/manual_ohlcv_corrections.csv"
     if corrections_csv is None:
         if not registry_path.is_file():
             raise ValueError("Mandatory manual-correction registry is missing")
@@ -68,29 +70,26 @@ def generate(
         raise ValueError("Both asset and FX registries must be supplied together")
     config_hashes = None
     if asset_registry_csv is not None:
-        u, fx_registry = prepare_registry(
-            pd.read_csv(asset_registry_csv), pd.read_csv(fx_registry_csv)
-        )
+        u, fx_registry = prepare_registry(pd.read_csv(asset_registry_csv), pd.read_csv(fx_registry_csv))
         source_identity = bars.groupby("asset_id")[["provider_symbol", "currency_original"]].first()
         expected_identity = u.set_index("asset_id")
         if set(source_identity.index) != set(expected_identity.index):
             raise ValueError("Bronze cohort does not match explicit asset registry")
         for aid in expected_identity.index:
-            if (source_identity.loc[aid, "provider_symbol"] != expected_identity.loc[aid, "yahoo_ticker"]
-                    or source_identity.loc[aid, "currency_original"] != expected_identity.loc[aid, "currency"]):
+            if (
+                source_identity.loc[aid, "provider_symbol"] != expected_identity.loc[aid, "yahoo_ticker"]
+                or source_identity.loc[aid, "currency_original"] != expected_identity.loc[aid, "currency"]
+            ):
                 raise ValueError(f"{aid}: Bronze identity or native currency inconsistent with registry")
         calendars = dict(zip(u["yahoo_ticker"], u["calendar_id"]))
-        pairs = {r.currency: (r.provider_symbol, r.direction)
-                 for r in fx_registry.itertuples(index=False)}
+        pairs = {r.currency: (r.provider_symbol, r.direction) for r in fx_registry.itertuples(index=False)}
         config_hashes = {
             "asset_registry_sha256": _sha256(asset_registry_csv),
             "fx_registry_sha256": _sha256(fx_registry_csv),
         }
     else:
         calendars, pairs = None, None
-    outputs = build_silver_gold_from_bronze(
-        bars, quotes, calendars=calendars, pairs=pairs
-    )
+    outputs = build_silver_gold_from_bronze(bars, quotes, calendars=calendars, pairs=pairs)
     if len(outputs["bronze_validated"]) != len(bars) or len(outputs["silver"]) != len(bars):
         raise ValueError("Bronze-to-Silver row count mismatch")
     if len(outputs["gold"]) != len(bars):
@@ -113,27 +112,27 @@ def generate(
     summary = []
     traces = output / "asset_traces"
     traces.mkdir()
-    for (aid, symbol), g in outputs["gold"].groupby(
-        ["asset_id", "provider_symbol"], sort=True
-    ):
+    for (aid, symbol), g in outputs["gold"].groupby(["asset_id", "provider_symbol"], sort=True):
         quality = g["quality_status"]
         return_status = g["return_quality_status"]
-        summary.append({
-            "asset_id": aid,
-            "symbol": symbol,
-            "currency": g["currency_original"].iloc[0],
-            "rows": len(g),
-            "accepted_prices": int(quality.eq("accepted").sum()),
-            "quarantined_prices": int(quality.eq("quarantined").sum()),
-            "missing_fx": int(g["quality_reason"].str.contains("fx_missing").sum()),
-            "stale_fx": int(g["quality_reason"].str.contains("fx_stale").sum()),
-            "session_gap_affected_rows": int(
-                g["quality_reason"].str.contains("prior_expected_session_missing").sum()
-            ),
-            "valid_returns": int(return_status.eq("accepted").sum()),
-            "review_returns": int(return_status.eq("review").sum()),
-            "unavailable_returns": int(return_status.eq("unavailable").sum()),
-        })
+        summary.append(
+            {
+                "asset_id": aid,
+                "symbol": symbol,
+                "currency": g["currency_original"].iloc[0],
+                "rows": len(g),
+                "accepted_prices": int(quality.eq("accepted").sum()),
+                "quarantined_prices": int(quality.eq("quarantined").sum()),
+                "missing_fx": int(g["quality_reason"].str.contains("fx_missing").sum()),
+                "stale_fx": int(g["quality_reason"].str.contains("fx_stale").sum()),
+                "session_gap_affected_rows": int(
+                    g["quality_reason"].str.contains("prior_expected_session_missing").sum()
+                ),
+                "valid_returns": int(return_status.eq("accepted").sum()),
+                "review_returns": int(return_status.eq("review").sum()),
+                "unavailable_returns": int(return_status.eq("unavailable").sum()),
+            }
+        )
         # Asset-id is treated as data, never as a filesystem path.
         filename = "asset_" + hashlib.sha256(str(aid).encode()).hexdigest()[:16] + ".csv"
         target = traces / filename
@@ -151,34 +150,29 @@ def generate(
         "candidate_input_rows": len(bars),
         "manual_corrections_csv_sha256": correction_sha256,
         "manual_correction_approval": (
-            "pending_independent_verification"
-            if correction_audit is not None else "not_applicable"
+            "pending_independent_verification" if correction_audit is not None else "not_applicable"
         ),
         "silver_rows": len(outputs["silver"]),
         "gold_rows": len(outputs["gold"]),
         "fx_quote_rows": len(quotes),
         "fx_accepted_rows": len(outputs["fx_normalized"]),
-        "fx_rejected_rows": int(
-            outputs["fx_evidence"]["fx_validation_status"].ne("accepted").sum()
-        ),
-        "missing_expected_sessions": int(
-            outputs["session_issues"]["issue"].eq("missing_expected_session").sum()
-        ),
-        "unexpected_sessions": int(
-            outputs["session_issues"]["issue"].eq("unexpected_session").sum()
-        ),
+        "fx_rejected_rows": int(outputs["fx_evidence"]["fx_validation_status"].ne("accepted").sum()),
+        "missing_expected_sessions": int(outputs["session_issues"]["issue"].eq("missing_expected_session").sum()),
+        "unexpected_sessions": int(outputs["session_issues"]["issue"].eq("unexpected_session").sum()),
         "assets": summary,
         "source_config_hashes": config_hashes,
         "files_sha256": artifacts,
         "publication_state": "candidate_only",
         "legacy_production_unchanged": True,
-        "acceptance": "review_required" if (
+        "acceptance": "review_required"
+        if (
             correction_audit is not None
             or len(outputs["session_issues"]) > 0
             or any(a["quarantined_prices"] or a["review_returns"] for a in summary)
-        ) else "initial_contract_pass",
+        )
+        else "initial_contract_pass",
         "warning": "Calendar audit covers only first-to-last observed sessions; "
-                   "no official-close-time or corporate-action verification yet.",
+        "no official-close-time or corporate-action verification yet.",
     }
     (output / "manifest.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
     return report
@@ -192,10 +186,18 @@ def main() -> None:
     parser.add_argument("--asset-registry-csv", type=Path, default=None)
     parser.add_argument("--fx-registry-csv", type=Path, default=None)
     args = parser.parse_args()
-    print(json.dumps(generate(
-        args.bronze_batch_dir, output=args.output, corrections_csv=args.corrections_csv,
-        asset_registry_csv=args.asset_registry_csv, fx_registry_csv=args.fx_registry_csv,
-    ), indent=2))
+    print(
+        json.dumps(
+            generate(
+                args.bronze_batch_dir,
+                output=args.output,
+                corrections_csv=args.corrections_csv,
+                asset_registry_csv=args.asset_registry_csv,
+                fx_registry_csv=args.fx_registry_csv,
+            ),
+            indent=2,
+        )
+    )
 
 
 if __name__ == "__main__":

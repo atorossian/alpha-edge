@@ -3,7 +3,6 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-import pandas as pd
 
 from alpha_edge.core.market_store import MarketStore
 from alpha_edge.core.runtime import load_runtime_config

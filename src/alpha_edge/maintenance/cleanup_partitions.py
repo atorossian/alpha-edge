@@ -125,11 +125,7 @@ def _validate_safe_prefixes(*, market_root: str, prefixes: list[str]) -> None:
         pp_slash = pp + "/"
 
         if pp_slash not in allowed:
-            raise SystemExit(
-                "Refusing unsafe cleanup prefix.\n"
-                f"Got: {p!r}\n"
-                f"Allowed: {sorted(allowed)}"
-            )
+            raise SystemExit(f"Refusing unsafe cleanup prefix.\nGot: {p!r}\nAllowed: {sorted(allowed)}")
 
         if pp in {"", "market", "dev/market", "staging/market"}:
             raise SystemExit(f"Refusing broad cleanup prefix: {p!r}")
@@ -170,9 +166,7 @@ def _print_safety_banner(
 # CLI
 # ----------------------------
 def parse_args() -> argparse.Namespace:
-    ap = argparse.ArgumentParser(
-        description="Delete bad-run market parquet objects by S3 LastModified UTC date."
-    )
+    ap = argparse.ArgumentParser(description="Delete bad-run market parquet objects by S3 LastModified UTC date.")
 
     ap.add_argument("--bucket", default=None, help="Override runtime bucket. Usually avoid this.")
     ap.add_argument("--region", default=None, help="Override runtime region. Usually avoid this.")
@@ -198,7 +192,9 @@ def parse_args() -> argparse.Namespace:
     ap.add_argument("--env", default=None, choices=["dev", "staging", "prod"])
     ap.add_argument("--confirm-prod-write", action="store_true")
 
-    ap.add_argument("--reason", default=None, help="Required for real maintenance writes/deletes. Stored in audit trail.")
+    ap.add_argument(
+        "--reason", default=None, help="Required for real maintenance writes/deletes. Stored in audit trail."
+    )
 
     return ap.parse_args()
 
@@ -296,7 +292,6 @@ def main() -> None:
     print(f"\n[DELETE DONE] deleted={deleted}")
 
 
-
 # ----------------------------
 # Audit/logging entrypoint wrapper
 # ----------------------------
@@ -314,31 +309,58 @@ def main_with_audit() -> None:
         captured_delete_keys.extend([str(k) for k in keys])
         return original_delete_keys(bucket=bucket, keys=keys, region=region, dry_run=dry_run)
 
-    with capture_script_run(cfg=cfg, script_name="cleanup_partitions.py", input_args=vars(args), dry_run=is_dry_run) as run_id:
+    with capture_script_run(
+        cfg=cfg, script_name="cleanup_partitions.py", input_args=vars(args), dry_run=is_dry_run
+    ) as run_id:
         globals()["delete_keys"] = _audited_delete_keys
         try:
             main()
             planned = sorted(set(captured_delete_keys))
             event = build_audit_event(
-                cfg=cfg, run_id=run_id, event_type="delete", entity_type="market_partitions_cleanup",
-                entity_id=None, as_of=str(getattr(args, "date", None) or ""),
-                source_script="cleanup_partitions.py", source_mode="cleanup_partitions",
-                status=("dry_run" if is_dry_run else "success"), reason=getattr(args, "reason", None),
-                input_args=vars(args), deleted_keys=([] if is_dry_run else planned),
-                metadata={"tier": "tier_2", "payload_policy": "large_dataset_metadata_only", "planned_deleted_keys": planned,
-                          "planned_deleted_count": len(planned), "target_date": str(getattr(args, "date", "")),
-                          "year_filter": getattr(args, "year", None), "execute": bool(getattr(args, "execute", False))},
+                cfg=cfg,
+                run_id=run_id,
+                event_type="delete",
+                entity_type="market_partitions_cleanup",
+                entity_id=None,
+                as_of=str(getattr(args, "date", None) or ""),
+                source_script="cleanup_partitions.py",
+                source_mode="cleanup_partitions",
+                status=("dry_run" if is_dry_run else "success"),
+                reason=getattr(args, "reason", None),
+                input_args=vars(args),
+                deleted_keys=([] if is_dry_run else planned),
+                metadata={
+                    "tier": "tier_2",
+                    "payload_policy": "large_dataset_metadata_only",
+                    "planned_deleted_keys": planned,
+                    "planned_deleted_count": len(planned),
+                    "target_date": str(getattr(args, "date", "")),
+                    "year_filter": getattr(args, "year", None),
+                    "execute": bool(getattr(args, "execute", False)),
+                },
             )
             write_audit_event(cfg=cfg, event=event, dry_run=is_dry_run)
         except Exception as exc:
             planned = sorted(set(captured_delete_keys))
             event = build_audit_event(
-                cfg=cfg, run_id=run_id, event_type="delete", entity_type="market_partitions_cleanup",
-                entity_id=None, as_of=str(getattr(args, "date", None) or ""),
-                source_script="cleanup_partitions.py", source_mode="cleanup_partitions", status="failed",
-                reason=getattr(args, "reason", None), input_args=vars(args),
-                metadata={"tier": "tier_2", "payload_policy": "large_dataset_metadata_only", "planned_deleted_keys": planned,
-                          "planned_deleted_count": len(planned), "execute": bool(getattr(args, "execute", False))},
+                cfg=cfg,
+                run_id=run_id,
+                event_type="delete",
+                entity_type="market_partitions_cleanup",
+                entity_id=None,
+                as_of=str(getattr(args, "date", None) or ""),
+                source_script="cleanup_partitions.py",
+                source_mode="cleanup_partitions",
+                status="failed",
+                reason=getattr(args, "reason", None),
+                input_args=vars(args),
+                metadata={
+                    "tier": "tier_2",
+                    "payload_policy": "large_dataset_metadata_only",
+                    "planned_deleted_keys": planned,
+                    "planned_deleted_count": len(planned),
+                    "execute": bool(getattr(args, "execute", False)),
+                },
                 error=f"{type(exc).__name__}: {exc}",
             )
             write_audit_event(cfg=cfg, event=event, dry_run=is_dry_run)

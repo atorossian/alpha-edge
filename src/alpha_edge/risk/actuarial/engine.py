@@ -19,6 +19,7 @@ from alpha_edge.risk.actuarial.path_metrics import (
 )
 from alpha_edge.risk.actuarial.solvency import evaluate_capital_adequacy
 
+
 def _mean_or_none(values: np.ndarray) -> Optional[float]:
     clean = values[np.isfinite(values)]
     if clean.size == 0:
@@ -159,7 +160,7 @@ def evaluate_actuarial_risk(
         )
         recovery_probability = recovery.recovery_probability
         median_recovery_time_days = recovery.median_recovery_time_days
-    
+
     capital_required = None
     capital_buffer_gap = None
     solvency_ratio = None
@@ -178,7 +179,6 @@ def evaluate_actuarial_risk(
         safe_leverage_estimate = capital.safe_leverage_estimate
         warnings.extend(capital.warnings)
 
-
     survival_curve = []
     if cfg.survival.enabled and cfg.ruin.enabled:
         survival_curve = calculate_survival_curve(
@@ -194,17 +194,13 @@ def evaluate_actuarial_risk(
     )
 
     if ruin_probability is not None and ruin_probability > cfg.capital_adequacy.target_ruin_probability:
-        warnings.append(
-            "Ruin probability exceeds target_ruin_probability."
-        )
+        warnings.append("Ruin probability exceeds target_ruin_probability.")
 
     if (
         drawdown_breach_probability is not None
         and drawdown_breach_probability > cfg.capital_adequacy.target_drawdown_breach_probability
     ):
-        warnings.append(
-            "Drawdown breach probability exceeds target_drawdown_breach_probability."
-        )
+        warnings.append("Drawdown breach probability exceeds target_drawdown_breach_probability.")
 
     result = ActuarialRiskResult(
         initial_value=float(cfg.initial_value),
@@ -242,5 +238,5 @@ def evaluate_actuarial_risk(
             "config": cfg.to_dict(),
         },
     )
-    
+
     return result.validate()

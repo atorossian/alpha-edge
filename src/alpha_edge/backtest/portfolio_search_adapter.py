@@ -3,6 +3,7 @@ from typing import Any, Dict
 from alpha_edge.jobs.run_portfolio_search import run_portfolio_search_asof
 from alpha_edge.core.schemas import EvalMetrics
 
+
 def portfolio_search_via_prod(
     *,
     returns_wide,
@@ -21,8 +22,8 @@ def portfolio_search_via_prod(
         universe_csv=universe_csv,
         use_market_hmm=True,
         override_target_leverage=None,
-        write_outputs=False,          # IMPORTANT in backtest
-        run_dt=as_of,                 # keep run_dt aligned for reproducibility
+        write_outputs=False,  # IMPORTANT in backtest
+        run_dt=as_of,  # keep run_dt aligned for reproducibility
         cache_min_years=5.0,
     )
 

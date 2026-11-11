@@ -1,4 +1,5 @@
 """Historical reconciliation tests: no silent date, price or return mismatch."""
+
 import hashlib
 import json
 
@@ -6,38 +7,53 @@ import pandas as pd
 import pytest
 
 from alpha_edge.market.reconcile_aea87_lake_v2 import (
-    ReconciliationError, generate, reconcile,
+    ReconciliationError,
+    generate,
+    reconcile,
 )
 
 
 def fixture(tmp_path):
     root = tmp_path / "candidate"
     root.mkdir()
-    gold = pd.DataFrame([
-        {"asset_id": "A_US", "session_date": day,
-         "close_adjusted_usd": close, "ret_simple_close_adjusted_usd": ret,
-         "ret_log_close_adjusted_usd": logret,
-         "quality_status": "accepted", "return_quality_status": "accepted",
-         "observation_origin": "yahoo_finance"}
-        for day, close, ret, logret in [
-            ("2026-04-21", 100.0, None, None),
-            ("2026-04-22", 101.0, 0.01, 0.009950330853168),
-            ("2026-04-23", 102.0, 102.0 / 101 - 1, 0.009852296443),
+    gold = pd.DataFrame(
+        [
+            {
+                "asset_id": "A_US",
+                "session_date": day,
+                "close_adjusted_usd": close,
+                "ret_simple_close_adjusted_usd": ret,
+                "ret_log_close_adjusted_usd": logret,
+                "quality_status": "accepted",
+                "return_quality_status": "accepted",
+                "observation_origin": "yahoo_finance",
+            }
+            for day, close, ret, logret in [
+                ("2026-04-21", 100.0, None, None),
+                ("2026-04-22", 101.0, 0.01, 0.009950330853168),
+                ("2026-04-23", 102.0, 102.0 / 101 - 1, 0.009852296443),
+            ]
         ]
-    ])
+    )
     gold.to_parquet(root / "gold.parquet", index=False)
     manifest = {
         "schema": "market_data_lake_v2_silver_gold_candidate_1",
         "publication_state": "candidate_only",
         "legacy_production_unchanged": True,
         "bronze_manifest_sha256": "a" * 64,
-        "source_rows": 3, "gold_rows": 3, "silver_rows": 3,
+        "source_rows": 3,
+        "gold_rows": 3,
+        "silver_rows": 3,
         "acceptance": "initial_contract_pass",
         "files_sha256": {},
     }
-    for filename in ("silver.parquet", "bronze_validated.parquet",
-                     "fx_normalized.parquet", "fx_evidence.parquet",
-                     "session_issues.parquet"):
+    for filename in (
+        "silver.parquet",
+        "bronze_validated.parquet",
+        "fx_normalized.parquet",
+        "fx_evidence.parquet",
+        "session_issues.parquet",
+    ):
         (root / filename).write_bytes(b"placeholder")
     (root / "asset_quality_summary.csv").write_text("asset_id,rows\nA_US,3\n")
     for f in root.iterdir():
@@ -49,16 +65,20 @@ def fixture(tmp_path):
 def legacy(tmp_path):
     prices = tmp_path / "legacy_prices.csv"
     returns = tmp_path / "legacy_returns.csv"
-    pd.DataFrame([
-        {"asset_id": "A_US", "date": "2026-04-21", "close_adjusted_usd": 100.0},
-        {"asset_id": "A_US", "date": "2026-04-22", "close_adjusted_usd": 101.5},
-        {"asset_id": "A_US", "date": "2026-04-24", "close_adjusted_usd": 104.0},
-    ]).to_csv(prices, index=False)
-    pd.DataFrame([
-        {"asset_id": "A_US", "date": "2026-04-21", "ret_close_adjusted_usd": None},
-        {"asset_id": "A_US", "date": "2026-04-22", "ret_close_adjusted_usd": 0.015},
-        {"asset_id": "A_US", "date": "2026-04-24", "ret_close_adjusted_usd": 0.023},
-    ]).to_csv(returns, index=False)
+    pd.DataFrame(
+        [
+            {"asset_id": "A_US", "date": "2026-04-21", "close_adjusted_usd": 100.0},
+            {"asset_id": "A_US", "date": "2026-04-22", "close_adjusted_usd": 101.5},
+            {"asset_id": "A_US", "date": "2026-04-24", "close_adjusted_usd": 104.0},
+        ]
+    ).to_csv(prices, index=False)
+    pd.DataFrame(
+        [
+            {"asset_id": "A_US", "date": "2026-04-21", "ret_close_adjusted_usd": None},
+            {"asset_id": "A_US", "date": "2026-04-22", "ret_close_adjusted_usd": 0.015},
+            {"asset_id": "A_US", "date": "2026-04-24", "ret_close_adjusted_usd": 0.023},
+        ]
+    ).to_csv(returns, index=False)
     return prices, returns
 
 

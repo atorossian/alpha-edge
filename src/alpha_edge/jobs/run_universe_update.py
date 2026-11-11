@@ -181,13 +181,7 @@ def ensure_columns(df: pd.DataFrame) -> pd.DataFrame:
 
 def compute_row_id(df: pd.DataFrame) -> pd.Series:
     tmp = ensure_columns(df.copy())
-    key = (
-        tmp["ticker"] + "|"
-        + tmp["name"] + "|"
-        + tmp["region"] + "|"
-        + tmp["role"] + "|"
-        + tmp["asset_class"]
-    )
+    key = tmp["ticker"] + "|" + tmp["name"] + "|" + tmp["region"] + "|" + tmp["role"] + "|" + tmp["asset_class"]
     return key.apply(lambda s: hashlib.sha1(s.encode("utf-8")).hexdigest()[:16]).astype(str).str.upper()
 
 
@@ -292,7 +286,9 @@ def dedup_by_row_id(
 
     if out_path is not None and not removed.empty:
         out_path.parent.mkdir(parents=True, exist_ok=True)
-        removed.drop(columns=[c for c in removed.columns if c.startswith("_")], errors="ignore").to_csv(out_path, index=False)
+        removed.drop(columns=[c for c in removed.columns if c.startswith("_")], errors="ignore").to_csv(
+            out_path, index=False
+        )
 
     kept = kept.drop(columns=[c for c in kept.columns if c.startswith("_")], errors="ignore")
     print(f"[{context}] dedup_by_row_id removed={len(removed)} kept={len(kept)}")
@@ -416,7 +412,9 @@ def load_overrides(path: Path) -> pd.DataFrame:
 
     for c in base_cols:
         if c not in df.columns:
-            df[c] = "" if c in {"target_row_id", "ticker", "yahoo_ticker", "exclude_reason", "expected_name", "note"} else 0
+            df[c] = (
+                "" if c in {"target_row_id", "ticker", "yahoo_ticker", "exclude_reason", "expected_name", "note"} else 0
+            )
 
     df["ticker"] = df["ticker"].astype(str).str.strip().str.upper()
     df["target_row_id"] = df["target_row_id"].astype(str).fillna("").str.strip().str.upper()
@@ -482,7 +480,9 @@ def apply_asset_exclusions_patch(universe: pd.DataFrame, excluded_df: pd.DataFra
     return u.reset_index(drop=True)
 
 
-def apply_overrides_patch(universe: pd.DataFrame, overrides: pd.DataFrame, *, affected_tickers: set[str]) -> pd.DataFrame:
+def apply_overrides_patch(
+    universe: pd.DataFrame, overrides: pd.DataFrame, *, affected_tickers: set[str]
+) -> pd.DataFrame:
     if overrides is None or overrides.empty or not affected_tickers:
         return universe.reset_index(drop=True)
 
@@ -804,7 +804,9 @@ def _main_impl() -> None:
         ex["row_id"] = ex.get("row_id", "").astype(str).fillna("").str.strip().str.upper()
         ex["asset_id"] = ex.get("asset_id", "").astype(str).fillna("").str.strip()
         ex = ex[(ex["row_id"] != "") & (ex["asset_id"] != "")]
-        existing_asset_id_map = ex.drop_duplicates(subset=["row_id"], keep="first").set_index("row_id")["asset_id"].to_dict()
+        existing_asset_id_map = (
+            ex.drop_duplicates(subset=["row_id"], keep="first").set_index("row_id")["asset_id"].to_dict()
+        )
 
     existing = dedup_by_row_id(
         existing,
@@ -896,7 +898,9 @@ def _main_impl() -> None:
 
         u_live = universe.copy()
         u_live["include"] = pd.to_numeric(u_live.get("include", 1), errors="coerce").fillna(1).astype(int)
-        row_ids_live = sorted(u_live.loc[u_live["include"] == 1, "row_id"].dropna().astype(str).str.upper().unique().tolist())
+        row_ids_live = sorted(
+            u_live.loc[u_live["include"] == 1, "row_id"].dropna().astype(str).str.upper().unique().tolist()
+        )
 
         enrich_universe_csv(
             universe_csv=str(UNIVERSE_CSV),
@@ -1118,7 +1122,9 @@ def main_with_audit() -> None:
                 event_type="modify",
                 entity_type="universe",
                 entity_id=None,
-                as_of=str(getattr(args, "as_of", None) or getattr(args, "dt", None) or getattr(args, "run_dt", None) or ""),
+                as_of=str(
+                    getattr(args, "as_of", None) or getattr(args, "dt", None) or getattr(args, "run_dt", None) or ""
+                ),
                 source_script="run_universe_update.py",
                 source_mode="universe_update",
                 status=("dry_run" if is_dry_run else "success"),
@@ -1137,7 +1143,9 @@ def main_with_audit() -> None:
                 event_type="modify",
                 entity_type="universe",
                 entity_id=None,
-                as_of=str(getattr(args, "as_of", None) or getattr(args, "dt", None) or getattr(args, "run_dt", None) or ""),
+                as_of=str(
+                    getattr(args, "as_of", None) or getattr(args, "dt", None) or getattr(args, "run_dt", None) or ""
+                ),
                 source_script="run_universe_update.py",
                 source_mode="universe_update",
                 status="failed",

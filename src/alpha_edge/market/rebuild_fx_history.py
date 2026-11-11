@@ -3,6 +3,7 @@
 Usage: poetry run python alpha_edge/market/rebuild_fx_history.py --currencies MXN,EUR,GBP --start 2010-01-01 --out-dir ../data/quality/fx/staging
 Optional: --currencies-csv FILE (CSV with currency / ccy / quote_currency column).
 """
+
 from __future__ import annotations
 import argparse
 import json
@@ -16,7 +17,8 @@ import yfinance as yf
 
 def download(ticker: str, start: str, end: str | None) -> pd.Series:
     kwargs = dict(start=start, interval="1d", progress=False, threads=False, auto_adjust=False)
-    if end: kwargs["end"] = end
+    if end:
+        kwargs["end"] = end
     frame = yf.download(ticker, **kwargs)
     if frame is None or frame.empty:
         return pd.Series(dtype="float64", name=ticker)
@@ -66,10 +68,7 @@ def refresh(currency: str, start: str, end: str | None, tolerance: float, max_da
     # necessarily an abnormal daily FX return.
     result["gap_days"] = gap_days.reindex(result.index).values
 
-    result.loc[
-        valid.index[large_gap.fillna(False)],
-        "validation_status"
-    ] = "VALID_AFTER_GAP"
+    result.loc[valid.index[large_gap.fillna(False)], "validation_status"] = "VALID_AFTER_GAP"
 
     jumps = large_move & ~large_gap
 
@@ -124,13 +123,23 @@ def main() -> None:
         except Exception as e:
             reports.append({"currency": ccy, "error": str(e)})
             print(f"ERROR {ccy}: {e}")
-    (out / "validation_report.json").write_text(json.dumps({"start": args.start, "end": args.end, "currencies": reports}, indent=2))
+    (out / "validation_report.json").write_text(
+        json.dumps({"start": args.start, "end": args.end, "currencies": reports}, indent=2)
+    )
     if outputs:
         pd.concat(outputs, ignore_index=True).to_parquet(out / "fx_history_all.parquet", index=False)
-    failed = any("error" in r or r.get("statuses", {}).get("QUOTE_DISAGREEMENT", 0) or r.get("statuses", {}).get("LARGE_FX_CHANGE", 0) or r.get("rows",0)==0 for r in reports)
+    failed = any(
+        "error" in r
+        or r.get("statuses", {}).get("QUOTE_DISAGREEMENT", 0)
+        or r.get("statuses", {}).get("LARGE_FX_CHANGE", 0)
+        or r.get("rows", 0) == 0
+        for r in reports
+    )
     print("OUTPUT:", out.resolve())
     if failed:
-        raise SystemExit("FX staging completed with validation exceptions; review validation_report.json before any promotion")
+        raise SystemExit(
+            "FX staging completed with validation exceptions; review validation_report.json before any promotion"
+        )
 
 
 if __name__ == "__main__":

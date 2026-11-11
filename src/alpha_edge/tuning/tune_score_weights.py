@@ -11,6 +11,7 @@ from alpha_edge.core.schemas import ScoreConfig
 
 # ---- small helpers ----
 
+
 def _eval_features(
     returns: pd.DataFrame,
     weights: Dict[str, float],
@@ -89,7 +90,7 @@ def _eval_features(
             block_size=block_size,
         )
         mc = simulate_leveraged_paths_vectorized(
-            port_rets=None,              # ignored when precomputed_r is provided
+            port_rets=None,  # ignored when precomputed_r is provided
             precomputed_r=R_port_paths,  # (n_paths, n_days)
             notional=notional,
             equity0=equity0,
@@ -97,7 +98,7 @@ def _eval_features(
             n_days=days,
             n_paths=n_paths,
             seed=seed,
-            block_size=None,             # irrelevant when precomputed_r is used
+            block_size=None,  # irrelevant when precomputed_r is used
         )
 
     else:
@@ -170,6 +171,7 @@ def tune_score_config(
 
     # Precompute spectral profiles once for tuning (huge speedup)
     from optimizer_engine import _spectral_profiles_df
+
     returns_clean = returns.dropna(how="any")
     spec_df_full = _spectral_profiles_df(returns_clean, bands_days=base_cfg.fft_bands_days)
 
@@ -191,32 +193,58 @@ def tune_score_config(
 
         # cheap
         p_c, r_c, pen_c, _ = _eval_features(
-            returns, w, equity0, notional, goals, main_goal, lw_cov,
-            days, cheap_paths, seed, block_size, path_source, pca_k, base_cfg,
+            returns,
+            w,
+            equity0,
+            notional,
+            goals,
+            main_goal,
+            lw_cov,
+            days,
+            cheap_paths,
+            seed,
+            block_size,
+            path_source,
+            pca_k,
+            base_cfg,
             spec_df_full=spec_df_full,
         )
 
         # truth
         p_t, r_t, pen_t, _ = _eval_features(
-            returns, w, equity0, notional, goals, main_goal, lw_cov,
-            days, truth_paths, seed, block_size, path_source, pca_k, base_cfg,
+            returns,
+            w,
+            equity0,
+            notional,
+            goals,
+            main_goal,
+            lw_cov,
+            days,
+            truth_paths,
+            seed,
+            block_size,
+            path_source,
+            pca_k,
+            base_cfg,
             spec_df_full=spec_df_full,
         )
 
         y = float(p_c - p_t)
 
-        rows.append({
-            "y": y,
-            "ruin": float(r_c),
-            "cvar": float(pen_c.get("cvar", 0.0)),
-            "mdd": float(pen_c.get("mdd", 0.0)),
-            "hhi": float(pen_c.get("hhi", 0.0)),
-            "avg_corr": float(pen_c.get("avg_corr", 0.0)),
-            "time": float(pen_c.get("time", 0.0)),
-            "hf_ratio": float(pen_c.get("hf_ratio", 0.0)),
-            "freq_overlap": float(pen_c.get("freq_overlap", 0.0)),
-            "spec_entropy": float(pen_c.get("spec_entropy", 0.0)),
-        })
+        rows.append(
+            {
+                "y": y,
+                "ruin": float(r_c),
+                "cvar": float(pen_c.get("cvar", 0.0)),
+                "mdd": float(pen_c.get("mdd", 0.0)),
+                "hhi": float(pen_c.get("hhi", 0.0)),
+                "avg_corr": float(pen_c.get("avg_corr", 0.0)),
+                "time": float(pen_c.get("time", 0.0)),
+                "hf_ratio": float(pen_c.get("hf_ratio", 0.0)),
+                "freq_overlap": float(pen_c.get("freq_overlap", 0.0)),
+                "spec_entropy": float(pen_c.get("spec_entropy", 0.0)),
+            }
+        )
 
     df = pd.DataFrame(rows).replace([np.inf, -np.inf], np.nan).dropna()
 
@@ -240,7 +268,7 @@ def tune_score_config(
     # Order must match feature_cols above
     cfg.lambda_ruin = float(b[0])
     cfg.lambda_cvar = float(b[1])
-    cfg.lambda_mdd  = float(b[2])
+    cfg.lambda_mdd = float(b[2])
     cfg.lambda_conc = float(b[3])
     cfg.lambda_corr = float(b[4])
     cfg.lambda_time = float(b[5])

@@ -1,4 +1,5 @@
 """Gold v2 release candidate and pointer activation must fail closed."""
+
 import hashlib
 import io
 import json
@@ -7,7 +8,12 @@ import pytest
 from botocore.exceptions import ClientError
 
 from alpha_edge.market.production_gold_release_v2 import (
-    CURRENT, ReleaseError, activate, encoded, get, sha, stage,
+    CURRENT,
+    ReleaseError,
+    activate,
+    encoded,
+    sha,
+    stage,
 )
 
 
@@ -42,7 +48,8 @@ def candidate(s3):
         s3.objects[key] = blob
         files[field] = {"key": key, "sha256": sha(blob)}
     report = {
-        "internal_integrity_status": "passed", "acceptance": "review_required",
+        "internal_integrity_status": "passed",
+        "acceptance": "review_required",
         "blocker_counts": {"quarantined_prices": 1},
         "open_external_evidence_gates": ["independent_source_observation_verification"],
     }
@@ -52,8 +59,10 @@ def candidate(s3):
     files["acceptance"] = {"key": key, "sha256": sha(body)}
     return {
         "schema": "alpha_edge_v2_release_candidate_1",
-        "release_id": "test_release_1", "as_of": "2026-11-11",
-        "expected_cohorts": 1, "expected_assets": 1,
+        "release_id": "test_release_1",
+        "as_of": "2026-11-11",
+        "expected_cohorts": 1,
+        "expected_assets": 1,
         "cohorts": [{"cohort": 1, "assets": ["A"], "gold_rows": 1, **files}],
         "universe_reconciliation": "pending",
         "indicator_validation": "pending",
@@ -67,8 +76,9 @@ def test_stage_works_but_activation_blocks_quality_and_external_gates():
     staged = stage(s3, bucket="test", release=release, execute=True)
     assert staged["state"] == "staged"
     with pytest.raises(ReleaseError, match="acceptance blocked"):
-        activate(s3, bucket="test", release_key=staged["release_key"],
-                 approved_sha256=staged["release_sha256"], execute=True)
+        activate(
+            s3, bucket="test", release_key=staged["release_key"], approved_sha256=staged["release_sha256"], execute=True
+        )
     assert CURRENT not in s3.objects
 
 
@@ -77,8 +87,10 @@ def test_full_approval_requires_indicator_and_universe_validation():
     release = candidate(s3)
     cohort = release["cohorts"][0]
     report = {
-        "internal_integrity_status": "passed", "acceptance": "accepted",
-        "blocker_counts": {}, "open_external_evidence_gates": [],
+        "internal_integrity_status": "passed",
+        "acceptance": "accepted",
+        "blocker_counts": {},
+        "open_external_evidence_gates": [],
     }
     key = cohort["acceptance"]["key"]
     s3.objects[key] = encoded(report)
@@ -89,8 +101,9 @@ def test_full_approval_requires_indicator_and_universe_validation():
     }
     staged = stage(s3, bucket="test", release=release, execute=True)
     with pytest.raises(ReleaseError, match="indicator validation"):
-        activate(s3, bucket="test", release_key=staged["release_key"],
-                 approved_sha256=staged["release_sha256"], execute=True)
+        activate(
+            s3, bucket="test", release_key=staged["release_key"], approved_sha256=staged["release_sha256"], execute=True
+        )
     assert CURRENT not in s3.objects
 
 
@@ -99,8 +112,10 @@ def test_complete_approved_release_pointer_switches_and_preserves_previous():
     release = candidate(s3)
     cohort = release["cohorts"][0]
     report = {
-        "internal_integrity_status": "passed", "acceptance": "accepted",
-        "blocker_counts": {}, "open_external_evidence_gates": [],
+        "internal_integrity_status": "passed",
+        "acceptance": "accepted",
+        "blocker_counts": {},
+        "open_external_evidence_gates": [],
     }
     key = cohort["acceptance"]["key"]
     s3.objects[key] = encoded(report)
@@ -109,22 +124,30 @@ def test_complete_approved_release_pointer_switches_and_preserves_previous():
         "reviewer": "independent-reviewer",
         "acceptance_manifest_sha256": cohort["acceptance"]["sha256"],
     }
-    release.update({
-        "indicator_validation": "passed",
-        "consumer_contract_validation": "passed",
-        "universe_reconciliation": "passed",
-        "independent_signoff": "external release approval 1",
-    })
+    release.update(
+        {
+            "indicator_validation": "passed",
+            "consumer_contract_validation": "passed",
+            "universe_reconciliation": "passed",
+            "independent_signoff": "external release approval 1",
+        }
+    )
     staged = stage(s3, bucket="test", release=release, execute=True)
-    dry = activate(s3, bucket="test", release_key=staged["release_key"],
-                   approved_sha256=staged["release_sha256"], execute=False)
+    dry = activate(
+        s3, bucket="test", release_key=staged["release_key"], approved_sha256=staged["release_sha256"], execute=False
+    )
     assert dry["state"] == "dry_run" and CURRENT not in s3.objects
-    actual = activate(s3, bucket="test", release_key=staged["release_key"],
-                      approved_sha256=staged["release_sha256"], execute=True)
+    actual = activate(
+        s3, bucket="test", release_key=staged["release_key"], approved_sha256=staged["release_sha256"], execute=True
+    )
     assert actual["state"] == "activated"
     assert json.loads(s3.objects[CURRENT])["release_id"] == "test_release_1"
-    assert activate(s3, bucket="test", release_key=staged["release_key"],
-                    approved_sha256=staged["release_sha256"], execute=True)["state"] == "already_current"
+    assert (
+        activate(
+            s3, bucket="test", release_key=staged["release_key"], approved_sha256=staged["release_sha256"], execute=True
+        )["state"]
+        == "already_current"
+    )
 
 
 def test_incomplete_cohort_inventory_cannot_be_staged():

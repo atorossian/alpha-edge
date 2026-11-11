@@ -3,6 +3,7 @@
 Checks active manifest optimistic-lock hashes and retirement inventory before
 any future release implementation may be considered. Writes evidence to staging.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -52,8 +53,14 @@ def preflight(s3, bucket, prefix, reconciliation_id):
         if len(staged["records"]) != item["record_count"]:
             findings.append({"asset_id": aid, "reason": "PARTITION_COUNT_MISMATCH"})
         if item["status"] == "VALID_WITH_QUARANTINE" or item["flagged_retained"] or item["quarantine_rows"]:
-            findings.append({"asset_id": aid, "reason": "UNRESOLVED_QUARANTINE",
-                             "flagged": item["flagged_retained"], "excluded": len(item["quarantine_rows"])})
+            findings.append(
+                {
+                    "asset_id": aid,
+                    "reason": "UNRESOLVED_QUARANTINE",
+                    "flagged": item["flagged_retained"],
+                    "excluded": len(item["quarantine_rows"]),
+                }
+            )
         for part in staged["records"]:
             parts += 1
             key = part["manifest_key"]
@@ -65,8 +72,7 @@ def preflight(s3, bucket, prefix, reconciliation_id):
             except s3.exceptions.NoSuchKey:
                 actual = None
             except Exception as exc:
-                findings.append({"asset_id": aid, "reason": "MANIFEST_READ_FAILED",
-                                 "key": key, "error": str(exc)})
+                findings.append({"asset_id": aid, "reason": "MANIFEST_READ_FAILED", "key": key, "error": str(exc)})
                 continue
             if actual != part.get("original_manifest_sha256"):
                 findings.append({"asset_id": aid, "reason": "ACTIVE_MANIFEST_CHANGED", "key": key})
@@ -79,8 +85,7 @@ def preflight(s3, bucket, prefix, reconciliation_id):
                 # An old year may also have a newly staged replacement, but
                 # every old reference still requires an explicit retirement step.
                 pass
-            findings.append({"asset_id": "CRYPTO:HYPE-USD", "reason": "RETIRE_OLD_MANIFEST_REQUIRED",
-                             "key": key})
+            findings.append({"asset_id": "CRYPTO:HYPE-USD", "reason": "RETIRE_OLD_MANIFEST_REQUIRED", "key": key})
     if rec.get("production_promotion_allowed") is not False:
         findings.append({"reason": "UNEXPECTED_SOURCE_PROMOTION_PERMISSION"})
     if rec.get("blockers"):
@@ -114,8 +119,7 @@ def main():
     p.add_argument("--region", default="eu-west-1")
     p.add_argument("--market-prefix", default="market")
     args = p.parse_args()
-    preflight(boto3.client("s3", region_name=args.region), args.bucket,
-              args.market_prefix, args.reconciliation_id)
+    preflight(boto3.client("s3", region_name=args.region), args.bucket, args.market_prefix, args.reconciliation_id)
 
 
 if __name__ == "__main__":

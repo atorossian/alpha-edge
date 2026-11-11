@@ -3,8 +3,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import math
-import os
 import tempfile
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -251,8 +249,12 @@ def validate_returns(
     asset_report.loc[asset_report["obs"] < cfg.min_obs_per_asset, "severity"] = "WARN_LOW_HISTORY"
     asset_report.loc[asset_report["abs_gt_warn"] >= cfg.max_bad_cells_per_asset_warn, "severity"] = "WARN"
     asset_report.loc[asset_report["abs_gt_block"] >= cfg.max_bad_cells_per_asset_block, "severity"] = "BLOCK"
-    asset_report.loc[(asset_report["gt_100pct"] > 0) | (asset_report["le_minus_100pct"] > 0), "severity"] = "BLOCK_IMPOSSIBLE"
-    asset_report.sort_values(["severity", "max_abs_return"], ascending=[True, False]).to_csv(out / "returns_quality_assets.csv", index=False)
+    asset_report.loc[(asset_report["gt_100pct"] > 0) | (asset_report["le_minus_100pct"] > 0), "severity"] = (
+        "BLOCK_IMPOSSIBLE"
+    )
+    asset_report.sort_values(["severity", "max_abs_return"], ascending=[True, False]).to_csv(
+        out / "returns_quality_assets.csv", index=False
+    )
 
     # Quarantine candidates.
     quarantine = asset_report[asset_report["severity"].str.startswith("BLOCK")].copy()
@@ -294,18 +296,32 @@ def validate_returns(
 
 def parse_args() -> argparse.Namespace:
     ap = argparse.ArgumentParser(description="Validate wide asset returns before portfolio search/quarantine.")
-    ap.add_argument("--returns", required=True, help="Local CSV/parquet path or S3 URI, e.g. s3://bucket/key/returns_wide_min5y.parquet")
+    ap.add_argument(
+        "--returns",
+        required=True,
+        help="Local CSV/parquet path or S3 URI, e.g. s3://bucket/key/returns_wide_min5y.parquet",
+    )
     ap.add_argument("--out-dir", default="returns_quality_report")
     ap.add_argument("--fail-on-critical", action="store_true")
     ap.add_argument("--write-sanitized", action="store_true")
-    ap.add_argument("--sanitized-path", default=None, help="Local path for sanitized output. S3 output is not supported for sanitized file in this script version.")
+    ap.add_argument(
+        "--sanitized-path",
+        default=None,
+        help="Local path for sanitized output. S3 output is not supported for sanitized file in this script version.",
+    )
     ap.add_argument("--max-abs-warn", type=float, default=0.20)
     ap.add_argument("--max-abs-block", type=float, default=0.50)
     ap.add_argument("--max-date-block-cells", type=int, default=50)
     ap.add_argument("--max-asset-block-cells", type=int, default=10)
-    ap.add_argument("--aws-region", default=None, help="AWS region for S3 access. If omitted, boto3 default resolution is used.")
+    ap.add_argument(
+        "--aws-region", default=None, help="AWS region for S3 access. If omitted, boto3 default resolution is used."
+    )
     ap.add_argument("--tmp-dir", default=None, help="Optional local directory for downloaded S3 input file.")
-    ap.add_argument("--upload-report-s3", default=None, help="Optional S3 URI prefix where report files should be uploaded, e.g. s3://bucket/engine/v1/quality/returns/latest/")
+    ap.add_argument(
+        "--upload-report-s3",
+        default=None,
+        help="Optional S3 URI prefix where report files should be uploaded, e.g. s3://bucket/engine/v1/quality/returns/latest/",
+    )
     return ap.parse_args()
 
 

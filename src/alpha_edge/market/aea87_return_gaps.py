@@ -1,4 +1,5 @@
 """Independent return-gap expectations derived from source campaign OHLCV dates."""
+
 from __future__ import annotations
 
 import pandas as pd
@@ -19,7 +20,4 @@ def expected_return_break_dates(source_dates, quarantined_dates):
         raise ValueError("Quarantine contains a date absent from source timeline")
     retained = source[~source.isin(excluded)].sort_values()
     positions = retained.searchsorted(excluded, side="right")
-    return sorted({
-        retained[int(pos)].strftime("%Y-%m-%d")
-        for pos in positions if int(pos) < len(retained)
-    })
+    return sorted({retained[int(pos)].strftime("%Y-%m-%d") for pos in positions if int(pos) < len(retained)})

@@ -201,6 +201,7 @@ def estimate_safe_leverage(
 
     return float(min(max_lev, lev * ratio))
 
+
 def evaluate_capital_adequacy(
     equity_paths: object,
     *,

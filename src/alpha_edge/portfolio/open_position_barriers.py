@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import math
 from dataclasses import asdict, dataclass, field, replace
 from typing import Any, Literal, Optional
 
@@ -100,6 +99,7 @@ class BarrierMonitorConfig:
     fail_on_missing_atr: bool = False
 
     version: str = "open_position_barriers_v1_production_ready"
+
 
 DEFAULT_ASSET_CLASS_OVERRIDES: dict[str, dict[str, Any]] = {
     # Wider crypto buffer and confirmation window to avoid noisy stop-outs.
@@ -400,7 +400,11 @@ def normalize_ohlcv_history(ohlcv: pd.DataFrame) -> pd.DataFrame:
 
     out = out.dropna(subset=["date", "asset_id", "close"])
     out = out[(out["close"] > 0) & (out["open"] > 0) & (out["high"] > 0) & (out["low"] > 0)].copy()
-    return out[["date", "asset_id", "ticker", "open", "close", "high", "low"]].sort_values(["asset_id", "date"]).reset_index(drop=True)
+    return (
+        out[["date", "asset_id", "ticker", "open", "close", "high", "low"]]
+        .sort_values(["asset_id", "date"])
+        .reset_index(drop=True)
+    )
 
 
 def latest_prices_by_asset_id(latest_prices: pd.DataFrame) -> dict[str, dict[str, Any]]:
@@ -539,11 +543,19 @@ def normalize_barrier_state(previous_state: Optional[dict[str, Any]]) -> dict[st
                 side=side,  # type: ignore[arg-type]
                 last_as_of=(str(obj.get("last_as_of")) if obj.get("last_as_of") is not None else None),
                 breach_count=int(_safe_float(obj.get("breach_count")) or 0),
-                last_breach_type=(str(obj.get("last_breach_type")) if obj.get("last_breach_type") is not None else None),
-                last_breach_date=(str(obj.get("last_breach_date")) if obj.get("last_breach_date") is not None else None),
-                last_recovery_date=(str(obj.get("last_recovery_date")) if obj.get("last_recovery_date") is not None else None),
+                last_breach_type=(
+                    str(obj.get("last_breach_type")) if obj.get("last_breach_type") is not None else None
+                ),
+                last_breach_date=(
+                    str(obj.get("last_breach_date")) if obj.get("last_breach_date") is not None else None
+                ),
+                last_recovery_date=(
+                    str(obj.get("last_recovery_date")) if obj.get("last_recovery_date") is not None else None
+                ),
                 prior_active_stop_price=_safe_float(obj.get("prior_active_stop_price")),
-                prior_recommendation=(str(obj.get("prior_recommendation")) if obj.get("prior_recommendation") is not None else None),
+                prior_recommendation=(
+                    str(obj.get("prior_recommendation")) if obj.get("prior_recommendation") is not None else None
+                ),
             )
             out[str(key)] = st
         except Exception:
@@ -614,7 +626,9 @@ def _current_return(side: PositionSide, entry: float, current: Optional[float]) 
     return float(entry / current - 1.0)
 
 
-def _peak_return(side: PositionSide, entry: float, highest_high: Optional[float], lowest_low: Optional[float]) -> Optional[float]:
+def _peak_return(
+    side: PositionSide, entry: float, highest_high: Optional[float], lowest_low: Optional[float]
+) -> Optional[float]:
     if entry <= 0:
         return None
     if side == "LONG":
@@ -653,7 +667,9 @@ def _distance_to_target(side: PositionSide, current: Optional[float], target: Op
     return float(current / target - 1.0)
 
 
-def _stop_buffer_amount(*, current_price: Optional[float], atr_14: Optional[float], cfg: BarrierMonitorConfig) -> Optional[float]:
+def _stop_buffer_amount(
+    *, current_price: Optional[float], atr_14: Optional[float], cfg: BarrierMonitorConfig
+) -> Optional[float]:
     candidates: list[float] = []
     if atr_14 is not None and atr_14 > 0:
         candidates.append(float(atr_14) * float(cfg.stop_buffer_atr_multiplier))
@@ -664,7 +680,9 @@ def _stop_buffer_amount(*, current_price: Optional[float], atr_14: Optional[floa
     return float(max(candidates))
 
 
-def _execution_trigger(side: PositionSide, raw_stop: Optional[float], buffer_amount: Optional[float]) -> Optional[float]:
+def _execution_trigger(
+    side: PositionSide, raw_stop: Optional[float], buffer_amount: Optional[float]
+) -> Optional[float]:
     if raw_stop is None or raw_stop <= 0:
         return None
     b = float(buffer_amount or 0.0)
@@ -818,10 +836,28 @@ def classify_liquidity_aware_breach(
     if emergency_gap:
         fraction = float(cfg.gap_through_stop_exit_fraction)
         action = cfg.gap_through_stop_action
-        return "GAP_THROUGH_STOP", "EMERGENCY", max(previous_breach_count + 1, cfg.confirmed_break_breach_count), False, fraction, action, "gap_through_execution_trigger", True
+        return (
+            "GAP_THROUGH_STOP",
+            "EMERGENCY",
+            max(previous_breach_count + 1, cfg.confirmed_break_breach_count),
+            False,
+            fraction,
+            action,
+            "gap_through_execution_trigger",
+            True,
+        )
 
     if recovered:
-        return "WICK_BREACH_RECOVERED", "RECOVERED", 0, True, 0.0, cfg.wick_breach_action, "wick_breach_recovered", False
+        return (
+            "WICK_BREACH_RECOVERED",
+            "RECOVERED",
+            0,
+            True,
+            0.0,
+            cfg.wick_breach_action,
+            "wick_breach_recovered",
+            False,
+        )
 
     if not wick_breached and not close_breached and not execution_breached:
         return "NONE", "NONE", 0, False, 0.0, "HOLD", None, False
@@ -832,16 +868,52 @@ def classify_liquidity_aware_breach(
         severe = _severe_breach(side=side, price=close, risk_threshold=risk_threshold, atr_14=atr_14, cfg=cfg)
         if confirmed:
             if bool(cfg.conservative_advisory_mode) and not severe:
-                return "CONFIRMED_BREAK", "CONFIRMED", breach_count, False, float(cfg.confirmed_break_small_exit_fraction), cfg.confirmed_break_small_action, "confirmed_stop_break_small", True
-            return "CONFIRMED_BREAK", "CONFIRMED", breach_count, False, float(cfg.confirmed_break_exit_fraction), cfg.confirmed_break_action, "confirmed_stop_break", True
+                return (
+                    "CONFIRMED_BREAK",
+                    "CONFIRMED",
+                    breach_count,
+                    False,
+                    float(cfg.confirmed_break_small_exit_fraction),
+                    cfg.confirmed_break_small_action,
+                    "confirmed_stop_break_small",
+                    True,
+                )
+            return (
+                "CONFIRMED_BREAK",
+                "CONFIRMED",
+                breach_count,
+                False,
+                float(cfg.confirmed_break_exit_fraction),
+                cfg.confirmed_break_action,
+                "confirmed_stop_break",
+                True,
+            )
 
         mag = _breach_magnitude(side, close, risk_threshold)
         frac = 0.50 if mag >= float(cfg.close_breach_reduce_threshold_pct) else 0.25
         action = cfg.close_breach_action
-        return "CLOSE_BREACH", "FIRST_CLOSE_BREACH", breach_count, False, frac, action, "close_below_risk_threshold" if side == "LONG" else "close_above_risk_threshold", True
+        return (
+            "CLOSE_BREACH",
+            "FIRST_CLOSE_BREACH",
+            breach_count,
+            False,
+            frac,
+            action,
+            "close_below_risk_threshold" if side == "LONG" else "close_above_risk_threshold",
+            True,
+        )
 
     if wick_breached:
-        return "WICK_BREACH_UNCONFIRMED", "WATCH_ONLY", previous_breach_count, False, 0.0, cfg.wick_breach_action, "wick_breach_unconfirmed", False
+        return (
+            "WICK_BREACH_UNCONFIRMED",
+            "WATCH_ONLY",
+            previous_breach_count,
+            False,
+            0.0,
+            cfg.wick_breach_action,
+            "wick_breach_unconfirmed",
+            False,
+        )
 
     return "NONE", "NONE", 0, False, 0.0, "HOLD", None, False
 
@@ -935,9 +1007,7 @@ def evaluate_open_lot_barrier(
     curr_ret = _current_return(lot.side, float(lot.entry_price), current_price)
 
     profit_lock_activated = bool(
-        cfg.use_profit_lock
-        and peak_ret is not None
-        and float(peak_ret) >= float(cfg.profit_lock_activation_return)
+        cfg.use_profit_lock and peak_ret is not None and float(peak_ret) >= float(cfg.profit_lock_activation_return)
     )
     profit_lock_stop: Optional[float] = None
     if profit_lock_activated:
@@ -957,8 +1027,12 @@ def evaluate_open_lot_barrier(
         },
     )
 
-    buffer_amount = _stop_buffer_amount(current_price=current_price, atr_14=atr_14, cfg=cfg) if cfg.liquidity_aware_stops else 0.0
-    execution_trigger = _execution_trigger(lot.side, raw_active_stop, buffer_amount) if cfg.liquidity_aware_stops else raw_active_stop
+    buffer_amount = (
+        _stop_buffer_amount(current_price=current_price, atr_14=atr_14, cfg=cfg) if cfg.liquidity_aware_stops else 0.0
+    )
+    execution_trigger = (
+        _execution_trigger(lot.side, raw_active_stop, buffer_amount) if cfg.liquidity_aware_stops else raw_active_stop
+    )
     risk_threshold = raw_active_stop
     active_stop = execution_trigger if cfg.liquidity_aware_stops else raw_active_stop
 
@@ -1026,7 +1100,9 @@ def evaluate_open_lot_barrier(
     else:
         stop_triggered = False
         if current_price is not None and raw_active_stop is not None:
-            stop_triggered = bool(current_price <= raw_active_stop) if lot.side == "LONG" else bool(current_price >= raw_active_stop)
+            stop_triggered = (
+                bool(current_price <= raw_active_stop) if lot.side == "LONG" else bool(current_price >= raw_active_stop)
+            )
         breach_type = "CONFIRMED_BREAK" if stop_triggered else "NONE"
         confirmation_status = "CONFIRMED" if stop_triggered else "NONE"
         breach_count = previous_breach_count + 1 if stop_triggered else 0
@@ -1190,7 +1266,9 @@ def aggregate_position_results(*, as_of: str, lot_results: list[LotBarrierResult
         rec = max((str(x) for x in g["recommended_action"].tolist()), key=lambda x: priority.get(x, -1))
         q = max((str(x) for x in g["barrier_quality"].tolist()), key=lambda x: quality_rank.get(x, -1))
         breach_type = max((str(x) for x in g["breach_type"].tolist()), key=lambda x: breach_priority.get(x, -1))
-        confirmation_status = max((str(x) for x in g["confirmation_status"].tolist()), key=lambda x: confirmation_priority.get(x, -1))
+        confirmation_status = max(
+            (str(x) for x in g["confirmation_status"].tolist()), key=lambda x: confirmation_priority.get(x, -1)
+        )
         warnings: list[str] = []
         for ws in g["warnings"].tolist():
             if isinstance(ws, list):
@@ -1226,7 +1304,9 @@ def aggregate_position_results(*, as_of: str, lot_results: list[LotBarrierResult
         entry_values = pd.to_numeric(g["entry_price"], errors="coerce").dropna()
         if not entry_values.empty and not qty_values.empty and len(entry_values) == len(qty_values):
             try:
-                avg_entry = float(np.average(entry_values.to_numpy(dtype=float), weights=qty_values.to_numpy(dtype=float)))
+                avg_entry = float(
+                    np.average(entry_values.to_numpy(dtype=float), weights=qty_values.to_numpy(dtype=float))
+                )
             except Exception:
                 avg_entry = float(entry_values.mean())
         else:
@@ -1234,7 +1314,11 @@ def aggregate_position_results(*, as_of: str, lot_results: list[LotBarrierResult
         current_price = float(current_price_values.iloc[-1]) if not current_price_values.empty else None
         current_return_pct = None
         if avg_entry is not None and current_price is not None and avg_entry > 0 and current_price > 0:
-            current_return_pct = float(current_price / avg_entry - 1.0) if str(side) == "LONG" else float(avg_entry / current_price - 1.0)
+            current_return_pct = (
+                float(current_price / avg_entry - 1.0)
+                if str(side) == "LONG"
+                else float(avg_entry / current_price - 1.0)
+            )
 
         def _num_col(name: str, how: str = "last"):
             vals = pd.to_numeric(g.get(name), errors="coerce").dropna()
@@ -1267,8 +1351,12 @@ def aggregate_position_results(*, as_of: str, lot_results: list[LotBarrierResult
                 "CLEAR": 1,
             },
         )
-        target_status = _status_col("target_status", {"TARGET_REACHED": 3, "NEAR_TARGET": 2, "BELOW_TARGET": 1, "NO_TARGET": 0})
-        bucket_values = [str(x) for x in g.get("asset_bucket", pd.Series(dtype=object)).dropna().tolist() if str(x).strip()]
+        target_status = _status_col(
+            "target_status", {"TARGET_REACHED": 3, "NEAR_TARGET": 2, "BELOW_TARGET": 1, "NO_TARGET": 0}
+        )
+        bucket_values = [
+            str(x) for x in g.get("asset_bucket", pd.Series(dtype=object)).dropna().tolist() if str(x).strip()
+        ]
         entry_dates = [str(x) for x in g.get("entry_date", pd.Series(dtype=object)).dropna().tolist() if str(x).strip()]
 
         out.append(
@@ -1300,13 +1388,19 @@ def aggregate_position_results(*, as_of: str, lot_results: list[LotBarrierResult
                 latest_high=_num_col("latest_high", "last"),
                 latest_low=_num_col("latest_low", "last"),
                 latest_close=_num_col("latest_close", "last"),
-                latest_bar_date=(str(g["latest_bar_date"].dropna().iloc[-1]) if "latest_bar_date" in g and not g["latest_bar_date"].dropna().empty else None),
+                latest_bar_date=(
+                    str(g["latest_bar_date"].dropna().iloc[-1])
+                    if "latest_bar_date" in g and not g["latest_bar_date"].dropna().empty
+                    else None
+                ),
                 stop_status=stop_status,
                 target_status=target_status,
                 active_stop_price=active_stop,
                 active_stop_source=active_source,
                 nearest_distance_to_stop_pct=(float(dist_stop_values.min()) if not dist_stop_values.empty else None),
-                nearest_distance_to_target_pct=(float(dist_target_values.min()) if not dist_target_values.empty else None),
+                nearest_distance_to_target_pct=(
+                    float(dist_target_values.min()) if not dist_target_values.empty else None
+                ),
                 stop_triggered_lots=int(g["stop_triggered"].astype(bool).sum()),
                 target_reached_lots=int(g["target_reached"].astype(bool).sum()),
                 time_exit_due_lots=int(g["time_exit_due"].astype(bool).sum()),
@@ -1324,7 +1418,6 @@ def aggregate_position_results(*, as_of: str, lot_results: list[LotBarrierResult
         )
 
     return out
-
 
 
 def _action_priority_for_throttle(row: PositionBarrierResult) -> int:
@@ -1450,6 +1543,7 @@ def apply_liquidation_throttle(
         "max_reduce_actions_per_day": int(cfg.max_reduce_actions_per_day),
     }
 
+
 def run_barrier_monitor(
     *,
     as_of: str,
@@ -1495,13 +1589,41 @@ def run_barrier_monitor(
         "open_lots": int(len(lot_results)),
         "open_positions": int(len(position_results)),
         "lot_actions": {rec: count_rec(lot_results, rec) for rec in ["EXIT", "REDUCE", "WATCH", "HOLD", "DATA_ISSUE"]},
-        "position_actions": {rec: count_rec(position_results, rec) for rec in ["EXIT", "REDUCE", "WATCH", "HOLD", "DATA_ISSUE"]},
-        "lot_breach_types": {bt: count_attr(lot_results, "breach_type", bt) for bt in ["GAP_THROUGH_STOP", "CONFIRMED_BREAK", "CLOSE_BREACH", "WICK_BREACH_UNCONFIRMED", "WICK_BREACH_RECOVERED", "NONE", "NO_PRICE"]},
+        "position_actions": {
+            rec: count_rec(position_results, rec) for rec in ["EXIT", "REDUCE", "WATCH", "HOLD", "DATA_ISSUE"]
+        },
+        "lot_breach_types": {
+            bt: count_attr(lot_results, "breach_type", bt)
+            for bt in [
+                "GAP_THROUGH_STOP",
+                "CONFIRMED_BREAK",
+                "CLOSE_BREACH",
+                "WICK_BREACH_UNCONFIRMED",
+                "WICK_BREACH_RECOVERED",
+                "NONE",
+                "NO_PRICE",
+            ]
+        },
         "degraded_lots": int(sum(1 for r in lot_results if r.barrier_quality == "degraded")),
         "invalid_lots": int(sum(1 for r in lot_results if r.barrier_quality == "invalid")),
         "liquidity_sweep_recovered_lots": int(sum(1 for r in lot_results if r.liquidity_sweep_recovered)),
-        "position_stop_status": {ss: count_attr(position_results, "stop_status", ss) for ss in ["BELOW_EXECUTION_TRIGGER", "ABOVE_EXECUTION_TRIGGER", "BELOW_RISK_THRESHOLD", "ABOVE_RISK_THRESHOLD", "WICK_BREACH_RECOVERED", "NEAR_STOP", "CLEAR", "NO_PRICE_OR_STOP"]},
-        "position_target_status": {ts: count_attr(position_results, "target_status", ts) for ts in ["TARGET_REACHED", "NEAR_TARGET", "BELOW_TARGET", "NO_TARGET"]},
+        "position_stop_status": {
+            ss: count_attr(position_results, "stop_status", ss)
+            for ss in [
+                "BELOW_EXECUTION_TRIGGER",
+                "ABOVE_EXECUTION_TRIGGER",
+                "BELOW_RISK_THRESHOLD",
+                "ABOVE_RISK_THRESHOLD",
+                "WICK_BREACH_RECOVERED",
+                "NEAR_STOP",
+                "CLEAR",
+                "NO_PRICE_OR_STOP",
+            ]
+        },
+        "position_target_status": {
+            ts: count_attr(position_results, "target_status", ts)
+            for ts in ["TARGET_REACHED", "NEAR_TARGET", "BELOW_TARGET", "NO_TARGET"]
+        },
         "liquidation_throttle": throttle_summary,
         "config_version": cfg.version,
     }

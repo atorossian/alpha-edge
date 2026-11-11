@@ -211,7 +211,9 @@ def parse_args() -> argparse.Namespace:
         help="Deprecated compatibility flag. Default behavior is already dry-run unless --execute is passed.",
     )
 
-    ap.add_argument("--reason", default=None, help="Required for real maintenance writes/deletes. Stored in audit trail.")
+    ap.add_argument(
+        "--reason", default=None, help="Required for real maintenance writes/deletes. Stored in audit trail."
+    )
 
     return ap.parse_args()
 
@@ -293,7 +295,7 @@ def main() -> None:
     total_delete = 0
     all_delete_keys: list[str] = []
 
-    for (kind, ident, year) in sorted(groups.keys(), key=lambda x: (x[0], x[1], x[2])):
+    for kind, ident, year in sorted(groups.keys(), key=lambda x: (x[0], x[1], x[2])):
         items = groups[(kind, ident, year)]
         if len(items) <= 1:
             continue
@@ -329,7 +331,6 @@ def main() -> None:
         print(f"\n[DELETE DONE] deleted={deleted}")
 
 
-
 # ----------------------------
 # Audit/logging entrypoint wrapper
 # ----------------------------
@@ -347,30 +348,59 @@ def main_with_audit() -> None:
         captured_delete_keys.extend([str(k) for k in keys])
         return original_delete_keys(bucket=bucket, keys=keys, region=region, dry_run=dry_run)
 
-    with capture_script_run(cfg=cfg, script_name="dedupe_ohlcv_partitions_keep_one.py", input_args=vars(args), dry_run=is_dry_run) as run_id:
+    with capture_script_run(
+        cfg=cfg, script_name="dedupe_ohlcv_partitions_keep_one.py", input_args=vars(args), dry_run=is_dry_run
+    ) as run_id:
         globals()["delete_keys"] = _audited_delete_keys
         try:
             main()
             planned = sorted(set(captured_delete_keys))
             event = build_audit_event(
-                cfg=cfg, run_id=run_id, event_type="delete", entity_type="ohlcv_partition_dedupe",
-                entity_id=None, as_of=None, source_script="dedupe_ohlcv_partitions_keep_one.py",
-                source_mode="dedupe_ohlcv_partitions", status=("dry_run" if is_dry_run else "success"),
-                reason=getattr(args, "reason", None), input_args=vars(args), deleted_keys=([] if is_dry_run else planned),
-                metadata={"tier": "tier_2", "payload_policy": "large_dataset_metadata_only", "planned_deleted_keys": planned,
-                          "planned_deleted_count": len(planned), "partition_kind": getattr(args, "partition_kind", None),
-                          "keep_strategy": getattr(args, "keep_strategy", None), "year_filter": getattr(args, "year", None),
-                          "execute": bool(getattr(args, "execute", False))},
+                cfg=cfg,
+                run_id=run_id,
+                event_type="delete",
+                entity_type="ohlcv_partition_dedupe",
+                entity_id=None,
+                as_of=None,
+                source_script="dedupe_ohlcv_partitions_keep_one.py",
+                source_mode="dedupe_ohlcv_partitions",
+                status=("dry_run" if is_dry_run else "success"),
+                reason=getattr(args, "reason", None),
+                input_args=vars(args),
+                deleted_keys=([] if is_dry_run else planned),
+                metadata={
+                    "tier": "tier_2",
+                    "payload_policy": "large_dataset_metadata_only",
+                    "planned_deleted_keys": planned,
+                    "planned_deleted_count": len(planned),
+                    "partition_kind": getattr(args, "partition_kind", None),
+                    "keep_strategy": getattr(args, "keep_strategy", None),
+                    "year_filter": getattr(args, "year", None),
+                    "execute": bool(getattr(args, "execute", False)),
+                },
             )
             write_audit_event(cfg=cfg, event=event, dry_run=is_dry_run)
         except Exception as exc:
             planned = sorted(set(captured_delete_keys))
             event = build_audit_event(
-                cfg=cfg, run_id=run_id, event_type="delete", entity_type="ohlcv_partition_dedupe",
-                entity_id=None, as_of=None, source_script="dedupe_ohlcv_partitions_keep_one.py",
-                source_mode="dedupe_ohlcv_partitions", status="failed", reason=getattr(args, "reason", None),
-                input_args=vars(args), metadata={"tier": "tier_2", "payload_policy": "large_dataset_metadata_only", "planned_deleted_keys": planned,
-                                               "planned_deleted_count": len(planned), "execute": bool(getattr(args, "execute", False))},
+                cfg=cfg,
+                run_id=run_id,
+                event_type="delete",
+                entity_type="ohlcv_partition_dedupe",
+                entity_id=None,
+                as_of=None,
+                source_script="dedupe_ohlcv_partitions_keep_one.py",
+                source_mode="dedupe_ohlcv_partitions",
+                status="failed",
+                reason=getattr(args, "reason", None),
+                input_args=vars(args),
+                metadata={
+                    "tier": "tier_2",
+                    "payload_policy": "large_dataset_metadata_only",
+                    "planned_deleted_keys": planned,
+                    "planned_deleted_count": len(planned),
+                    "execute": bool(getattr(args, "execute", False)),
+                },
                 error=f"{type(exc).__name__}: {exc}",
             )
             write_audit_event(cfg=cfg, event=event, dry_run=is_dry_run)

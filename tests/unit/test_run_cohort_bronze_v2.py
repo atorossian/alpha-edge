@@ -1,4 +1,5 @@
 """Staged cohorts require verified plans and explicit local-only execution."""
+
 import hashlib
 import json
 
@@ -6,7 +7,9 @@ import pandas as pd
 import pytest
 
 from alpha_edge.market.run_cohort_bronze_v2 import (
-    CohortRunError, load_plan, run,
+    CohortRunError,
+    load_plan,
+    run,
 )
 
 
@@ -15,10 +18,8 @@ def plan(tmp_path):
     folder.mkdir()
     files = {}
     cohorts = [
-        pd.DataFrame([{"asset_id": "A", "yahoo_ticker": "GLD", "currency": "USD",
-                       "calendar_id": "NYSE"}]),
-        pd.DataFrame([{"asset_id": "B", "yahoo_ticker": "KESKOB.HE", "currency": "EUR",
-                       "calendar_id": "XHEL"}]),
+        pd.DataFrame([{"asset_id": "A", "yahoo_ticker": "GLD", "currency": "USD", "calendar_id": "NYSE"}]),
+        pd.DataFrame([{"asset_id": "B", "yahoo_ticker": "KESKOB.HE", "currency": "EUR", "calendar_id": "XHEL"}]),
     ]
     for i, cohort in enumerate(cohorts, 1):
         name = f"cohort_{i:04d}.csv"
@@ -27,19 +28,28 @@ def plan(tmp_path):
     fx = pd.DataFrame([{"currency": "EUR", "provider_symbol": "EURUSD=X", "direction": "direct"}])
     fx.to_csv(folder / "fx_config.csv", index=False)
     files["fx_config.csv"] = hashlib.sha256((folder / "fx_config.csv").read_bytes()).hexdigest()
-    (folder / "manifest.json").write_text(json.dumps({
-        "schema": "alpha_edge_lake_v2_universe_preflight_1",
-        "cohorts": 2, "assets_included": 2, "files_sha256": files
-    }))
+    (folder / "manifest.json").write_text(
+        json.dumps(
+            {
+                "schema": "alpha_edge_lake_v2_universe_preflight_1",
+                "cohorts": 2,
+                "assets_included": 2,
+                "files_sha256": files,
+            }
+        )
+    )
     return folder
 
 
 def test_dry_run_makes_no_network_calls(tmp_path):
     folder = plan(tmp_path)
+
     def fail(**kwargs):
         raise AssertionError("No source access allowed")
-    result = run(plan_dir=folder, output=tmp_path / "run", batch_prefix="test",
-                 start="2025-01-01", end="2025-01-10", runner=fail)
+
+    result = run(
+        plan_dir=folder, output=tmp_path / "run", batch_prefix="test", start="2025-01-01", end="2025-01-10", runner=fail
+    )
     assert result["status"] == "dry_run"
     assert result["planned_assets"] == 1
     assert not (tmp_path / "run").exists()
@@ -48,20 +58,37 @@ def test_dry_run_makes_no_network_calls(tmp_path):
 def test_explicit_execution_is_bounded_and_s3_free(tmp_path):
     folder = plan(tmp_path)
     calls = []
+
     def fake(**kwargs):
         calls.append(kwargs)
         assert kwargs["upload"] is False
         return {"local_path": "fake"}
-    result = run(plan_dir=folder, output=tmp_path / "run", batch_prefix="test",
-                 start="2025-01-01", end="2025-01-10",
-                 max_cohorts=1, execute=True, retries=0, runner=fake)
+
+    result = run(
+        plan_dir=folder,
+        output=tmp_path / "run",
+        batch_prefix="test",
+        start="2025-01-01",
+        end="2025-01-10",
+        max_cohorts=1,
+        execute=True,
+        retries=0,
+        runner=fake,
+    )
     assert result["acquired_cohorts"] == 1
     assert len(calls) == 1 and calls[0]["batch_id"] == "test-0001"
     assert result["s3_writes"] == 0
     with pytest.raises(FileExistsError):
-        run(plan_dir=folder, output=tmp_path / "run", batch_prefix="other",
-            start="2025-01-01", end="2025-01-10",
-            execute=True, retries=0, runner=fake)
+        run(
+            plan_dir=folder,
+            output=tmp_path / "run",
+            batch_prefix="other",
+            start="2025-01-01",
+            end="2025-01-10",
+            execute=True,
+            retries=0,
+            runner=fake,
+        )
 
 
 def test_corrupted_plan_fails_before_execution(tmp_path):
@@ -74,12 +101,22 @@ def test_corrupted_plan_fails_before_execution(tmp_path):
 
 def test_failed_cohort_does_not_claim_success(tmp_path):
     folder = plan(tmp_path)
+
     def fail(**kwargs):
         raise RuntimeError("provider rate limited")
-    report = run(plan_dir=folder, output=tmp_path / "run",
-                 batch_prefix="test", start="2025-01-01", end="2025-01-10",
-                 execute=True, retries=1, delay_seconds=0,
-                 runner=fail, sleeper=lambda _: None)
+
+    report = run(
+        plan_dir=folder,
+        output=tmp_path / "run",
+        batch_prefix="test",
+        start="2025-01-01",
+        end="2025-01-10",
+        execute=True,
+        retries=1,
+        delay_seconds=0,
+        runner=fail,
+        sleeper=lambda _: None,
+    )
     assert report["state"] == "partial_failed"
     assert report["failed_cohorts"] == 1
 
@@ -87,17 +124,34 @@ def test_failed_cohort_does_not_claim_success(tmp_path):
 def test_start_cohort_two_does_not_repeat_first(tmp_path):
     folder = plan(tmp_path)
     calls = []
+
     def fake(**kwargs):
         calls.append(kwargs)
         assert kwargs["upload"] is False
         return {"local_path": "fake"}
-    dry = run(plan_dir=folder, output=tmp_path / "dry", batch_prefix="validation",
-              start="2025-01-01", end="2025-01-10", start_cohort=2, runner=fake)
+
+    dry = run(
+        plan_dir=folder,
+        output=tmp_path / "dry",
+        batch_prefix="validation",
+        start="2025-01-01",
+        end="2025-01-10",
+        start_cohort=2,
+        runner=fake,
+    )
     assert dry["start_cohort"] == 2 and dry["planned_assets"] == 1
     assert not calls
-    result = run(plan_dir=folder, output=tmp_path / "second", batch_prefix="validation",
-                 start="2025-01-01", end="2025-01-10", start_cohort=2,
-                 execute=True, retries=0, runner=fake)
+    result = run(
+        plan_dir=folder,
+        output=tmp_path / "second",
+        batch_prefix="validation",
+        start="2025-01-01",
+        end="2025-01-10",
+        start_cohort=2,
+        execute=True,
+        retries=0,
+        runner=fake,
+    )
     assert result["attempted_cohorts"] == 1
     assert calls[0]["batch_id"] == "validation-0002"
     assert calls[0]["universe"]["asset_id"].tolist() == ["B"]
@@ -106,5 +160,11 @@ def test_start_cohort_two_does_not_repeat_first(tmp_path):
 def test_invalid_start_cohort_fails_closed(tmp_path):
     folder = plan(tmp_path)
     with pytest.raises(CohortRunError, match="Starting cohort"):
-        run(plan_dir=folder, output=tmp_path / "run", batch_prefix="validation",
-            start="2025-01-01", end="2025-01-10", start_cohort=3)
+        run(
+            plan_dir=folder,
+            output=tmp_path / "run",
+            batch_prefix="validation",
+            start="2025-01-01",
+            end="2025-01-10",
+            start_cohort=3,
+        )

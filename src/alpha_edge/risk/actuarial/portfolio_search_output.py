@@ -147,9 +147,7 @@ def build_actuarial_diagnostic_from_portfolio_report(
     equity0 = float(getattr(snapshot, "equity"))
     notional = float(getattr(snapshot, "total_notional"))
     observed_leverage = (
-        float(current_leverage)
-        if current_leverage is not None
-        else float(getattr(snapshot, "leverage"))
+        float(current_leverage) if current_leverage is not None else float(getattr(snapshot, "leverage"))
     )
 
     eval_with_paths = evaluate_portfolio_candidate_with_paths(

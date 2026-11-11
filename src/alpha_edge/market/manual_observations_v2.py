@@ -4,6 +4,7 @@ Original Yahoo Bronze parquet and manifests are never modified. A correction
 is an appended, attributable observation, not a provider rewrite. Do not
 invent adjusted close, dividends, split factors or a precise close timestamp.
 """
+
 from __future__ import annotations
 
 import numpy as np
@@ -13,15 +14,30 @@ from alpha_edge.market.data_lake_v2 import DataContractError
 
 
 REQUIRED_CORRECTION = {
-    "asset_id", "provider_symbol", "currency_original", "session_date",
-    "open", "high", "low", "close", "volume", "correction_id",
-    "reported_by", "verification_status",
+    "asset_id",
+    "provider_symbol",
+    "currency_original",
+    "session_date",
+    "open",
+    "high",
+    "low",
+    "close",
+    "volume",
+    "correction_id",
+    "reported_by",
+    "verification_status",
 }
 NUMERIC = ("open", "high", "low", "close", "volume")
 OPTIONAL = ("adj_close", "source_reference", "notes", "adj_close_policy")
 SCHEMA_COLS = (
-    "provider", "source_timestamp", "source_timezone", "interval",
-    "ingestion_batch_id", "ingested_at_utc", "dividends", "stock_splits",
+    "provider",
+    "source_timestamp",
+    "source_timezone",
+    "interval",
+    "ingestion_batch_id",
+    "ingested_at_utc",
+    "dividends",
+    "stock_splits",
 )
 
 
@@ -45,8 +61,14 @@ def append_manual_observations(
         if col not in records:
             records[col] = pd.NA
 
-    for key in ("asset_id", "provider_symbol", "currency_original",
-                "correction_id", "reported_by", "verification_status"):
+    for key in (
+        "asset_id",
+        "provider_symbol",
+        "currency_original",
+        "correction_id",
+        "reported_by",
+        "verification_status",
+    ):
         records[key] = records[key].astype("string").str.strip()
         if records[key].isna().any() or records[key].eq("").any():
             raise DataContractError(f"Manual correction has missing {key}")
@@ -56,18 +78,14 @@ def append_manual_observations(
     if not records["verification_status"].isin(allowed).all():
         raise DataContractError("Unexpected correction approval state")
 
-    records["session_date"] = pd.to_datetime(
-        records["session_date"], format="%Y-%m-%d", errors="coerce"
-    )
+    records["session_date"] = pd.to_datetime(records["session_date"], format="%Y-%m-%d", errors="coerce")
     if records["session_date"].isna().any():
         raise DataContractError("Invalid manual correction session date")
     records["currency_original"] = records["currency_original"].str.upper()
 
     for col in NUMERIC:
         records[col] = pd.to_numeric(records[col], errors="coerce")
-    if records[list(NUMERIC)].isna().any().any() or not np.isfinite(
-        records[list(NUMERIC)].to_numpy(dtype=float)
-    ).all():
+    if records[list(NUMERIC)].isna().any().any() or not np.isfinite(records[list(NUMERIC)].to_numpy(dtype=float)).all():
         raise DataContractError("Manual OHLCV must be finite")
     if (
         records["open"].le(0).any()
@@ -85,10 +103,14 @@ def append_manual_observations(
     records["adj_close"] = pd.to_numeric(records["adj_close"], errors="coerce")
     policy = records["adj_close_policy"].astype("string").fillna("").str.strip()
     asserted = records["verification_status"].eq("user_asserted_unverified")
-    if (asserted & (~policy.eq("explicit_equal_close")
-                    | records["adj_close"].isna()
-                    | ~np.isclose(records["adj_close"].fillna(-1),
-                                  records["close"], rtol=0, atol=1e-9))).any():
+    if (
+        asserted
+        & (
+            ~policy.eq("explicit_equal_close")
+            | records["adj_close"].isna()
+            | ~np.isclose(records["adj_close"].fillna(-1), records["close"], rtol=0, atol=1e-9)
+        )
+    ).any():
         raise DataContractError("User asserted adjusted close must explicitly equal close")
     if ((~asserted) & records["adj_close"].notna()).any():
         raise DataContractError("Unverified corrections must not provide adjusted close")
@@ -96,9 +118,7 @@ def append_manual_observations(
         raise DataContractError("Unexpected adjusted close policy")
     records["adj_close_origin"] = np.where(asserted, "user_asserted_equal_close", "not_available")
 
-    identity = source_bars[
-        ["asset_id", "provider_symbol", "currency_original"]
-    ].drop_duplicates()
+    identity = source_bars[["asset_id", "provider_symbol", "currency_original"]].drop_duplicates()
     for entry in records.itertuples(index=False):
         existing = identity.loc[identity["asset_id"].eq(entry.asset_id)]
         if len(existing) != 1 or (
@@ -107,16 +127,9 @@ def append_manual_observations(
         ):
             raise DataContractError(f"Identity mismatch for {entry.asset_id}")
 
-    source_date = pd.to_datetime(
-        source_bars["session_date"].astype(str).str[:10],
-        format="%Y-%m-%d", errors="coerce"
-    )
-    original_keys = pd.MultiIndex.from_arrays(
-        [source_bars["asset_id"].astype(str), source_date]
-    )
-    correction_keys = pd.MultiIndex.from_arrays(
-        [records["asset_id"].astype(str), records["session_date"]]
-    )
+    source_date = pd.to_datetime(source_bars["session_date"].astype(str).str[:10], format="%Y-%m-%d", errors="coerce")
+    original_keys = pd.MultiIndex.from_arrays([source_bars["asset_id"].astype(str), source_date])
+    correction_keys = pd.MultiIndex.from_arrays([records["asset_id"].astype(str), records["session_date"]])
     if correction_keys.has_duplicates:
         raise DataContractError("Duplicate correction asset/session key")
     if correction_keys.isin(original_keys).any():
@@ -145,11 +158,26 @@ def append_manual_observations(
     if candidate.duplicated(["asset_id", "session_date"]).any():
         raise DataContractError("Candidate has duplicate session keys")
 
-    audit = records[[
-        "correction_id", "asset_id", "provider_symbol", "currency_original",
-        "session_date", "open", "high", "low", "close", "volume",
-        "adj_close", "adj_close_origin", "adj_close_policy",
-        "observation_origin", "verification_status",
-        "reported_by", "source_reference", "notes",
-    ]].copy()
+    audit = records[
+        [
+            "correction_id",
+            "asset_id",
+            "provider_symbol",
+            "currency_original",
+            "session_date",
+            "open",
+            "high",
+            "low",
+            "close",
+            "volume",
+            "adj_close",
+            "adj_close_origin",
+            "adj_close_policy",
+            "observation_origin",
+            "verification_status",
+            "reported_by",
+            "source_reference",
+            "notes",
+        ]
+    ].copy()
     return candidate, audit

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Optional, Tuple
+from typing import Dict, Optional
 import time
 import re
 import pandas as pd
@@ -14,6 +14,7 @@ from alpha_edge import paths
 # =========================
 # Core schema
 # =========================
+
 
 @dataclass
 class Asset:
@@ -123,30 +124,15 @@ def validate_yahoo_meta_for_row(
         or ("NYSE" in full)
     )
 
-    if (
-        "mexico" in reg
-        or "bmv" in reg
-        or "mexican" in reg
-        or "bolsa mexicana" in reg
-    ):
+    if "mexico" in reg or "bmv" in reg or "mexican" in reg or "bolsa mexicana" in reg:
         if looks_us:
             return False, "region_mismatch_looks_us_for_mexico", 0.0
 
-    if (
-        "brazil" in reg
-        or "b3" in reg
-        or "bovespa" in reg
-        or "sao paulo" in reg
-        or "são paulo" in reg
-    ):
+    if "brazil" in reg or "b3" in reg or "bovespa" in reg or "sao paulo" in reg or "são paulo" in reg:
         if looks_us:
             return False, "region_mismatch_looks_us_for_brazil", 0.0
 
-    if (
-        "europe" in reg
-        or "euronext" in reg
-        or "cboe europe" in reg
-    ):
+    if "europe" in reg or "euronext" in reg or "cboe europe" in reg:
         if looks_us:
             return False, "region_mismatch_looks_us", 0.0
 
@@ -169,7 +155,9 @@ def fetch_yahoo_meta(ticker: str) -> dict:
         info = {}
 
     meta = {k: info.get(k) for k in FIELDS}
-    meta["yahoo_ok"] = bool(meta.get("exchange") or meta.get("quoteType") or meta.get("shortName") or meta.get("longName"))
+    meta["yahoo_ok"] = bool(
+        meta.get("exchange") or meta.get("quoteType") or meta.get("shortName") or meta.get("longName")
+    )
     return meta
 
 
@@ -217,8 +205,8 @@ def enrich_universe_csv(
     out_csv: str,
     sleep_s: float = 0.25,
     *,
-    ticker_col: str = "ticker",   # internal id (join key)
-    yahoo_col: str = "symbol",    # provider symbol to query
+    ticker_col: str = "ticker",  # internal id (join key)
+    yahoo_col: str = "symbol",  # provider symbol to query
     tickers_subset: list[str] | set[str] | None = None,
 ) -> pd.DataFrame:
     """
@@ -297,17 +285,40 @@ def enrich_universe_csv(
 # =========================
 
 EU_SUFFIXES = [
-    ".DE", ".MU", ".F", ".DU", ".HM",
-    ".MC", ".PA", ".MI", ".AS",
-    ".BR", ".SW", ".ST", ".L",
-    ".SA", ".MX", ".HE",
+    ".DE",
+    ".MU",
+    ".F",
+    ".DU",
+    ".HM",
+    ".MC",
+    ".PA",
+    ".MI",
+    ".AS",
+    ".BR",
+    ".SW",
+    ".ST",
+    ".L",
+    ".SA",
+    ".MX",
+    ".HE",
 ]
 
 PREF_SUFFIX_ORDER = [
-    ".DE", ".MC", ".PA", ".MI", ".AS", ".L", ".SW",
-    ".BR", ".ST",
-    ".SA", ".MX",
-    ".MU", ".F", ".DU", ".HM",
+    ".DE",
+    ".MC",
+    ".PA",
+    ".MI",
+    ".AS",
+    ".L",
+    ".SW",
+    ".BR",
+    ".ST",
+    ".SA",
+    ".MX",
+    ".MU",
+    ".F",
+    ".DU",
+    ".HM",
     ".HE",
     "",
 ]

@@ -6,6 +6,7 @@ from typing import Dict, Iterable
 
 from alpha_edge.core.market_store import MarketStore
 
+
 def slice_returns_wide_asof(
     wide: pd.DataFrame,
     *,
@@ -24,6 +25,7 @@ def slice_returns_wide_asof(
     if sub.shape[0] > lookback_days:
         sub = sub.iloc[-lookback_days:]
     return sub
+
 
 def get_close_prices_asof(
     *,

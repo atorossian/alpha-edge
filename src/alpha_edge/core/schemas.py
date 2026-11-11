@@ -8,6 +8,7 @@ import numpy as np
 
 Goals3 = Tuple[float, float, float]
 
+
 @dataclass(frozen=True)
 class EvalMetrics:
     # Portfolio definition (optimizer-friendly)
@@ -81,6 +82,7 @@ class PortfolioReport:
     snapshot: PortfolioSnapshot
     eval: EvalMetrics
 
+
 @dataclass
 class PortfolioCandidateMetrics:
     weights: Dict[str, float]
@@ -124,6 +126,7 @@ class PortfolioCandidateMetrics:
     p_dd_breach: float | None = None
     underwater_mean: float | None = None
     ttr_mean_days: float | None = None
+
 
 @dataclass
 class ScoreConfig:
@@ -183,8 +186,9 @@ class Position:
     ticker: str
     quantity: float
     entry_price: float | None = None  # optional
-    exit_price: float | None = None   # optional
+    exit_price: float | None = None  # optional
     currency: str = "USD"
+
 
 @dataclass
 class PortfolioMetrics:
@@ -235,6 +239,7 @@ class PortfolioMetrics:
     underwater_mean: float | None = None
     ttr_mean_days: float | None = None
 
+
 @dataclass
 class PortfolioHealth:
     date: pd.Timestamp
@@ -252,11 +257,11 @@ class PortfolioHealth:
     alpha_report_json: str | None = None
 
     # ---- 1y diagnostics (optional) ----
-    alpha_1y: float | None = None          # CAPM alpha annualized (preferred)
-    beta_1y: float | None = None           # CAPM beta
-    r2_1y: float | None = None             # CAPM R^2
-    info_ratio_1y: float | None = None     # IR
-    tracking_error_1y: float | None = None # TE annualized
+    alpha_1y: float | None = None  # CAPM alpha annualized (preferred)
+    beta_1y: float | None = None  # CAPM beta
+    r2_1y: float | None = None  # CAPM R^2
+    info_ratio_1y: float | None = None  # IR
+    tracking_error_1y: float | None = None  # TE annualized
     excess_return_1y: float | None = None  # mean(port-bench)*252
 
     # ---- 3m diagnostics (optional) ----
@@ -271,10 +276,10 @@ class PortfolioHealth:
 @dataclass(frozen=True)
 class PCAModel:
     tickers: list[str]
-    mu: np.ndarray            # (N,)
-    loadings: np.ndarray      # (N, K)
+    mu: np.ndarray  # (N,)
+    loadings: np.ndarray  # (N, K)
     factor_returns: np.ndarray  # (T, K)
-    resid: np.ndarray         # (T, N)
+    resid: np.ndarray  # (T, N)
 
 
 @dataclass(frozen=True)
@@ -286,6 +291,7 @@ class DiscreteAllocation:
     total_spent: float
     cash_left: float
 
+
 @dataclass(frozen=True)
 class StabilityEnergyConfig:
     alpha_cdar: float = 0.95
@@ -295,6 +301,7 @@ class StabilityEnergyConfig:
     lambda_ttr: float = 0.7
     lambda_breach: float = 1.5
     lambda_underwater: float = 0.5
+
 
 @dataclass(frozen=True)
 class StabilityReport:
@@ -383,6 +390,7 @@ class Trade:
     calculation_inputs: Optional[Dict[str, Any]] = None
     calculation_warnings: Optional[list[str]] = None
 
+
 @dataclass(frozen=True)
 class RuntimeConfig:
     env: str
@@ -392,6 +400,7 @@ class RuntimeConfig:
     market_root: str
     warehouse_root: str
     is_prod: bool = False
+
 
 @dataclass
 class TradeRow:
@@ -442,6 +451,7 @@ class OpenValueLot:
     quantity: Optional[float]
     quantity_unit: Optional[str]
 
+
 @dataclass
 class RepairRow:
     trade_id: str
@@ -467,6 +477,7 @@ class RepairRow:
     command: str
     s3_key: str
 
+
 @dataclass
 class Dividend:
     dividend_id: str
@@ -486,6 +497,7 @@ class Dividend:
     gross_amount: Optional[float] = None
     source: Optional[str] = None
 
+
 @dataclass
 class Cashflow:
     cashflow_id: str
@@ -496,6 +508,7 @@ class Cashflow:
     amount: float
     currency: str
     note: Optional[str] = None
+
 
 @dataclass
 class PositionLotAvg:
@@ -563,6 +576,7 @@ class SplitEvent:
     effective_date: str
     factor: float
 
+
 @dataclass(frozen=True)
 class UniverseIndex:
     by_broker_ticker: Dict[str, List[dict]]
@@ -572,8 +586,8 @@ class UniverseIndex:
 class AuditEvent:
     audit_id: str
     run_id: str
-    event_type: str          # create, modify, delete, rebuild, backfill, import, migrate, build_dataset
-    entity_type: str         # trade, cashflow, dividend, ledger, market_data, warehouse, portfolio_choice
+    event_type: str  # create, modify, delete, rebuild, backfill, import, migrate, build_dataset
+    entity_type: str  # trade, cashflow, dividend, ledger, market_data, warehouse, portfolio_choice
     entity_id: Optional[str]
     as_of: Optional[str]
 
@@ -585,7 +599,7 @@ class AuditEvent:
     source_mode: Optional[str]
     created_at_utc: str
 
-    status: str              # success, failed, dry_run
+    status: str  # success, failed, dry_run
     reason: Optional[str]
 
     input_args: Dict[str, Any]
@@ -597,6 +611,7 @@ class AuditEvent:
     after_payload: Optional[dict] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
     error: Optional[str] = None
+
 
 @dataclass
 class IndicatorBuildConfig:
@@ -650,10 +665,7 @@ class IndicatorBuildConfig:
             raise ValueError("replacement_calendar_days must be >= 0.")
 
         if self.replacement_calendar_days > self.lookback_calendar_days:
-            raise ValueError(
-                "replacement_calendar_days cannot exceed "
-                "lookback_calendar_days."
-            )
+            raise ValueError("replacement_calendar_days cannot exceed lookback_calendar_days.")
 
         if self.min_obs < 1:
             raise ValueError("min_obs must be >= 1.")
@@ -719,22 +731,16 @@ class CacheConfig:
             raise ValueError("min_obs must be >= 1.")
 
         if self.replacement_calendar_days < 0:
-            raise ValueError(
-                "replacement_calendar_days must be >= 0."
-            )
+            raise ValueError("replacement_calendar_days must be >= 0.")
 
         if self.max_new_assets_full_build < 0:
-            raise ValueError(
-                "max_new_assets_full_build must be >= 0."
-            )
+            raise ValueError("max_new_assets_full_build must be >= 0.")
 
         if self.max_workers < 1:
             raise ValueError("max_workers must be >= 1.")
 
         if self.s3_max_concurrency < 1:
-            raise ValueError(
-                "s3_max_concurrency must be >= 1."
-            )
+            raise ValueError("s3_max_concurrency must be >= 1.")
 
         if self.progress_every < 1:
             raise ValueError("progress_every must be >= 1.")
@@ -810,9 +816,7 @@ class RuinConfig:
 
         if self.threshold_mode == "fraction_of_initial":
             if self.threshold_value > 1.0:
-                raise ValueError(
-                    "ruin.threshold_value must be <= 1 when threshold_mode='fraction_of_initial'"
-                )
+                raise ValueError("ruin.threshold_value must be <= 1 when threshold_mode='fraction_of_initial'")
 
         return self
 
@@ -984,10 +988,7 @@ class CapitalAdequacyConfig:
         )
 
         if self.leverage_mode not in {"none", "gross_exposure", "notional_multiplier"}:
-            raise ValueError(
-                "capital_adequacy.leverage_mode must be one of: "
-                "none, gross_exposure, notional_multiplier"
-            )
+            raise ValueError("capital_adequacy.leverage_mode must be one of: none, gross_exposure, notional_multiplier")
 
         # Important:
         # current_leverage is observed state.
@@ -1172,6 +1173,7 @@ class ActuarialRiskResult:
 
         return d
 
+
 @dataclass(frozen=True)
 class ActuarialDiagnosticReport:
     """
@@ -1227,6 +1229,7 @@ class ActuarialDiagnosticReport:
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
 
+
 @dataclass(frozen=True)
 class ActuarialDiagnosticBatchReport:
     """
@@ -1270,6 +1273,7 @@ class ActuarialDiagnosticBatchReport:
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
+
 
 @dataclass(frozen=True)
 class PortfolioEvaluationResult:
@@ -1401,6 +1405,7 @@ class LocalTransitionOptimizerConfig:
     min_score_improvement: float = 0.02
     min_health_improvement: float = 3.0
 
+
 @dataclass
 class LocalTransitionCandidate:
     weights: dict[str, float]
@@ -1426,6 +1431,7 @@ class LocalTransitionOptimizerResult:
     candidates_accepted_by_turnover: int
     config: LocalTransitionOptimizerConfig
     diagnostics: dict[str, Any] = field(default_factory=dict)
+
 
 ShadowPortfolioRecommendation = Literal[
     "KEEP_CURRENT",

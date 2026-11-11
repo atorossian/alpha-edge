@@ -4,6 +4,7 @@ from __future__ import annotations
 from typing import Dict
 from alpha_edge.core.schemas import EvalMetrics
 
+
 def extract_p_hit_map(eval_metrics: EvalMetrics, goals: list[float]) -> Dict[float, float]:
     """
     Centralized helper (moved out of report_engine to avoid circular imports).

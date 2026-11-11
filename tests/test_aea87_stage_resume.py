@@ -1,5 +1,5 @@
 """AEA-87 staging resume and progress tests using in-memory S3 operations."""
-import json
+
 from io import BytesIO
 from unittest.mock import patch
 
@@ -13,18 +13,22 @@ from alpha_edge.market.aea87_publication_transaction import checksum
 class FakeS3:
     def __init__(self, data):
         self.data = dict(data)
+
     def get_object(self, Bucket, Key):
         if Key not in self.data:
             raise ClientError({"Error": {"Code": "NoSuchKey"}}, "GetObject")
         return {"Body": BytesIO(self.data[Key])}
+
     def head_object(self, Bucket, Key):
         if Key not in self.data:
             raise ClientError({"Error": {"Code": "404"}}, "HeadObject")
         return {"ETag": '"source"', "Metadata": {}}
+
     def put_object(self, Bucket, Key, Body, IfNoneMatch=None, **kw):
         if IfNoneMatch == "*" and Key in self.data:
             raise ClientError({"Error": {"Code": "PreconditionFailed"}}, "PutObject")
         self.data[Key] = Body
+
     def copy_object(self, Bucket, CopySource, Key, **kw):
         self.data[Key] = self.data[CopySource["Key"]]
 
@@ -32,16 +36,25 @@ class FakeS3:
 def fixture():
     old = b'{"parts":["old"]}'
     part = b"parquet-content"
-    op = {"asset_id": "A", "manifest_key": "active", "before_sha": checksum(old),
-          "backup_key": "backups/0", "staged_key": "staged", "staged_sha": checksum(part),
-          "part_key": "dest"}
+    op = {
+        "asset_id": "A",
+        "manifest_key": "active",
+        "before_sha": checksum(old),
+        "backup_key": "backups/0",
+        "staged_key": "staged",
+        "staged_sha": checksum(part),
+        "part_key": "dest",
+    }
     manifest = {"release_id": "AEA87-TEST-RESUME", "plan_key": "plan", "operations": [op]}
     return FakeS3({"active": old, "staged": part}), manifest
 
 
 def test_resumes_preparing_with_existing_objects(capsys):
     s3, manifest = fixture()
-    with patch.object(runner, "entries", side_effect=[[], [{"step": 0, "state": "PREPARING"}]]), patch.object(runner, "write_event") as write:
+    with (
+        patch.object(runner, "entries", side_effect=[[], [{"step": 0, "state": "PREPARING"}]]),
+        patch.object(runner, "write_event") as write,
+    ):
         runner.stage(s3, "bucket", manifest, workers=2, progress_every=1)
         runner.stage(s3, "bucket", manifest, workers=2, progress_every=1)
     assert s3.data["backups/0"] == s3.data["active"]

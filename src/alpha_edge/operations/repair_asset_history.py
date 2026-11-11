@@ -137,8 +137,7 @@ def discover_first_trade_for_asset(
 
     if first is None:
         raise RuntimeError(
-            f"Asset not found in trades under s3://{cfg.bucket}/{prefix} "
-            f"(asset_id={asset_id!r}, ticker={ticker!r})"
+            f"Asset not found in trades under s3://{cfg.bucket}/{prefix} (asset_id={asset_id!r}, ticker={ticker!r})"
         )
 
     return first

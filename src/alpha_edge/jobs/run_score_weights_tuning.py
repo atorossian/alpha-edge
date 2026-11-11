@@ -66,12 +66,12 @@ def _safe_conf_str(x: Any) -> str:
         return "n/a"
     return f"{v:.2f}"
 
+
 def _parse_goals(s: str) -> tuple[float, float, float]:
     parts = [float(x.strip()) for x in str(s).split(",") if str(x).strip()]
     if len(parts) != 3:
         raise ValueError(f"--goals must contain exactly 3 comma-separated numbers. Got {s!r}")
     return (float(parts[0]), float(parts[1]), float(parts[2]))
-
 
 
 def _safe_float(x: Any, default: float = float("nan")) -> float:
@@ -121,7 +121,9 @@ def _execution_quality(
     executable_gross_notional: float,
     cash_left: float,
 ) -> dict[str, float]:
-    tickers = set(str(t).upper().strip() for t in theoretical_weights) | set(str(t).upper().strip() for t in executable_weights)
+    tickers = set(str(t).upper().strip() for t in theoretical_weights) | set(
+        str(t).upper().strip() for t in executable_weights
+    )
     l1 = 0.0
     dropped = 0.0
     for t in tickers:
@@ -170,7 +172,9 @@ def _build_prices_ticker(
     elif "close_usd" in latest_prices_df.columns:
         px_col = "close_usd"
     else:
-        raise RuntimeError(f"latest_prices snapshot missing usable price column. Columns={list(latest_prices_df.columns)}")
+        raise RuntimeError(
+            f"latest_prices snapshot missing usable price column. Columns={list(latest_prices_df.columns)}"
+        )
 
     u2 = universe_df[["asset_id", "ticker"]].copy()
     u2["asset_id"] = u2["asset_id"].astype(str).str.strip()
@@ -279,6 +283,7 @@ def _make_executable_candidate_pool(
         "errors_sample": errors[:25],
     }
     return executable_pool, summary
+
 
 def run_score_weights_tuning(
     *,
@@ -449,9 +454,7 @@ def run_score_weights_tuning(
         ) from e
 
     # Map asset_id columns -> tickers when needed.
-    returns_wide = returns_wide.rename(
-        columns=lambda c: asset_to_ticker.get(str(c).strip(), str(c).strip())
-    )
+    returns_wide = returns_wide.rename(columns=lambda c: asset_to_ticker.get(str(c).strip(), str(c).strip()))
     returns_wide.columns = [str(c).upper().strip() for c in returns_wide.columns]
 
     # Slice to <= as_of. This is critical to avoid lookahead.
@@ -459,9 +462,7 @@ def run_score_weights_tuning(
     returns_wide = returns_wide.loc[returns_wide.index <= today]
 
     if returns_wide.shape[0] < 252:
-        raise RuntimeError(
-            f"Not enough returns history up to as_of={as_of_date}: rows={returns_wide.shape[0]}"
-        )
+        raise RuntimeError(f"Not enough returns history up to as_of={as_of_date}: rows={returns_wide.shape[0]}")
 
     # IMPORTANT: match portfolio search criteria exactly.
     returns_wide, diag = clean_returns_matrix(
@@ -475,8 +476,7 @@ def run_score_weights_tuning(
     universe = {
         str(t).upper().strip(): a
         for t, a in universe_all.items()
-        if str(t).upper().strip() in allowed_tickers
-        and str(t).upper().strip() in returns_wide.columns
+        if str(t).upper().strip() in allowed_tickers and str(t).upper().strip() in returns_wide.columns
     }
 
     if len(universe) < int(min_universe_size):
@@ -876,7 +876,9 @@ def main_with_audit() -> None:
                 event_type="build_dataset",
                 entity_type="score_weights_tuning",
                 entity_id=None,
-                as_of=str(getattr(args, "as_of", None) or getattr(args, "dt", None) or getattr(args, "run_dt", None) or ""),
+                as_of=str(
+                    getattr(args, "as_of", None) or getattr(args, "dt", None) or getattr(args, "run_dt", None) or ""
+                ),
                 source_script="run_score_weights_tuning.py",
                 source_mode="score_weights_tuning",
                 status=("dry_run" if is_dry_run else "success"),
@@ -895,7 +897,9 @@ def main_with_audit() -> None:
                 event_type="build_dataset",
                 entity_type="score_weights_tuning",
                 entity_id=None,
-                as_of=str(getattr(args, "as_of", None) or getattr(args, "dt", None) or getattr(args, "run_dt", None) or ""),
+                as_of=str(
+                    getattr(args, "as_of", None) or getattr(args, "dt", None) or getattr(args, "run_dt", None) or ""
+                ),
                 source_script="run_score_weights_tuning.py",
                 source_mode="score_weights_tuning",
                 status="failed",

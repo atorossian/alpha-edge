@@ -3,6 +3,7 @@
 A separate additive reference candidate. Does not modify market/reference/v1,
 production OHLCV/returns, or apply actions to prices. No S3 writes.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -20,12 +21,20 @@ import pandas as pd
 
 SAFE_BATCH = re.compile(r"^[A-Za-z0-9_-]{1,100}$")
 EVENT_COLUMNS = [
-    "asset_id", "provider_symbol", "action_type", "effective_date",
-    "source_timestamp", "source_timezone", "value", "unit",
-    "currency", "source", "retrieved_at_utc", "ingestion_batch_id",
+    "asset_id",
+    "provider_symbol",
+    "action_type",
+    "effective_date",
+    "source_timestamp",
+    "source_timezone",
+    "value",
+    "unit",
+    "currency",
+    "source",
+    "retrieved_at_utc",
+    "ingestion_batch_id",
 ]
-ACTION_FIELDS = {"Dividends": ("DIVIDEND", "currency_per_share"),
-                 "Stock Splits": ("SPLIT", "new_shares_per_old_share")}
+ACTION_FIELDS = {"Dividends": ("DIVIDEND", "currency_per_share"), "Stock Splits": ("SPLIT", "new_shares_per_old_share")}
 LEGACY_ACTION_PREFIX = "market/reference/v1/corporate_actions"
 
 
@@ -44,20 +53,26 @@ def _parquet(table: pd.DataFrame) -> bytes:
 
 
 def acquire_actions(
-    asset_id: str, symbol: str, currency: str,
-    *, start: str, end: str, batch_id: str,
-    ticker_factory: Callable | None = None, retrieved_at: str | None = None,
+    asset_id: str,
+    symbol: str,
+    currency: str,
+    *,
+    start: str,
+    end: str,
+    batch_id: str,
+    ticker_factory: Callable | None = None,
+    retrieved_at: str | None = None,
 ) -> pd.DataFrame:
     if ticker_factory is None:
         import yfinance as yf
+
         ticker_factory = yf.Ticker
     if not asset_id or not symbol or not currency:
         raise ValueError("Asset ID, symbol and currency must be specified")
     if pd.Timestamp(start) >= pd.Timestamp(end):
         raise ValueError("Expected start before exclusive end")
     ticker = ticker_factory(symbol)
-    frame = ticker.history(start=start, end=end, interval="1d",
-                           auto_adjust=False, actions=True, repair=False)
+    frame = ticker.history(start=start, end=end, interval="1d", auto_adjust=False, actions=True, repair=False)
     if not isinstance(frame, pd.DataFrame) or frame.empty:
         raise ValueError(f"{symbol}: Yahoo returned empty history; cannot assert zero actions")
     if frame.index.has_duplicates:
@@ -80,21 +95,32 @@ def acquire_actions(
             raise ValueError(f"{symbol}: invalid {source_column} evidence")
         for stamp, value in series[series.gt(0)].items():
             ts = pd.Timestamp(stamp)
-            rows.append({
-                "asset_id": str(asset_id), "provider_symbol": str(symbol),
-                "action_type": kind, "effective_date": ts.date().isoformat(),
-                "source_timestamp": ts.isoformat(),
-                "source_timezone": str(ts.tzinfo) if ts.tzinfo else "",
-                "value": float(value), "unit": units, "currency": currency.upper() if kind == "DIVIDEND" else None,
-                "source": "yfinance_history", "retrieved_at_utc": obtained,
-                "ingestion_batch_id": batch_id,
-            })
+            rows.append(
+                {
+                    "asset_id": str(asset_id),
+                    "provider_symbol": str(symbol),
+                    "action_type": kind,
+                    "effective_date": ts.date().isoformat(),
+                    "source_timestamp": ts.isoformat(),
+                    "source_timezone": str(ts.tzinfo) if ts.tzinfo else "",
+                    "value": float(value),
+                    "unit": units,
+                    "currency": currency.upper() if kind == "DIVIDEND" else None,
+                    "source": "yfinance_history",
+                    "retrieved_at_utc": obtained,
+                    "ingestion_batch_id": batch_id,
+                }
+            )
     return pd.DataFrame(rows, columns=EVENT_COLUMNS)
 
 
 def create_local_batch(
-    *, universe: pd.DataFrame, start: str, end: str,
-    output: Path, batch_id: str,
+    *,
+    universe: pd.DataFrame,
+    start: str,
+    end: str,
+    output: Path,
+    batch_id: str,
     ticker_factory: Callable | None = None,
     retrieved_at: str | None = None,
 ) -> dict:
@@ -105,17 +131,26 @@ def create_local_batch(
         raise ValueError(f"Universe missing {sorted(missing)}")
     if universe.empty or universe["asset_id"].duplicated().any():
         raise ValueError("Universe empty or duplicate asset IDs")
-    if (universe[list(required)].isna().any().any() or
-        universe[list(required)].astype(str).apply(lambda c: c.str.strip().eq("").any()).any()):
+    if (
+        universe[list(required)].isna().any().any()
+        or universe[list(required)].astype(str).apply(lambda c: c.str.strip().eq("").any()).any()
+    ):
         raise ValueError("Universe contains blank required fields")
     retrieved = retrieved_at or _utc()
     frames = []
     for record in universe.sort_values("asset_id").to_dict("records"):
-        frames.append(acquire_actions(
-            str(record["asset_id"]), str(record["yahoo_ticker"]),
-            str(record["currency"]), start=start, end=end, batch_id=batch_id,
-            ticker_factory=ticker_factory, retrieved_at=retrieved,
-        ))
+        frames.append(
+            acquire_actions(
+                str(record["asset_id"]),
+                str(record["yahoo_ticker"]),
+                str(record["currency"]),
+                start=start,
+                end=end,
+                batch_id=batch_id,
+                ticker_factory=ticker_factory,
+                retrieved_at=retrieved,
+            )
+        )
     events = pd.concat(frames, ignore_index=True)
     if events.duplicated(["asset_id", "action_type", "effective_date"]).any():
         raise ValueError("Duplicate event keys")
@@ -126,15 +161,18 @@ def create_local_batch(
     (base / "events.parquet").write_bytes(payload)
     manifest = {
         "schema": "alpha_edge_corporate_actions_v2_candidate_1",
-        "batch_id": batch_id, "created_at_utc": retrieved,
-        "start": start, "end_exclusive": end,
+        "batch_id": batch_id,
+        "created_at_utc": retrieved,
+        "start": start,
+        "end_exclusive": end,
         "assets": len(universe),
         "asset_ids": sorted(universe["asset_id"].astype(str).tolist()),
         "events": len(events),
         "dividends": int(events["action_type"].eq("DIVIDEND").sum()),
         "splits": int(events["action_type"].eq("SPLIT").sum()),
         "files_sha256": {"events.parquet": _sha(payload)},
-        "publication_state": "local_candidate_only", "s3_writes": 0,
+        "publication_state": "local_candidate_only",
+        "s3_writes": 0,
         "legacy_production_unchanged": True,
         "limitations": "Yahoo-reported splits and dividends only. Does not cover rights issues; never applies adjustment factors.",
     }
@@ -148,7 +186,10 @@ def load_verified_batch(base: Path) -> tuple[pd.DataFrame, dict]:
     if any(not f.is_file() or f.is_symlink() for f in (manifest_file, parquet_file)):
         raise ValueError("Missing or unsafe corporate-action candidate artifacts")
     manifest = json.loads(manifest_file.read_text(encoding="utf-8"))
-    if manifest.get("schema") != "alpha_edge_corporate_actions_v2_candidate_1" or manifest.get("publication_state") != "local_candidate_only":
+    if (
+        manifest.get("schema") != "alpha_edge_corporate_actions_v2_candidate_1"
+        or manifest.get("publication_state") != "local_candidate_only"
+    ):
         raise ValueError("Corporate action candidate manifest contract mismatch")
     if _sha(parquet_file.read_bytes()) != manifest.get("files_sha256", {}).get("events.parquet"):
         raise ValueError("Corporate action candidate hash mismatch")
@@ -170,10 +211,18 @@ def main() -> None:
     if "include" in u:
         u = u.loc[pd.to_numeric(u["include"], errors="coerce").fillna(0).eq(1)]
     batch_id = args.batch_id or f"{datetime.now(timezone.utc):%Y%m%dT%H%M%SZ}-{uuid.uuid4().hex[:8]}"
-    print(json.dumps(create_local_batch(
-        universe=u, start=args.start, end=args.end,
-        batch_id=batch_id, output=Path(args.output),
-    ), indent=2))
+    print(
+        json.dumps(
+            create_local_batch(
+                universe=u,
+                start=args.start,
+                end=args.end,
+                batch_id=batch_id,
+                output=Path(args.output),
+            ),
+            indent=2,
+        )
+    )
 
 
 if __name__ == "__main__":

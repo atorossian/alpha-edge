@@ -145,8 +145,7 @@ def weights_to_discrete_shares(
     if gross_in > 0 and (gross_kept / gross_in) < 0.80:
         missing_preview = ", ".join(sorted(set(missing_px))[:20])
         raise ValueError(
-            f"Too many weights missing prices (kept={gross_kept/gross_in:.1%}). "
-            f"Missing_px sample: {missing_preview}"
+            f"Too many weights missing prices (kept={gross_kept / gross_in:.1%}). Missing_px sample: {missing_preview}"
         )
 
     # drop tiny ABS weights (keeps sign)
@@ -323,12 +322,12 @@ def weights_to_discrete_shares(
     target_value = {t: float(tgt_exp[t]) for t in tgt_exp}  # SIGNED target exposure
 
     return DiscreteAllocation(
-        shares=qty,                    # signed quantities
-        target_value=target_value,     # signed exposure targets
+        shares=qty,  # signed quantities
+        target_value=target_value,  # signed exposure targets
         realized_value=realized_value,
         realized_weights=realized_weights,
         total_spent=gross_used_final,  # gross used
-        cash_left=cash_left,           # gross remaining
+        cash_left=cash_left,  # gross remaining
     )
 
 
@@ -419,13 +418,7 @@ def _weight_turnover(
 ) -> float:
     keys = set(current_weights.keys()) | set(target_weights.keys())
 
-    return float(
-        0.5
-        * sum(
-            abs(float(target_weights.get(k, 0.0)) - float(current_weights.get(k, 0.0)))
-            for k in keys
-        )
-    )
+    return float(0.5 * sum(abs(float(target_weights.get(k, 0.0)) - float(current_weights.get(k, 0.0))) for k in keys))
 
 
 def _scale_target_weights_to_daily_turnover(
@@ -457,20 +450,12 @@ def _scale_target_weights_to_daily_turnover(
     adjusted = {
         k: float(
             float(current_weights.get(k, 0.0))
-            + scale
-            * (
-                float(target_weights.get(k, 0.0))
-                - float(current_weights.get(k, 0.0))
-            )
+            + scale * (float(target_weights.get(k, 0.0)) - float(current_weights.get(k, 0.0)))
         )
         for k in keys
     }
 
-    adjusted = {
-        k: v
-        for k, v in adjusted.items()
-        if abs(float(v)) > 1e-12
-    }
+    adjusted = {k: v for k, v in adjusted.items() if abs(float(v)) > 1e-12}
 
     daily_turnover = _weight_turnover(current_weights, adjusted)
     blocked_turnover = max(0.0, full_turnover - daily_turnover)
@@ -536,10 +521,7 @@ def allocation_to_trade_deltas(
         is_blocked = False
 
         if abs(delta_value) < float(cfg.min_trade_value):
-            reason = (
-                f"abs(delta_value) {abs(delta_value):.2f} below "
-                f"min_trade_value {float(cfg.min_trade_value):.2f}"
-            )
+            reason = f"abs(delta_value) {abs(delta_value):.2f} below min_trade_value {float(cfg.min_trade_value):.2f}"
             is_blocked = True
 
         if abs(delta_qty) < float(cfg.min_trade_quantity):

@@ -4,11 +4,11 @@ No S3, network calls, server, write-back, or external JavaScript dependencies.
 Input files are verified against the immutable candidate manifest first.
 The browser reads only the snapshot embedded during report generation.
 """
+
 from __future__ import annotations
 
 import argparse
 import hashlib
-import html
 import json
 from pathlib import Path
 
@@ -19,14 +19,35 @@ from alpha_edge.market.publish_lake_v2 import validate_local_candidate
 
 
 DETAIL_FIELDS = [
-    "session_date", "asset_id", "provider_symbol", "currency_original",
-    "observation_origin", "provider", "correction_id", "verification_status",
-    "source_reference", "source_timestamp", "source_timezone",
-    "open", "high", "low", "close", "adj_close", "volume",
-    "fx_date", "fx_to_usd", "fx_age_days", "fx_quote_symbol",
-    "fx_quote_direction", "quote_close", "close_raw_usd",
-    "close_adjusted_usd", "quality_status", "quality_reason",
-    "ret_simple_close_adjusted_usd", "ret_log_close_adjusted_usd",
+    "session_date",
+    "asset_id",
+    "provider_symbol",
+    "currency_original",
+    "observation_origin",
+    "provider",
+    "correction_id",
+    "verification_status",
+    "source_reference",
+    "source_timestamp",
+    "source_timezone",
+    "open",
+    "high",
+    "low",
+    "close",
+    "adj_close",
+    "volume",
+    "fx_date",
+    "fx_to_usd",
+    "fx_age_days",
+    "fx_quote_symbol",
+    "fx_quote_direction",
+    "quote_close",
+    "close_raw_usd",
+    "close_adjusted_usd",
+    "quality_status",
+    "quality_reason",
+    "ret_simple_close_adjusted_usd",
+    "ret_log_close_adjusted_usd",
     "return_quality_status",
 ]
 MAX_EMBEDDED_ROWS = 100_000
@@ -52,10 +73,7 @@ def _serializable(value: object) -> object:
 
 
 def _records(frame: pd.DataFrame) -> list[dict]:
-    return [
-        {str(key): _serializable(value) for key, value in row.items()}
-        for row in frame.to_dict(orient="records")
-    ]
+    return [{str(key): _serializable(value) for key, value in row.items()} for row in frame.to_dict(orient="records")]
 
 
 def build_explorer_model(candidate_dir: Path) -> dict:
@@ -90,24 +108,25 @@ def build_explorer_model(candidate_dir: Path) -> dict:
     assets = []
     for aid, group in subset.groupby("asset_id", sort=True):
         asset_issues = sessions.loc[sessions["asset_id"].astype(str).eq(str(aid))]
-        assets.append({
-            "asset_id": str(aid),
-            "symbol": str(group.iloc[0]["provider_symbol"]),
-            "currency": str(group.iloc[0].get("currency_original", "")),
-            "observations": len(group),
-            "quarantined": int(group["quality_status"].eq("quarantined").sum()),
-            "manual": int(group.get("observation_origin",
-                pd.Series("", index=group.index)).eq("user_supplied_manual").sum()),
-            "session_issues": len(asset_issues),
-            "first": group["session_date"].iloc[0].date().isoformat(),
-            "last": group["session_date"].iloc[-1].date().isoformat(),
-        })
+        assets.append(
+            {
+                "asset_id": str(aid),
+                "symbol": str(group.iloc[0]["provider_symbol"]),
+                "currency": str(group.iloc[0].get("currency_original", "")),
+                "observations": len(group),
+                "quarantined": int(group["quality_status"].eq("quarantined").sum()),
+                "manual": int(
+                    group.get("observation_origin", pd.Series("", index=group.index)).eq("user_supplied_manual").sum()
+                ),
+                "session_issues": len(asset_issues),
+                "first": group["session_date"].iloc[0].date().isoformat(),
+                "last": group["session_date"].iloc[-1].date().isoformat(),
+            }
+        )
 
     return {
         "schema": "alpha_edge_lake_v2_quality_explorer_1",
-        "source_candidate_manifest_sha256": hashlib.sha256(
-            (candidate_dir / "manifest.json").read_bytes()
-        ).hexdigest(),
+        "source_candidate_manifest_sha256": hashlib.sha256((candidate_dir / "manifest.json").read_bytes()).hexdigest(),
         "candidate_acceptance": manifest.get("acceptance"),
         "publication_state": manifest.get("publication_state"),
         "files_verified": len(verified_files),
@@ -331,7 +350,8 @@ def generate_explorer(candidate_dir: Path, output: Path) -> dict:
     page = HTML_TEMPLATE.replace("__DATA__", _safe_json(model))
     output.write_text(page, encoding="utf-8")
     return {
-        "path": str(output), "assets": len(model["assets"]),
+        "path": str(output),
+        "assets": len(model["assets"]),
         "observations": len(model["observations"]),
         "candidate_acceptance": model["candidate_acceptance"],
         "source_manifest_sha256": model["source_candidate_manifest_sha256"],

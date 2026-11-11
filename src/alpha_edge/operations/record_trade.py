@@ -156,6 +156,7 @@ def _normalize_quantity_unit(x: Optional[str]) -> Optional[str]:
     }
     return unit_map.get(s, s)
 
+
 def _normalize_risk_model(x: Optional[str]) -> str:
     model = str(x or "fixed_by_asset_class").strip().lower()
 
@@ -167,12 +168,10 @@ def _normalize_risk_model(x: Optional[str]) -> str:
     }
 
     if model not in allowed:
-        raise ValueError(
-            f"risk_model must be one of {sorted(allowed)} "
-            f"(got {x!r})"
-        )
+        raise ValueError(f"risk_model must be one of {sorted(allowed)} (got {x!r})")
 
     return model
+
 
 def _normalize_indicator_mode(x: Optional[str]) -> str:
     mode = str(x or "auto").strip().lower()
@@ -180,12 +179,10 @@ def _normalize_indicator_mode(x: Optional[str]) -> str:
     allowed = {"auto", "latest", "point_in_time"}
 
     if mode not in allowed:
-        raise ValueError(
-            f"indicator_mode must be one of {sorted(allowed)} "
-            f"(got {x!r})"
-        )
+        raise ValueError(f"indicator_mode must be one of {sorted(allowed)} (got {x!r})")
 
     return mode
+
 
 # ----------------------------
 # Trade calculation engine
@@ -260,8 +257,21 @@ def _infer_asset_class(
         return "futures"
 
     fiat = {
-        "USD", "EUR", "GBP", "JPY", "CHF", "CAD", "AUD", "NZD",
-        "BRL", "MXN", "SEK", "NOK", "DKK", "CNH", "CNY",
+        "USD",
+        "EUR",
+        "GBP",
+        "JPY",
+        "CHF",
+        "CAD",
+        "AUD",
+        "NZD",
+        "BRL",
+        "MXN",
+        "SEK",
+        "NOK",
+        "DKK",
+        "CNH",
+        "CNY",
     }
 
     if "-" in t:
@@ -376,9 +386,7 @@ def _calculate_quantity_price_value(
     implied_value = _round_money(float(qty) * float(px))
 
     if value is not None and abs(implied_value - float(value)) > 0.05:
-        warnings.append(
-            f"provided value differs from quantity*price: provided={value}, implied={implied_value}"
-        )
+        warnings.append(f"provided value differs from quantity*price: provided={value}, implied={implied_value}")
 
     return float(qty), float(px), float(val), warnings
 
@@ -530,11 +538,7 @@ def _calculate_risk_contract(
     model = _normalize_risk_model(risk_model)
     params = _default_risk_params(asset_class)
 
-    holding_days = (
-        int(max_holding_days)
-        if max_holding_days is not None
-        else int(params["max_holding_days"])
-    )
+    holding_days = int(max_holding_days) if max_holding_days is not None else int(params["max_holding_days"])
 
     if holding_days <= 0:
         raise ValueError("max_holding_days must be > 0.")
@@ -545,17 +549,9 @@ def _calculate_risk_contract(
     }
 
     if model == "fixed_by_asset_class":
-        sl_pct = (
-            float(stop_loss_pct)
-            if stop_loss_pct is not None
-            else float(params["stop_loss_pct"])
-        )
+        sl_pct = float(stop_loss_pct) if stop_loss_pct is not None else float(params["stop_loss_pct"])
 
-        tp_pct = (
-            float(target_profit_pct)
-            if target_profit_pct is not None
-            else float(params["target_profit_pct"])
-        )
+        tp_pct = float(target_profit_pct) if target_profit_pct is not None else float(params["target_profit_pct"])
 
         time_method = str(params["time_barrier_method"])
 
@@ -563,21 +559,15 @@ def _calculate_risk_contract(
             {
                 "source": "fixed_by_asset_class",
                 "default_stop_loss_pct": params["stop_loss_pct"],
-                "default_target_profit_pct": (
-                    params["target_profit_pct"]
-                ),
+                "default_target_profit_pct": (params["target_profit_pct"]),
                 "stop_loss_overridden": stop_loss_pct is not None,
-                "target_profit_overridden": (
-                    target_profit_pct is not None
-                ),
+                "target_profit_overridden": (target_profit_pct is not None),
             }
         )
 
     else:
         if not asset_id:
-            raise ValueError(
-                f"asset_id is required for risk_model={model!r}."
-            )
+            raise ValueError(f"asset_id is required for risk_model={model!r}.")
 
         indicator_snapshot = load_indicator_snapshot(
             cfg=cfg,
@@ -586,27 +576,19 @@ def _calculate_risk_contract(
             mode=_normalize_indicator_mode(indicator_mode),
             latest_snapshot_key=indicators_snapshot_key,
             historical_root_prefix=indicators_root_prefix,
-            max_staleness_days=int(
-                max_indicator_staleness_days
-            ),
+            max_staleness_days=int(max_indicator_staleness_days),
         )
 
         model_config = MarketRiskModelConfig(
             atr_stop_multiplier=float(atr_stop_multiplier),
             atr_target_multiplier=float(atr_target_multiplier),
-            volatility_stop_multiplier=float(
-                volatility_stop_multiplier
-            ),
-            volatility_target_multiplier=float(
-                volatility_target_multiplier
-            ),
+            volatility_stop_multiplier=float(volatility_stop_multiplier),
+            volatility_target_multiplier=float(volatility_target_multiplier),
             reward_multiple=float(reward_multiple),
             min_stop_pct=float(min_stop_pct),
             max_stop_pct=float(max_stop_pct),
             max_target_pct=float(max_target_pct),
-            max_indicator_staleness_days=int(
-                max_indicator_staleness_days
-            ),
+            max_indicator_staleness_days=int(max_indicator_staleness_days),
         )
 
         calculated = calculate_indicator_backed_risk_percentages(
@@ -617,39 +599,21 @@ def _calculate_risk_contract(
         )
 
         # Explicit SL/TP values remain available as deliberate overrides.
-        sl_pct = (
-            float(stop_loss_pct)
-            if stop_loss_pct is not None
-            else float(calculated["stop_loss_pct"])
-        )
+        sl_pct = float(stop_loss_pct) if stop_loss_pct is not None else float(calculated["stop_loss_pct"])
 
-        tp_pct = (
-            float(target_profit_pct)
-            if target_profit_pct is not None
-            else float(calculated["target_profit_pct"])
-        )
+        tp_pct = float(target_profit_pct) if target_profit_pct is not None else float(calculated["target_profit_pct"])
 
         time_method = "market_indicator_calendar_days"
 
         risk_calculation_inputs.update(
             {
                 "source": "market_indicators",
-                "indicator_snapshot": (
-                    indicator_snapshot.as_dict()
-                ),
-                "market_model_inputs": calculated[
-                    "model_inputs"
-                ],
-                "calculated_stop_loss_pct": calculated[
-                    "stop_loss_pct"
-                ],
-                "calculated_target_profit_pct": calculated[
-                    "target_profit_pct"
-                ],
+                "indicator_snapshot": (indicator_snapshot.as_dict()),
+                "market_model_inputs": calculated["model_inputs"],
+                "calculated_stop_loss_pct": calculated["stop_loss_pct"],
+                "calculated_target_profit_pct": calculated["target_profit_pct"],
                 "stop_loss_overridden": stop_loss_pct is not None,
-                "target_profit_overridden": (
-                    target_profit_pct is not None
-                ),
+                "target_profit_overridden": (target_profit_pct is not None),
             }
         )
 
@@ -660,32 +624,19 @@ def _calculate_risk_contract(
         raise ValueError("target_profit_pct must be > 0.")
 
     if sl_pct >= 1:
-        raise ValueError(
-            "stop_loss_pct must be below 1.0."
-        )
+        raise ValueError("stop_loss_pct must be below 1.0.")
 
     if tp_pct >= 1:
-        raise ValueError(
-            "target_profit_pct must be below 1.0 so short-trade "
-            "targets remain positive."
-        )
+        raise ValueError("target_profit_pct must be below 1.0 so short-trade targets remain positive.")
 
     is_long = position_effect in {"open_long", "add_long"}
 
     if is_long:
-        stop_loss_price = _round_price(
-            float(price) * (1.0 - sl_pct)
-        )
-        target_profit_price = _round_price(
-            float(price) * (1.0 + tp_pct)
-        )
+        stop_loss_price = _round_price(float(price) * (1.0 - sl_pct))
+        target_profit_price = _round_price(float(price) * (1.0 + tp_pct))
     else:
-        stop_loss_price = _round_price(
-            float(price) * (1.0 + sl_pct)
-        )
-        target_profit_price = _round_price(
-            float(price) * (1.0 - tp_pct)
-        )
+        stop_loss_price = _round_price(float(price) * (1.0 + sl_pct))
+        target_profit_price = _round_price(float(price) * (1.0 - tp_pct))
 
     risk_amount = _round_money(float(value) * sl_pct)
     target_profit_amount = _round_money(float(value) * tp_pct)
@@ -698,9 +649,7 @@ def _calculate_risk_contract(
         "target_profit_pct": float(tp_pct),
         "risk_amount": risk_amount,
         "target_profit_amount": target_profit_amount,
-        "risk_reward_ratio": _round_price(
-            float(tp_pct) / float(sl_pct)
-        ),
+        "risk_reward_ratio": _round_price(float(tp_pct) / float(sl_pct)),
         "max_holding_days": holding_days,
         "expiry_date": _calculate_expiry_date(
             as_of=as_of,
@@ -712,10 +661,9 @@ def _calculate_risk_contract(
         "barrier_hit_at_utc": None,
         "barrier_hit_price": None,
         "barrier_hit_type": None,
-        "risk_calculation_inputs": (
-            risk_calculation_inputs
-        ),
+        "risk_calculation_inputs": (risk_calculation_inputs),
     }
+
 
 def _calculate_trade_fields(
     *,
@@ -785,8 +733,7 @@ def _calculate_trade_fields(
     if position_effect in {"close_long", "close_short", "reduce_long", "reduce_short"}:
         if pnl_fields["reported_pnl"] is None and pnl_fields["calculated_pnl"] is None:
             warnings.append(
-                "close/reduce trade has no reported_pnl and insufficient open_value/entry_price "
-                "to calculate pnl"
+                "close/reduce trade has no reported_pnl and insufficient open_value/entry_price to calculate pnl"
             )
 
     risk_fields = _calculate_risk_contract(
@@ -805,17 +752,11 @@ def _calculate_trade_fields(
         indicator_mode=indicator_mode,
         indicators_snapshot_key=indicators_snapshot_key,
         indicators_root_prefix=indicators_root_prefix,
-        max_indicator_staleness_days=(
-            max_indicator_staleness_days
-        ),
+        max_indicator_staleness_days=(max_indicator_staleness_days),
         atr_stop_multiplier=atr_stop_multiplier,
         atr_target_multiplier=atr_target_multiplier,
-        volatility_stop_multiplier=(
-            volatility_stop_multiplier
-        ),
-        volatility_target_multiplier=(
-            volatility_target_multiplier
-        ),
+        volatility_stop_multiplier=(volatility_stop_multiplier),
+        volatility_target_multiplier=(volatility_target_multiplier),
         reward_multiple=reward_multiple,
         min_stop_pct=min_stop_pct,
         max_stop_pct=max_stop_pct,
@@ -852,17 +793,11 @@ def _calculate_trade_fields(
             "indicator_mode": indicator_mode,
             "indicators_snapshot_key": indicators_snapshot_key,
             "indicators_root_prefix": indicators_root_prefix,
-            "max_indicator_staleness_days": (
-                max_indicator_staleness_days
-            ),
+            "max_indicator_staleness_days": (max_indicator_staleness_days),
             "atr_stop_multiplier": atr_stop_multiplier,
             "atr_target_multiplier": atr_target_multiplier,
-            "volatility_stop_multiplier": (
-                volatility_stop_multiplier
-            ),
-            "volatility_target_multiplier": (
-                volatility_target_multiplier
-            ),
+            "volatility_stop_multiplier": (volatility_stop_multiplier),
+            "volatility_target_multiplier": (volatility_target_multiplier),
             "reward_multiple": reward_multiple,
             "min_stop_pct": min_stop_pct,
             "max_stop_pct": max_stop_pct,
@@ -871,6 +806,7 @@ def _calculate_trade_fields(
         },
         "calculation_warnings": warnings or None,
     }
+
 
 # ----------------------------
 # Universe lookup
@@ -937,19 +873,19 @@ def _resolve_asset_id_from_universe(
             return aid, ref
 
         if len(m2) > 1:
-            sample_cols = [c for c in ["asset_id", "broker_ticker", "ticker", "yahoo_ticker", "name"] if c in df.columns]
+            sample_cols = [
+                c for c in ["asset_id", "broker_ticker", "ticker", "yahoo_ticker", "name"] if c in df.columns
+            ]
             sample = m2[sample_cols].head(10).to_dict("records")
             raise RuntimeError(
-                f"Ambiguous universe mapping for ticker={bt}: {len(m2)} rows match (ref={ref}). "
-                f"Sample={sample}"
+                f"Ambiguous universe mapping for ticker={bt}: {len(m2)} rows match (ref={ref}). Sample={sample}"
             )
 
     if len(m) > 1:
         sample_cols = [c for c in ["asset_id", "broker_ticker", "ticker", "yahoo_ticker", "name"] if c in df.columns]
         sample = m[sample_cols].head(10).to_dict("records")
         raise RuntimeError(
-            f"Ambiguous universe mapping for broker_ticker={bt}: {len(m)} rows match (ref={ref}). "
-            f"Sample={sample}"
+            f"Ambiguous universe mapping for broker_ticker={bt}: {len(m)} rows match (ref={ref}). Sample={sample}"
         )
 
     raise RuntimeError(f"No universe mapping for broker_ticker/ticker={bt} (ref={ref}).")
@@ -1013,7 +949,7 @@ def _rebuild_trades_index(
 
         resp = s3.list_objects_v2(**kwargs)
 
-        for it in (resp.get("Contents") or []):
+        for it in resp.get("Contents") or []:
             k = str(it.get("Key", "") or "")
             if not k:
                 continue
@@ -1230,7 +1166,6 @@ def record_trade(
     indicators_snapshot_key: Optional[str] = None,
     indicators_root_prefix: Optional[str] = None,
     max_indicator_staleness_days: int = 10,
-
     atr_stop_multiplier: float = 2.0,
     atr_target_multiplier: float = 4.0,
     volatility_stop_multiplier: float = 1.0,
@@ -1271,14 +1206,11 @@ def record_trade(
 
     if strict_universe and not asset_id_norm:
         raise ValueError(
-            "asset_id could not be resolved (strict mode). "
-            "Provide --asset-id or --universe-path/--universe-key."
+            "asset_id could not be resolved (strict mode). Provide --asset-id or --universe-path/--universe-key."
         )
 
     risk_model_norm = _normalize_risk_model(risk_model)
-    indicator_mode_norm = _normalize_indicator_mode(
-        indicator_mode
-    )
+    indicator_mode_norm = _normalize_indicator_mode(indicator_mode)
 
     calc = _calculate_trade_fields(
         cfg=cfg,
@@ -1342,19 +1274,15 @@ def record_trade(
         quantity_unit=unit_norm,
         value=value_norm,
         reported_pnl=reported_pnl_norm,
-
         asset_class=calc["asset_class"],
         position_effect=calc["position_effect"],
-
         entry_price=calc["entry_price"],
         exit_price=calc["exit_price"],
         open_value=calc["open_value"],
         close_value=calc["close_value"],
-
         calculated_pnl=calc["calculated_pnl"],
         pnl_diff=calc["pnl_diff"],
         pnl_source=calc["pnl_source"],
-
         risk_model=calc["risk_model"],
         stop_loss_price=calc["stop_loss_price"],
         target_profit_price=calc["target_profit_price"],
@@ -1363,16 +1291,13 @@ def record_trade(
         risk_amount=calc["risk_amount"],
         target_profit_amount=calc["target_profit_amount"],
         risk_reward_ratio=calc["risk_reward_ratio"],
-
         max_holding_days=calc["max_holding_days"],
         expiry_date=calc["expiry_date"],
         time_barrier_method=calc["time_barrier_method"],
-
         barrier_status=calc["barrier_status"],
         barrier_hit_at_utc=calc["barrier_hit_at_utc"],
         barrier_hit_price=calc["barrier_hit_price"],
         barrier_hit_type=calc["barrier_hit_type"],
-
         calculation_method=calc["calculation_method"],
         calculation_inputs=calc["calculation_inputs"],
         calculation_warnings=calc["calculation_warnings"],
@@ -1752,7 +1677,9 @@ def parse_args() -> argparse.Namespace:
     ap.add_argument("--new-as-of", default=None)
     ap.add_argument("--no-backup", action="store_true")
 
-    ap.add_argument("--reason", default=None, help="Business reason for edit/migration/correction. Recommended for audit trail.")
+    ap.add_argument(
+        "--reason", default=None, help="Business reason for edit/migration/correction. Recommended for audit trail."
+    )
     ap.add_argument("--dry-run", action="store_true")
 
     ap.add_argument(
@@ -1776,18 +1703,14 @@ def parse_args() -> argparse.Namespace:
         "--indicators-snapshot-key",
         default=None,
         help=(
-            "Override latest indicators snapshot key. Default is "
-            "<market_root>/snapshots/v1/latest_indicators.parquet."
+            "Override latest indicators snapshot key. Default is <market_root>/snapshots/v1/latest_indicators.parquet."
         ),
     )
 
     ap.add_argument(
         "--indicators-root-prefix",
         default=None,
-        help=(
-            "Override historical indicator root. Default is "
-            "<market_root>/indicators/v1."
-        ),
+        help=("Override historical indicator root. Default is <market_root>/indicators/v1."),
     )
 
     ap.add_argument(
@@ -1869,7 +1792,6 @@ def main() -> None:
             migrate_trades_index(cfg=cfg, dry_run=bool(args.dry_run), run_id=run_id, input_args=input_args)
             return
 
-
         if args.mode == "delete":
             if not args.trade_id:
                 raise ValueError("--trade-id is required for --mode delete")
@@ -1900,7 +1822,7 @@ def main() -> None:
             if args.reported_pnl is not None:
                 patch["reported_pnl"] = float(args.reported_pnl)
             if args.note is not None:
-                patch["note"] = (str(args.note) if args.note else None)
+                patch["note"] = str(args.note) if args.note else None
             if args.side is not None:
                 patch["side"] = _validate_side(args.side)
             if args.quantity is not None:
@@ -1929,10 +1851,7 @@ def main() -> None:
             if getattr(args, name) in (None, ""):
                 raise ValueError(f"--{name.replace('_', '-')} is required for --mode record")
 
-        provided_economics = sum(
-            getattr(args, name) is not None
-            for name in ["quantity", "price", "value"]
-        )
+        provided_economics = sum(getattr(args, name) is not None for name in ["quantity", "price", "value"])
 
         if provided_economics < 2:
             raise ValueError("For --mode record, provide at least two of --quantity, --price, --value.")
@@ -1975,17 +1894,11 @@ def main() -> None:
             indicator_mode=args.indicator_mode,
             indicators_snapshot_key=args.indicators_snapshot_key,
             indicators_root_prefix=args.indicators_root_prefix,
-            max_indicator_staleness_days=int(
-                args.max_indicator_staleness_days
-            ),
+            max_indicator_staleness_days=int(args.max_indicator_staleness_days),
             atr_stop_multiplier=float(args.atr_stop_multiplier),
             atr_target_multiplier=float(args.atr_target_multiplier),
-            volatility_stop_multiplier=float(
-                args.volatility_stop_multiplier
-            ),
-            volatility_target_multiplier=float(
-                args.volatility_target_multiplier
-            ),
+            volatility_stop_multiplier=float(args.volatility_stop_multiplier),
+            volatility_target_multiplier=float(args.volatility_target_multiplier),
             reward_multiple=float(args.reward_multiple),
             min_stop_pct=float(args.min_stop_pct),
             max_stop_pct=float(args.max_stop_pct),

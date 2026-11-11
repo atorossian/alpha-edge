@@ -3,6 +3,7 @@
 Run from src/: poetry run python -m alpha_edge.quality.compare_crypto_source_history
 Never writes to S3. A matching Yahoo price is not proof that a source price is correct.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -16,7 +17,11 @@ from alpha_edge.core.market_store import MarketStore
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--validate-local-replacements", action="store_true", help="Validate existing full-year files against S3 manifests without Yahoo downloads")
+    ap.add_argument(
+        "--validate-local-replacements",
+        action="store_true",
+        help="Validate existing full-year files against S3 manifests without Yahoo downloads",
+    )
     ap.add_argument("--repair-run-id", default="aea87_crypto_20261027")
     ap.add_argument("--universe", default="../data/universe/universe.csv")
     ap.add_argument("--tickers", default="DOGE-USD,HYPE-USD,FIL-USD,SOL-USD,ADA-USD")
@@ -29,18 +34,24 @@ def main():
 
     if args.validate_local_replacements:
         import json
+
         manifest = Path(args.out) / "full_year_replacement_manifest.json"
         entries = json.loads(manifest.read_text(encoding="utf-8"))
         store = MarketStore(bucket=args.bucket, region=args.region)
         for entry in entries:
             candidate = Path(entry["filename"])
             if not candidate.exists():
-                candidate = Path(args.out) / "full_year_replacements" / Path(entry["filename"].replace("\\\\", "/")).name
+                candidate = (
+                    Path(args.out) / "full_year_replacements" / Path(entry["filename"].replace("\\\\", "/")).name
+                )
             report = store.promote_ohlcv_year_repair(
-                asset_id=entry["asset_id"], year=int(entry["year"]),
-                local_path=str(candidate), expected_sha256=entry["sha256"],
+                asset_id=entry["asset_id"],
+                year=int(entry["year"]),
+                local_path=str(candidate),
+                expected_sha256=entry["sha256"],
                 expected_patched_dates=int(entry["patched_dates"]),
-                run_id=args.repair_run_id, execute=False,
+                run_id=args.repair_run_id,
+                execute=False,
             )
             print(report)
         print("VALIDATION PASSED — NO S3 WRITES")
@@ -61,7 +72,9 @@ def main():
         aliases = {requested, requested.replace("-", ""), requested.replace("/", "-")}
         rows = universe.loc[symbol.isin(aliases) | ticker.isin(aliases)].copy()
         if len(rows) != 1:
-            summaries.append({"requested": requested, "status": "AMBIGUOUS_OR_MISSING_UNIVERSE_MATCH", "matches": len(rows)})
+            summaries.append(
+                {"requested": requested, "status": "AMBIGUOUS_OR_MISSING_UNIVERSE_MATCH", "matches": len(rows)}
+            )
             continue
         row = rows.iloc[0]
         aid = str(row["asset_id"]).strip()
@@ -77,7 +90,9 @@ def main():
         stored = stored.sort_values("date")
         duplicate_count = int(stored.duplicated("date").sum())
         stored = stored.drop_duplicates("date", keep="last")
-        raw = yf.download(sym, start=args.start, end=args.end, auto_adjust=False, progress=False, threads=False, interval="1d")
+        raw = yf.download(
+            sym, start=args.start, end=args.end, auto_adjust=False, progress=False, threads=False, interval="1d"
+        )
         if raw.empty:
             summaries.append({"requested": requested, "asset_id": aid, "yahoo_ticker": sym, "status": "YAHOO_EMPTY"})
             continue
@@ -100,8 +115,14 @@ def main():
         # Stage complete replacement OHLCV bars locally, never just a close
         # price patch. Rebuilding from entire bars preserves OHLC invariants.
         if different.any():
-            fields = {"Open": "open", "High": "high", "Low": "low",
-                      "Close": "close", "Adj Close": "adj_close", "Volume": "volume"}
+            fields = {
+                "Open": "open",
+                "High": "high",
+                "Low": "low",
+                "Close": "close",
+                "Adj Close": "adj_close",
+                "Volume": "volume",
+            }
             raw_bars = pd.DataFrame(index=raw.index)
             for yf_field, target in fields.items():
                 source = raw[yf_field] if yf_field in raw.columns.get_level_values(0) else None
@@ -122,7 +143,9 @@ def main():
             numeric = patches[["open", "high", "low", "close", "adj_close"]].apply(pd.to_numeric, errors="coerce")
             if not np.isfinite(numeric.to_numpy(dtype=float)).all() or (numeric <= 0).any().any():
                 raise ValueError(f"{sym}: invalid staged Yahoo OHLCV bars")
-            if (numeric["high"] < numeric[["open", "close", "low"]].max(axis=1)).any() or (numeric["low"] > numeric[["open", "close", "high"]].min(axis=1)).any():
+            if (numeric["high"] < numeric[["open", "close", "low"]].max(axis=1)).any() or (
+                numeric["low"] > numeric[["open", "close", "high"]].min(axis=1)
+            ).any():
                 raise ValueError(f"{sym}: inconsistent staged OHLC values")
             patches["asset_id"] = aid
             patches["yahoo_ticker"] = sym
@@ -133,15 +156,22 @@ def main():
             patches["close_usd"] = patches["close"]
             patches["adj_close_usd"] = patches["adj_close"]
             staged_bars.append(patches)
-        summaries.append({
-            "requested": requested, "asset_id": aid, "yahoo_ticker": sym, "status": "COMPARED",
-            "s3_rows": int(len(stored)), "fresh_rows": int(len(fresh)),
-            "overlap": int(both.sum()), "diff_over_1pct": int(different.sum()),
-            "s3_only": int(joined["_merge"].eq("left_only").sum()),
-            "yahoo_only": int(joined["_merge"].eq("right_only").sum()),
-            "duplicate_s3_dates": duplicate_count,
-            "max_relative_error": float(joined.loc[both, "relative_error"].max()) if both.any() else None,
-        })
+        summaries.append(
+            {
+                "requested": requested,
+                "asset_id": aid,
+                "yahoo_ticker": sym,
+                "status": "COMPARED",
+                "s3_rows": int(len(stored)),
+                "fresh_rows": int(len(fresh)),
+                "overlap": int(both.sum()),
+                "diff_over_1pct": int(different.sum()),
+                "s3_only": int(joined["_merge"].eq("left_only").sum()),
+                "yahoo_only": int(joined["_merge"].eq("right_only").sum()),
+                "duplicate_s3_dates": duplicate_count,
+                "max_relative_error": float(joined.loc[both, "relative_error"].max()) if both.any() else None,
+            }
+        )
         print(summaries[-1])
     pd.DataFrame(summaries).to_csv(out / "summary.csv", index=False)
     if details:
@@ -155,7 +185,7 @@ def main():
             & all_dates["fresh_close"].notna()
             & np.isfinite(all_dates["fresh_close"])
             & all_dates["fresh_close"].gt(0),
-            ["asset_id", "requested", "date", "stored_close", "fresh_close", "relative_error"]
+            ["asset_id", "requested", "date", "stored_close", "fresh_close", "relative_error"],
         ].copy()
         bad = bad.rename(columns={"stored_close": "old_close", "fresh_close": "proposed_close"})
         bad["action"] = "REVIEW_ONLY_NO_S3_WRITE"
@@ -171,6 +201,7 @@ def main():
         # affected dates: the canonical store writes one Parquet per asset-year.
         import hashlib
         import json
+
         year_reports = []
         for (asset_id, year), group in patch.groupby(["asset_id", patch["date"].dt.year]):
             year_start = f"{int(year)}-01-01"
@@ -189,9 +220,19 @@ def main():
                 old = patched.loc[date]
                 if str(old["asset_id"]) != asset_id or str(old["currency"]).upper() != "USD":
                     raise ValueError(f"{asset_id} {date}: asset or currency mismatch")
-                for col in ["open", "high", "low", "close", "adj_close", "volume",
-                            "fx_to_usd", "close_raw_usd", "close_adjusted_usd",
-                            "close_usd", "adj_close_usd"]:
+                for col in [
+                    "open",
+                    "high",
+                    "low",
+                    "close",
+                    "adj_close",
+                    "volume",
+                    "fx_to_usd",
+                    "close_raw_usd",
+                    "close_adjusted_usd",
+                    "close_usd",
+                    "adj_close_usd",
+                ]:
                     if col in patched.columns:
                         patched.at[date, col] = bar[col]
             repaired = patched.reset_index(drop=True).sort_values("date")
@@ -200,19 +241,25 @@ def main():
             unchanged = ~repaired["date"].isin(set(group["date"]))
             before = original.set_index("date").sort_index()
             after = repaired.set_index("date").sort_index()
-            if not before.loc[~before.index.isin(group["date"])].equals(
-                after.loc[~after.index.isin(group["date"])]
-            ):
+            if not before.loc[~before.index.isin(group["date"])].equals(after.loc[~after.index.isin(group["date"])]):
                 raise ValueError(f"{asset_id} {year}: unrelated rows were changed")
             local_name = asset_id.replace(":", "_").replace("/", "_") + f"_{int(year)}.parquet"
             local_file = out / "full_year_replacements" / local_name
             local_file.parent.mkdir(parents=True, exist_ok=True)
             repaired.to_parquet(local_file, index=False)
             digest = hashlib.sha256(local_file.read_bytes()).hexdigest()
-            year_reports.append({"asset_id": asset_id, "year": int(year),
-                                 "source_rows": len(original), "output_rows": len(repaired),
-                                 "patched_dates": len(group), "filename": str(local_file),
-                                 "sha256": digest, "status": "LOCAL_STAGING_ONLY"})
+            year_reports.append(
+                {
+                    "asset_id": asset_id,
+                    "year": int(year),
+                    "source_rows": len(original),
+                    "output_rows": len(repaired),
+                    "patched_dates": len(group),
+                    "filename": str(local_file),
+                    "sha256": digest,
+                    "status": "LOCAL_STAGING_ONLY",
+                }
+            )
         (out / "full_year_replacement_manifest.json").write_text(
             json.dumps(year_reports, indent=2, default=str), encoding="utf-8"
         )

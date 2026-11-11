@@ -5,6 +5,7 @@ runs independent arithmetic validation, then publishes a *research candidate*
 bundle to isolated dev/market/lake_v2/backfills. Never activates a pointer
 or promotes production. Skips already verified S3 commits on resume.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -30,6 +31,7 @@ def _sha_bytes(blob: bytes) -> str:
 
 def _get_remote(s3, bucket: str, key: str) -> bytes | None:
     from botocore.exceptions import ClientError
+
     try:
         return s3.get_object(Bucket=bucket, Key=key)["Body"].read()
     except ClientError as exc:
@@ -60,8 +62,7 @@ def verify_commit(s3, bucket: str, prefix: str, plan_hash: str) -> dict | None:
     return committed
 
 
-def upload_verified(s3, *, bucket: str, prefix: str,
-                    local_dir: Path, plan_hash: str, end: str) -> dict:
+def upload_verified(s3, *, bucket: str, prefix: str, local_dir: Path, plan_hash: str, end: str) -> dict:
     if verify_commit(s3, bucket, prefix, plan_hash) is not None:
         raise S3BackfillError("Cohort already committed")
     entries = inventory(local_dir)
@@ -78,24 +79,25 @@ def upload_verified(s3, *, bucket: str, prefix: str,
             raise S3BackfillError(f"Remote verification failed: {key}")
     marker = {
         "schema": "alpha_edge_s3_backfill_commit_v2_1",
-        "plan_manifest_sha256": plan_hash, "prefix": prefix,
-        "end_exclusive": end, "files": entries,
+        "plan_manifest_sha256": plan_hash,
+        "prefix": prefix,
+        "end_exclusive": end,
+        "files": entries,
         "storage_state": "verified_research_candidate",
         "production_eligible": False,
     }
     encoded = (json.dumps(marker, sort_keys=True, indent=2) + "\n").encode()
-    s3.put_object(Bucket=bucket, Key=_commit_key(prefix),
-                  Body=encoded, ContentType="application/json", IfNoneMatch="*")
+    s3.put_object(Bucket=bucket, Key=_commit_key(prefix), Body=encoded, ContentType="application/json", IfNoneMatch="*")
     if _read_remote_sha(s3, bucket, _commit_key(prefix)) != _sha_bytes(encoded):
         raise S3BackfillError("S3 commit marker verification failed")
     return marker
 
 
-def restore_plan_from_archive(s3, *, bucket: str, archive_id: str,
-                              relative_dir: str, destination: Path) -> Path:
+def restore_plan_from_archive(s3, *, bucket: str, archive_id: str, relative_dir: str, destination: Path) -> Path:
     """Retrieve an already verified archive's plan without persistent local files."""
     from alpha_edge.market.archive_local_outputs_v2 import archive_prefix
     from pathlib import PurePosixPath
+
     prefix = archive_prefix(archive_id)
     manifest_blob = _get_remote(s3, bucket, f"{prefix}/_verified_inventory.json")
     if manifest_blob is None:
@@ -104,9 +106,13 @@ def restore_plan_from_archive(s3, *, bucket: str, archive_id: str,
     if manifest.get("schema") != "alpha_edge_local_output_archive_v2_1":
         raise S3BackfillError("Unexpected archive schema")
     parts = PurePosixPath(relative_dir).parts
-    if (not parts or any(p in ("", ".", "..") for p in parts)
-            or relative_dir.startswith(("/", "\\")) or "\\" in relative_dir
-            or ":" in relative_dir):
+    if (
+        not parts
+        or any(p in ("", ".", "..") for p in parts)
+        or relative_dir.startswith(("/", "\\"))
+        or "\\" in relative_dir
+        or ":" in relative_dir
+    ):
         raise S3BackfillError("Unsafe S3 plan relative directory")
     begin = "/".join(parts) + "/"
     entries = [x for x in manifest["files"] if x["path"].startswith(begin)]
@@ -114,7 +120,7 @@ def restore_plan_from_archive(s3, *, bucket: str, archive_id: str,
         raise S3BackfillError("Archive lacks the requested preflight plan")
     destination.mkdir(parents=True, exist_ok=False)
     for entry in entries:
-        name = entry["path"][len(begin):]
+        name = entry["path"][len(begin) :]
         segments = PurePosixPath(name).parts
         if not segments or any(p in ("", ".", "..") for p in segments):
             raise S3BackfillError("Unsafe archived plan entry")
@@ -129,8 +135,9 @@ def restore_plan_from_archive(s3, *, bucket: str, archive_id: str,
     return destination
 
 
-def run(*, plan_dir: Path, bucket: str, end: str, execute: bool,
-        start_cohort: int, max_cohorts: int, s3, retries: int = 2) -> dict:
+def run(
+    *, plan_dir: Path, bucket: str, end: str, execute: bool, start_cohort: int, max_cohorts: int, s3, retries: int = 2
+) -> dict:
     if not bucket or not end or not 0 <= retries <= 3:
         raise S3BackfillError("Invalid S3 full-history parameters")
     plan, cohorts, _ = load_plan(plan_dir)
@@ -142,8 +149,11 @@ def run(*, plan_dir: Path, bucket: str, end: str, execute: bool,
     base = f"dev/market/lake_v2/backfills/{plan_hash[:24]}/end-{end}"
     if not execute:
         return {
-            "status": "dry_run", "plan_assets": plan["assets_included"],
-            "selected_cohorts": len(indices), "first": start_cohort, "last": last,
+            "status": "dry_run",
+            "plan_assets": plan["assets_included"],
+            "selected_cohorts": len(indices),
+            "first": start_cohort,
+            "last": last,
             "s3_target": f"s3://{bucket}/{base}",
             "s3_writes": 0,
         }
@@ -152,8 +162,7 @@ def run(*, plan_dir: Path, bucket: str, end: str, execute: bool,
         prefix = f"{base}/cohort-{index:04d}"
         complete = verify_commit(s3, bucket, prefix, plan_hash)
         if complete:
-            summaries.append({"cohort": index, "state": "s3_verified_existing",
-                              "files": len(complete["files"])})
+            summaries.append({"cohort": index, "state": "s3_verified_existing", "files": len(complete["files"])})
             continue
         # Local bytes only live under OS temp directory and are removed at
         # context exit; uploads must be verified before we mark success.
@@ -161,46 +170,51 @@ def run(*, plan_dir: Path, bucket: str, end: str, execute: bool,
             temp_root = Path(temp)
             run_dir = temp_root / "execution"
             result = run_cohort(
-                plan_dir=plan_dir, output=run_dir,
-                batch_prefix=f"s3bf-{index:04d}", start=None, end=end,
-                full_history=True, execute=True, start_cohort=index,
-                max_cohorts=1, retries=retries,
+                plan_dir=plan_dir,
+                output=run_dir,
+                batch_prefix=f"s3bf-{index:04d}",
+                start=None,
+                end=end,
+                full_history=True,
+                execute=True,
+                start_cohort=index,
+                max_cohorts=1,
+                retries=retries,
             )
             if result["state"] != "complete":
                 summaries.append({"cohort": index, "state": "acquisition_failed"})
                 continue
-            bronze = (run_dir / "bronze_batches" /
-                      f"s3bf-{index:04d}-{index:04d}")
+            bronze = run_dir / "bronze_batches" / f"s3bf-{index:04d}-{index:04d}"
             if not (bronze / "manifest.json").is_file():
                 raise S3BackfillError("No complete immutable Bronze batch")
             audit_dir = temp_root / "audit"
-            audit_missing(bronze, plan_dir / f"cohort_{index:04d}.csv",
-                          plan_dir / "fx_config.csv", audit_dir)
+            audit_missing(bronze, plan_dir / f"cohort_{index:04d}.csv", plan_dir / "fx_config.csv", audit_dir)
             candidate_dir = temp_root / "candidate"
             standardize(
-                bronze, output=candidate_dir,
+                bronze,
+                output=candidate_dir,
                 asset_registry_csv=plan_dir / f"cohort_{index:04d}.csv",
                 fx_registry_csv=plan_dir / "fx_config.csv",
             )
             acceptance(
-                candidate_dir=candidate_dir, bronze_dir=bronze,
+                candidate_dir=candidate_dir,
+                bronze_dir=bronze,
                 output=temp_root / "acceptance",
                 asset_registry_csv=plan_dir / f"cohort_{index:04d}.csv",
                 fx_registry_csv=plan_dir / "fx_config.csv",
             )
-            committed = upload_verified(s3, bucket=bucket, prefix=prefix,
-                                        local_dir=temp_root, plan_hash=plan_hash,
-                                        end=end)
-            summaries.append({"cohort": index, "state": "s3_verified",
-                              "files": len(committed["files"])})
+            committed = upload_verified(
+                s3, bucket=bucket, prefix=prefix, local_dir=temp_root, plan_hash=plan_hash, end=end
+            )
+            summaries.append({"cohort": index, "state": "s3_verified", "files": len(committed["files"])})
     return {
         "schema": "alpha_edge_s3_backfill_execution_v2_1",
         "plan_assets": plan["assets_included"],
         "attempted_cohorts": len(indices),
-        "s3_verified_cohorts": sum(
-            row["state"].startswith("s3_verified") for row in summaries),
+        "s3_verified_cohorts": sum(row["state"].startswith("s3_verified") for row in summaries),
         "failed_cohorts": sum(row["state"] == "acquisition_failed" for row in summaries),
-        "results": summaries, "production_eligible": False,
+        "results": summaries,
+        "production_eligible": False,
         "persistent_repo_outputs": False,
     }
 
@@ -220,23 +234,38 @@ def main():
     p.add_argument("--execute", action="store_true")
     args = p.parse_args()
     import boto3
+
     s3 = boto3.client("s3", region_name=args.region)
     if args.plan_archive_id:
         with tempfile.TemporaryDirectory(prefix="alpha_edge_preflight_") as temp:
             plan = restore_plan_from_archive(
-                s3, bucket=args.bucket, archive_id=args.plan_archive_id,
+                s3,
+                bucket=args.bucket,
+                archive_id=args.plan_archive_id,
                 relative_dir=args.plan_relative_path,
                 destination=Path(temp) / "plan",
             )
-            result = run(plan_dir=plan, bucket=args.bucket,
-                         end=args.end, execute=args.execute,
-                         start_cohort=args.start_cohort,
-                         max_cohorts=args.max_cohorts, retries=args.retries, s3=s3)
+            result = run(
+                plan_dir=plan,
+                bucket=args.bucket,
+                end=args.end,
+                execute=args.execute,
+                start_cohort=args.start_cohort,
+                max_cohorts=args.max_cohorts,
+                retries=args.retries,
+                s3=s3,
+            )
     else:
-        result = run(plan_dir=args.plan_dir, bucket=args.bucket,
-                     end=args.end, execute=args.execute,
-                     start_cohort=args.start_cohort,
-                     max_cohorts=args.max_cohorts, retries=args.retries, s3=s3)
+        result = run(
+            plan_dir=args.plan_dir,
+            bucket=args.bucket,
+            end=args.end,
+            execute=args.execute,
+            start_cohort=args.start_cohort,
+            max_cohorts=args.max_cohorts,
+            retries=args.retries,
+            s3=s3,
+        )
     print(json.dumps(result, indent=2))
 
 

@@ -5,6 +5,7 @@ market prices or modifies active market manifests, snapshots, or caches.
 A journal proves published dates at cutover; it is not a guarantee that no
 subsequent market ingest changed active histories. The report says so.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -113,11 +114,16 @@ def audit_asset(aid, tables, source):
     if asset_class in {"UNKNOWN", ""}:
         problems.append("UNKNOWN_ASSET_CLASS")
     return {
-        "asset_id": aid, "provider_symbol": (source or {}).get("yahoo_ticker"),
-        "exchange": exchange, "asset_class": asset_class,
-        "price_dates": len(p), "return_dates": len(r),
-        "weekend_count": len(weekend), "weekend_dates_sample": weekend[:12],
-        "invalid_dates_sample": invalid[:12], "issues": sorted(set(problems)),
+        "asset_id": aid,
+        "provider_symbol": (source or {}).get("yahoo_ticker"),
+        "exchange": exchange,
+        "asset_class": asset_class,
+        "price_dates": len(p),
+        "return_dates": len(r),
+        "weekend_count": len(weekend),
+        "weekend_dates_sample": weekend[:12],
+        "invalid_dates_sample": invalid[:12],
+        "issues": sorted(set(problems)),
         "status": "REVIEW_REQUIRED" if problems else "PASSED_WEEKEND_AND_DATE_CONSISTENCY",
         "calendar_scope": "WEEKEND_ONLY; EXCHANGE_HOLIDAYS_NOT_YET_VERIFIED",
     }
@@ -125,15 +131,12 @@ def audit_asset(aid, tables, source):
 
 def run(s3, bucket, release, *, workers=8, write_report=True):
     result = _json(s3, bucket, f"{ROOT}/{release}/result.json")
-    if result.get("release_id") != release or result.get("status") not in (
-        "COMPLETED", "COMPLETED_WITH_EXCEPTIONS"
-    ):
+    if result.get("release_id") != release or result.get("status") not in ("COMPLETED", "COMPLETED_WITH_EXCEPTIONS"):
         raise RuntimeError("Release is incomplete")
     published = set(result["published"])
     source_ids = _run_source_ids(result)
     with ThreadPoolExecutor(max_workers=workers) as pool:
-        jobs = [pool.submit(_batch_info, s3, bucket, release, i)
-                for i in range(1, len(source_ids) + 1)]
+        jobs = [pool.submit(_batch_info, s3, bucket, release, i) for i in range(1, len(source_ids) + 1)]
         ops = [op for future in as_completed(jobs) for op in future.result()]
         jobs = [pool.submit(_source_info, s3, bucket, run_id) for run_id in source_ids]
         sources = {}
@@ -145,8 +148,9 @@ def run(s3, bucket, release, *, workers=8, write_report=True):
                 sources[aid] = info
     by_asset = _dates_from_ops(ops, published)
     if set(by_asset) != published:
-        raise RuntimeError("Published assets are missing from publication evidence: " +
-                           str(len(published - set(by_asset))))
+        raise RuntimeError(
+            "Published assets are missing from publication evidence: " + str(len(published - set(by_asset)))
+        )
     details = [audit_asset(aid, by_asset[aid], sources.get(aid)) for aid in sorted(published)]
     counts = Counter(x["status"] for x in details)
     problems = Counter(issue for x in details for issue in x["issues"])
@@ -159,17 +163,29 @@ def run(s3, bucket, release, *, workers=8, write_report=True):
         "inspected_assets": len(details),
         "status_counts": dict(counts),
         "issue_counts": dict(problems),
-        "scope": ("IMMUTABLE_PUBLICATION_EVIDENCE; WEEKEND_AND_DATE_SET_AUDIT;"
-                  " NOT_EXCHANGE_HOLIDAY_VERIFICATION; NOT_CURRENT_LIVE_DRIFT_PROOF"),
+        "scope": (
+            "IMMUTABLE_PUBLICATION_EVIDENCE; WEEKEND_AND_DATE_SET_AUDIT;"
+            " NOT_EXCHANGE_HOLIDAY_VERIFICATION; NOT_CURRENT_LIVE_DRIFT_PROOF"
+        ),
         "market_data_modified": False,
         "assets": details,
     }
     if write_report:
-        key = (AUDIT_ROOT + "/" + datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-               + "_" + uuid.uuid4().hex[:8] + "/report.json")
-        s3.put_object(Bucket=bucket, Key=key,
-                      Body=json.dumps(report, indent=2).encode(),
-                      ContentType="application/json", IfNoneMatch="*")
+        key = (
+            AUDIT_ROOT
+            + "/"
+            + datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+            + "_"
+            + uuid.uuid4().hex[:8]
+            + "/report.json"
+        )
+        s3.put_object(
+            Bucket=bucket,
+            Key=key,
+            Body=json.dumps(report, indent=2).encode(),
+            ContentType="application/json",
+            IfNoneMatch="*",
+        )
         report["report_uri"] = f"s3://{bucket}/{key}"
     print(json.dumps({k: v for k, v in report.items() if k != "assets"}, indent=2))
     return report

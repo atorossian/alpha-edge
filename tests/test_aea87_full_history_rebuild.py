@@ -4,11 +4,17 @@ from alpha_edge.market.aea87_full_history_rebuild import build_candidate, compar
 
 
 def sample():
-    return pd.DataFrame({
-        "date": pd.to_datetime(["2024-11-28", "2024-11-29", "2024-12-01"]),
-        "Open": [1., 6., 8.], "High": [1., 6., 8.],
-        "Low": [1., 6., 8.], "Close": [1., 6., 8.],
-        "Adj Close": [1., 6., 8.], "Volume": [5., 6., 7.]})
+    return pd.DataFrame(
+        {
+            "date": pd.to_datetime(["2024-11-28", "2024-11-29", "2024-12-01"]),
+            "Open": [1.0, 6.0, 8.0],
+            "High": [1.0, 6.0, 8.0],
+            "Low": [1.0, 6.0, 8.0],
+            "Close": [1.0, 6.0, 8.0],
+            "Adj Close": [1.0, 6.0, 8.0],
+            "Volume": [5.0, 6.0, 7.0],
+        }
+    )
 
 
 def test_inception_and_return_no_pre_inception_bridge():
@@ -16,7 +22,7 @@ def test_inception_and_return_no_pre_inception_bridge():
     assert status == "STAGED_FOR_REVIEW"
     assert list(prices["date"].dt.strftime("%Y-%m-%d")) == ["2024-11-29", "2024-12-01"]
     assert pd.isna(returns["ret_close_adjusted_usd"].iloc[0])
-    assert abs(returns["ret_close_adjusted_usd"].iloc[1] - (8/6-1)) < 1e-9
+    assert abs(returns["ret_close_adjusted_usd"].iloc[1] - (8 / 6 - 1)) < 1e-9
 
 
 def test_non_usd_requires_fx():
@@ -33,7 +39,7 @@ def test_missing_days_not_filled():
 def test_compare_detects_bad_existing_price():
     new, _, _ = build_candidate(sample(), "A", "USD")
     old = new.copy()
-    old.loc[1, "close_adjusted_usd"] = .01
+    old.loc[1, "close_adjusted_usd"] = 0.01
     report = compare_histories(old, new)
     assert report["disagreements_gt_1pct"] == 1
 
@@ -41,11 +47,18 @@ def test_compare_detects_bad_existing_price():
 def test_all_null_yahoo_placeholder_not_in_usd_candidate():
     import pandas as pd
     from alpha_edge.market.aea87_full_history_rebuild import build_candidate
-    frame = pd.DataFrame({
-        "date":pd.to_datetime(["2026-02-01", "2026-02-02", "2026-02-03"]),
-        "Open":[10.0, None, 12.0], "High":[11.0, None, 13.0],
-        "Low":[9.0, None, 11.0], "Close":[10.0, None, 12.0],
-        "Adj Close":[10.0, None, 12.0], "Volume":[1.0, 0.0, 1.0]})
+
+    frame = pd.DataFrame(
+        {
+            "date": pd.to_datetime(["2026-02-01", "2026-02-02", "2026-02-03"]),
+            "Open": [10.0, None, 12.0],
+            "High": [11.0, None, 13.0],
+            "Low": [9.0, None, 11.0],
+            "Close": [10.0, None, 12.0],
+            "Adj Close": [10.0, None, 12.0],
+            "Volume": [1.0, 0.0, 1.0],
+        }
+    )
     prices, returns, status = build_candidate(frame, "CRYPTO:HYPE-USD", "USD")
     assert status == "STAGED_FOR_REVIEW"
     assert prices["date"].dt.strftime("%Y-%m-%d").tolist() == ["2026-02-01", "2026-02-03"]
@@ -55,10 +68,10 @@ def test_all_null_yahoo_placeholder_not_in_usd_candidate():
 def test_legacy_history_without_adjusted_column_does_not_abort_comparison():
     import pandas as pd
     from alpha_edge.market.aea87_full_history_rebuild import compare_histories
+
     dates = pd.to_datetime(["2025-01-02", "2025-01-03"])
-    legacy = pd.DataFrame({"asset_id":["A","A"],"date":dates,"close":[10.,11.]})
-    fresh = pd.DataFrame({"asset_id":["A","A"],"date":dates,
-                          "close_adjusted_usd":[10.,11.]})
+    legacy = pd.DataFrame({"asset_id": ["A", "A"], "date": dates, "close": [10.0, 11.0]})
+    fresh = pd.DataFrame({"asset_id": ["A", "A"], "date": dates, "close_adjusted_usd": [10.0, 11.0]})
     result = compare_histories(legacy, fresh)
     assert result["old_rows"] == 2
     assert result["new_rows"] == 2

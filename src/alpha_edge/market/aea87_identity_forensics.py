@@ -1,4 +1,5 @@
 """Read-only identity-focused forensic screening for active Alpha Edge S3 histories."""
+
 from __future__ import annotations
 
 import argparse
@@ -16,15 +17,24 @@ from alpha_edge import paths
 from alpha_edge.core.market_store import MarketStore
 
 PRICE = "close_adjusted_usd"
-RETURN_TYPES = {"ret_adj_close_usd": "simple", "ret_close_adjusted_usd": "simple",
-                "ret_log_close_adjusted_usd": "log"}
+RETURN_TYPES = {"ret_adj_close_usd": "simple", "ret_close_adjusted_usd": "simple", "ret_log_close_adjusted_usd": "log"}
 
 
 def normalize(prices, returns, asset_id, inception=None, jump=0.5, tolerance=1e-5):
     """Preserve absent prices separately; never equate a missing value to an invalid quote."""
-    columns = ["asset_id", "date", "flag", "previous_price", PRICE,
-               "recomputed_return", "stored_return", "return_type",
-               "discrepancy", "classification", "severity"]
+    columns = [
+        "asset_id",
+        "date",
+        "flag",
+        "previous_price",
+        PRICE,
+        "recomputed_return",
+        "stored_return",
+        "return_type",
+        "discrepancy",
+        "classification",
+        "severity",
+    ]
     if prices.empty:
         return pd.DataFrame(columns=columns), pd.DataFrame()
     p = prices.loc[prices["asset_id"].astype(str) == asset_id].copy()
@@ -52,9 +62,9 @@ def normalize(prices, returns, asset_id, inception=None, jump=0.5, tolerance=1e-
                 break
         if "stored_return" in r:
             p = p.drop(columns=["stored_return", "return_type"]).merge(
-                r[["date", "stored_return", "return_type"]], on="date", how="left", validate="one_to_one")
-    target = p["recomputed_log_return"].where(p["return_type"].eq("log"),
-                                             p["recomputed_return"])
+                r[["date", "stored_return", "return_type"]], on="date", how="left", validate="one_to_one"
+            )
+    target = p["recomputed_log_return"].where(p["return_type"].eq("log"), p["recomputed_return"])
     p["discrepancy"] = (p["stored_return"] - target).abs()
     missing = p[PRICE].isna()
     invalid = p[PRICE].notna() & (~np.isfinite(p[PRICE]) | p[PRICE].le(0))
@@ -63,12 +73,17 @@ def normalize(prices, returns, asset_id, inception=None, jump=0.5, tolerance=1e-
     early = p["date"].lt(pd.Timestamp(inception)) if inception else pd.Series(False, index=p.index)
     duplicate = p["date"].isin(duplicate_dates)
     flagged = invalid | large | mismatch | early | duplicate
-    d = p.loc[flagged, ["date", "previous_price", PRICE, "recomputed_return",
-                        "stored_return", "return_type", "discrepancy"]].copy()
+    d = p.loc[
+        flagged, ["date", "previous_price", PRICE, "recomputed_return", "stored_return", "return_type", "discrepancy"]
+    ].copy()
     d.insert(0, "asset_id", asset_id)
-    labels = [(invalid, "invalid_price"), (large, "large_move_review"),
-              (mismatch, "return_mismatch"), (early, "pre_inception"),
-              (duplicate, "duplicate_date")]
+    labels = [
+        (invalid, "invalid_price"),
+        (large, "large_move_review"),
+        (mismatch, "return_mismatch"),
+        (early, "pre_inception"),
+        (duplicate, "duplicate_date"),
+    ]
     d["flag"] = ["|".join(label for mask, label in labels if bool(mask.loc[i])) for i in d.index]
     d["classification"] = "REVIEW_REQUIRED"
     d["severity"] = d["recomputed_return"].abs().clip(upper=100).fillna(0) + d["discrepancy"].fillna(0)
@@ -93,45 +108,46 @@ def load_boundaries(path):
 
 def plot_case(frame, flags, output, inception=None, window=40):
     import matplotlib
+
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
+
     focus = flags.sort_values("severity", ascending=False).iloc[0]["date"]
-    local = frame[frame["date"].between(focus - pd.Timedelta(days=window),
-                                         focus + pd.Timedelta(days=window))]
+    local = frame[frame["date"].between(focus - pd.Timedelta(days=window), focus + pd.Timedelta(days=window))]
     fig, axs = plt.subplots(3, 1, figsize=(12, 10))
     axs[0].plot(frame["date"], frame[PRICE])
     axs[0].set_title("Full adjusted USD price history")
     axs[1].plot(local["date"], local[PRICE], marker=".", lw=1)
     axs[1].set_title("Suspected identity boundary / price discontinuity")
     axs[2].plot(local["date"], local["recomputed_return"], label="recomputed simple")
-    axs[2].plot(local["date"], local["stored_return"], label="stored (see return_type)", alpha=.7)
+    axs[2].plot(local["date"], local["stored_return"], label="stored (see return_type)", alpha=0.7)
     axs[2].legend()
     for ax in axs:
-        ax.axvline(focus, ls="--", alpha=.7)
+        ax.axvline(focus, ls="--", alpha=0.7)
         if inception:
-            ax.axvline(pd.Timestamp(inception), color="red", ls=":", alpha=.75)
-        ax.grid(alpha=.2)
+            ax.axvline(pd.Timestamp(inception), color="red", ls=":", alpha=0.75)
+        ax.grid(alpha=0.2)
     fig.suptitle(str(flags.iloc[0]["asset_id"]))
     fig.tight_layout()
     buffer = io.BytesIO()
-    fig.savefig(buffer, format='png', dpi=140)
+    fig.savefig(buffer, format="png", dpi=140)
     plt.close(fig)
     return buffer.getvalue()
 
 
 def run(args):
     # S3 is the primary and only evidence destination; no local reports are written.
-    run_id = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ') + '_' + uuid.uuid4().hex[:8]
-    prefix = f'market/repairs/aea87/forensics/v1/runs/{run_id}'
-    s3 = boto3.client('s3', region_name=args.region)
+    run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "_" + uuid.uuid4().hex[:8]
+    prefix = f"market/repairs/aea87/forensics/v1/runs/{run_id}"
+    s3 = boto3.client("s3", region_name=args.region)
     artifacts = []
+
     def save(name, body, content_type):
         if isinstance(body, str):
-            body = body.encode('utf-8')
-        key = prefix + '/' + name
-        s3.put_object(Bucket=args.bucket, Key=key, Body=body,
-                      ContentType=content_type, IfNoneMatch='*')
-        artifacts.append({'key':key,'bytes':len(body)})
+            body = body.encode("utf-8")
+        key = prefix + "/" + name
+        s3.put_object(Bucket=args.bucket, Key=key, Body=body, ContentType=content_type, IfNoneMatch="*")
+        artifacts.append({"key": key, "bytes": len(body)})
 
     boundaries = load_boundaries(args.inception_csv)
     store = MarketStore(bucket=args.bucket, region=args.region)
@@ -142,13 +158,16 @@ def run(args):
     if args.asset_ids:
         ids = [s.strip() for s in args.asset_ids.split(",") if s.strip()]
     if args.max_assets:
-        ids = ids[:args.max_assets]
+        ids = ids[: args.max_assets]
     print(f"[forensics] {len(ids)} assets, READ ONLY", flush=True)
+
     def one(aid):
         price = store.read_ohlcv_usd([aid], start=args.start, end=args.end)
         returns = store.read_returns_usd([aid], start=args.start, end=args.end)
-        return normalize(price, returns, aid, inception=boundaries.get(aid),
-                         jump=args.threshold, tolerance=args.tolerance)
+        return normalize(
+            price, returns, aid, inception=boundaries.get(aid), jump=args.threshold, tolerance=args.tolerance
+        )
+
     findings, candidates, errors = [], [], []
     with ThreadPoolExecutor(max_workers=args.workers) as pool:
         futures = {pool.submit(one, aid): aid for aid in ids}
@@ -169,42 +188,83 @@ def run(args):
                 errors.append({"asset_id": aid, "error": str(exc)})
             if n % 50 == 0 or n == len(ids):
                 print(f"[forensics] {n}/{len(ids)} done; candidates={len(candidates)} errors={len(errors)}", flush=True)
-    cols = ["asset_id", "date", "flag", "previous_price", PRICE,
-            "recomputed_return", "stored_return", "return_type", "discrepancy",
-            "classification", "severity"]
+    cols = [
+        "asset_id",
+        "date",
+        "flag",
+        "previous_price",
+        PRICE,
+        "recomputed_return",
+        "stored_return",
+        "return_type",
+        "discrepancy",
+        "classification",
+        "severity",
+    ]
     anomalies = pd.concat(findings, ignore_index=True) if findings else pd.DataFrame(columns=cols)
     save("anomalies.csv", anomalies.to_csv(index=False), "text/csv")
     save("read_errors.csv", pd.DataFrame(errors, columns=["asset_id", "error"]).to_csv(index=False), "text/csv")
     ranking = []
     for score, aid, flags, frame in sorted(candidates, key=lambda x: x[0], reverse=True):
-        ranking.append({"asset_id": aid, "identity_priority_score": score,
-                        "first_observation": str(frame["date"].min().date()),
-                        "inception_date": boundaries.get(aid, ""),
-                        "flagged_rows": len(flags),
-                        "pre_inception_rows": int(flags["flag"].str.contains("pre_inception").sum()),
-                        "return_mismatch_rows": int(flags["flag"].str.contains("return_mismatch").sum()),
-                        "large_move_rows": int(flags["flag"].str.contains("large_move_review").sum())})
-    save("candidates.csv", pd.DataFrame(ranking, columns=["asset_id","identity_priority_score","first_observation",
-                                   "inception_date","flagged_rows","pre_inception_rows",
-                                   "return_mismatch_rows","large_move_rows"]).to_csv(index=False), "text/csv")
+        ranking.append(
+            {
+                "asset_id": aid,
+                "identity_priority_score": score,
+                "first_observation": str(frame["date"].min().date()),
+                "inception_date": boundaries.get(aid, ""),
+                "flagged_rows": len(flags),
+                "pre_inception_rows": int(flags["flag"].str.contains("pre_inception").sum()),
+                "return_mismatch_rows": int(flags["flag"].str.contains("return_mismatch").sum()),
+                "large_move_rows": int(flags["flag"].str.contains("large_move_review").sum()),
+            }
+        )
+    save(
+        "candidates.csv",
+        pd.DataFrame(
+            ranking,
+            columns=[
+                "asset_id",
+                "identity_priority_score",
+                "first_observation",
+                "inception_date",
+                "flagged_rows",
+                "pre_inception_rows",
+                "return_mismatch_rows",
+                "large_move_rows",
+            ],
+        ).to_csv(index=False),
+        "text/csv",
+    )
 
-    for i, (_, aid, flags, frame) in enumerate(sorted(candidates, key=lambda x: x[0], reverse=True)[:args.plots], 1):
+    for i, (_, aid, flags, frame) in enumerate(sorted(candidates, key=lambda x: x[0], reverse=True)[: args.plots], 1):
         case = "forensic_cases/" + (f"{i:02d}_" + "".join(c if c.isalnum() else "_" for c in aid))
         save(case + "/price_evidence.png", plot_case(frame, flags, None, inception=boundaries.get(aid)), "image/png")
-        save(case + "/evidence.json", json.dumps({
-            "asset_id":aid, "validated_inception":boundaries.get(aid),
-            "observed_first_date":str(frame["date"].min().date()),
-            "flags":flags["flag"].value_counts().to_dict(),
-            "status":"REVIEW_REQUIRED; no automated deletion or confirmation"
-        }, indent=2), "application/json")
-    report = {"assets_scanned":len(ids),"candidate_assets":len(candidates),
-              "flagged_observations":len(anomalies),"read_errors":len(errors),
-              "plots":min(args.plots,len(candidates)),
-              "inception_rules":len(boundaries),
-              "production_modified":False}
+        save(
+            case + "/evidence.json",
+            json.dumps(
+                {
+                    "asset_id": aid,
+                    "validated_inception": boundaries.get(aid),
+                    "observed_first_date": str(frame["date"].min().date()),
+                    "flags": flags["flag"].value_counts().to_dict(),
+                    "status": "REVIEW_REQUIRED; no automated deletion or confirmation",
+                },
+                indent=2,
+            ),
+            "application/json",
+        )
+    report = {
+        "assets_scanned": len(ids),
+        "candidate_assets": len(candidates),
+        "flagged_observations": len(anomalies),
+        "read_errors": len(errors),
+        "plots": min(args.plots, len(candidates)),
+        "inception_rules": len(boundaries),
+        "production_modified": False,
+    }
     report["s3_prefix"] = f"s3://{args.bucket}/{prefix}/"
     save("summary.json", json.dumps(report, indent=2), "application/json")
-    save("manifest.json", json.dumps({"run_id":run_id,"artifacts":artifacts}, indent=2), "application/json")
+    save("manifest.json", json.dumps({"run_id": run_id, "artifacts": artifacts}, indent=2), "application/json")
     print(json.dumps(report, indent=2), flush=True)
     if errors:
         raise RuntimeError("Failed asset reads; consult read_errors.csv")
@@ -221,7 +281,7 @@ def main():
     parser.add_argument("--asset-ids")
     parser.add_argument("--max-assets", type=int)
     parser.add_argument("--workers", type=int, default=8)
-    parser.add_argument("--threshold", type=float, default=.50)
+    parser.add_argument("--threshold", type=float, default=0.50)
     parser.add_argument("--tolerance", type=float, default=1e-5)
     parser.add_argument("--plots", type=int, default=15)
     args = parser.parse_args()

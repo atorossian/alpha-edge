@@ -7,6 +7,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+
 # -----------------------------
 # Alpha / regression utilities
 # -----------------------------
@@ -90,7 +91,7 @@ def _capm_alpha_beta(
     y_hat = alpha_daily + beta * x
     resid = y - y_hat
 
-    ss_res = float(np.sum(resid ** 2))
+    ss_res = float(np.sum(resid**2))
     ss_tot = float(np.sum((y - y_mean) ** 2))
     r2 = float("nan") if ss_tot <= 0 else float(1.0 - ss_res / ss_tot)
 
@@ -98,7 +99,7 @@ def _capm_alpha_beta(
     resid_vol_ann = float(resid_std * math.sqrt(ann_factor)) if np.isfinite(resid_std) else float("nan")
 
     s2 = float(ss_res / max(n - 2, 1))
-    s_alpha = float(math.sqrt(s2 * (1.0 / n + (x_mean ** 2) / sxx))) if n > 2 else float("nan")
+    s_alpha = float(math.sqrt(s2 * (1.0 / n + (x_mean**2) / sxx))) if n > 2 else float("nan")
     t_alpha = float(alpha_daily / s_alpha) if (np.isfinite(s_alpha) and s_alpha > 0) else float("nan")
 
     return {
@@ -185,7 +186,11 @@ def _regime_alpha_report(
         te_ann = float(np.std(a, ddof=1) * math.sqrt(ann_factor)) if len(a) > 1 else float("nan")
         ir = float(excess_ann / te_ann) if (np.isfinite(te_ann) and te_ann > 0) else float("nan")
 
-        capm = _capm_alpha_beta(g["p"], g["b"], rf_daily=0.0, ann_factor=ann_factor, min_n=min_n) if len(g) >= min_n else None
+        capm = (
+            _capm_alpha_beta(g["p"], g["b"], rf_daily=0.0, ann_factor=ann_factor, min_n=min_n)
+            if len(g) >= min_n
+            else None
+        )
 
         out["by_label"][str(lbl)] = {
             "n": int(len(g)),
@@ -244,7 +249,9 @@ def compute_alpha_report(
     }
 
     if regime_labels is not None:
-        out["regimes"] = _regime_alpha_report(p, b, _to_series(regime_labels, "regime"), ann_factor=ann_factor, min_n=40)
+        out["regimes"] = _regime_alpha_report(
+            p, b, _to_series(regime_labels, "regime"), ann_factor=ann_factor, min_n=40
+        )
 
     return out
 

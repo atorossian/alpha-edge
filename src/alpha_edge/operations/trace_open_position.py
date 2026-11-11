@@ -21,14 +21,47 @@ CLOSE_QTY_EPS = 5e-8
 LOT_EPS = 1e-9
 
 _FX_BASES = {
-    "EUR", "USD", "GBP", "JPY", "CHF", "AUD", "NZD", "CAD",
-    "SEK", "NOK", "DKK", "CNH", "HKD", "SGD", "MXN", "ZAR",
+    "EUR",
+    "USD",
+    "GBP",
+    "JPY",
+    "CHF",
+    "AUD",
+    "NZD",
+    "CAD",
+    "SEK",
+    "NOK",
+    "DKK",
+    "CNH",
+    "HKD",
+    "SGD",
+    "MXN",
+    "ZAR",
 }
 
 _CRYPTO_BASES = {
-    "BTC", "ETH", "ADA", "XRP", "DOT", "BCH", "LTC", "SOL",
-    "DOGE", "SUI", "HBAR", "DASH", "BNB", "AVAX", "LINK",
-    "MATIC", "ATOM", "NEAR", "UNI", "AAVE", "TRX", "ETC",
+    "BTC",
+    "ETH",
+    "ADA",
+    "XRP",
+    "DOT",
+    "BCH",
+    "LTC",
+    "SOL",
+    "DOGE",
+    "SUI",
+    "HBAR",
+    "DASH",
+    "BNB",
+    "AVAX",
+    "LINK",
+    "MATIC",
+    "ATOM",
+    "NEAR",
+    "UNI",
+    "AAVE",
+    "TRX",
+    "ETC",
     "QTUM",
 }
 
@@ -64,9 +97,29 @@ def _normalize_unit(u: Optional[str]) -> Optional[str]:
     if s in {"ounce", "ounces"}:
         return "ounces"
     if s in {
-        "btc", "eth", "sol", "ada", "xrp", "dot", "ltc", "bnb",
-        "avax", "link", "matic", "atom", "near", "uni", "aave",
-        "trx", "etc", "doge", "hbar", "sui", "dash", "bch", "qtum",
+        "btc",
+        "eth",
+        "sol",
+        "ada",
+        "xrp",
+        "dot",
+        "ltc",
+        "bnb",
+        "avax",
+        "link",
+        "matic",
+        "atom",
+        "near",
+        "uni",
+        "aave",
+        "trx",
+        "etc",
+        "doge",
+        "hbar",
+        "sui",
+        "dash",
+        "bch",
+        "qtum",
     }:
         return "coins"
     if s in {"derivative", "derivatives"}:
@@ -545,29 +598,13 @@ def trace_open_position(
         event["error"] = "Unsupported SPOT combination"
         events.append(event)
 
-    remaining_spot_long = [
-        asdict(lot)
-        for _, lots in spot_long_lots.items()
-        for lot in lots
-    ]
+    remaining_spot_long = [asdict(lot) for _, lots in spot_long_lots.items() for lot in lots]
 
-    remaining_spot_short = [
-        asdict(lot)
-        for _, lots in spot_short_lots.items()
-        for lot in lots
-    ]
+    remaining_spot_short = [asdict(lot) for _, lots in spot_short_lots.items() for lot in lots]
 
-    remaining_notional_long = [
-        asdict(lot)
-        for _, lots in notional_long_lots.items()
-        for lot in lots
-    ]
+    remaining_notional_long = [asdict(lot) for _, lots in notional_long_lots.items() for lot in lots]
 
-    remaining_notional_short = [
-        asdict(lot)
-        for _, lots in notional_short_lots.items()
-        for lot in lots
-    ]
+    remaining_notional_short = [asdict(lot) for _, lots in notional_short_lots.items() for lot in lots]
 
     return {
         "events": events,
@@ -595,7 +632,6 @@ def parse_args() -> argparse.Namespace:
 
 
 def _main_impl(args: argparse.Namespace, cfg: RuntimeConfig) -> None:
-
     if not args.ticker and not args.asset_id:
         raise ValueError("Provide at least --ticker or --asset-id")
 

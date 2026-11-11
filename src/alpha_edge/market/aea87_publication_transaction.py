@@ -3,6 +3,7 @@
 S3 has no multi-object transaction. The journal makes writes recoverable, but
 readers MUST be stopped throughout activation, cache rebuild, and verification.
 """
+
 from __future__ import annotations
 import hashlib
 import json
@@ -27,34 +28,35 @@ def put_once(s3, bucket, key, value):
 
 
 def write_event(s3, bucket, root, step, state, **extra):
-    payload = json.dumps({"step":step, "state":state, **extra}, sort_keys=True).encode()
+    payload = json.dumps({"step": step, "state": state, **extra}, sort_keys=True).encode()
     put_once(s3, bucket, f"{root}/events/{step:08d}.json", payload)
 
 
 def entries(s3, bucket, root):
-    pages = s3.get_paginator("list_objects_v2").paginate(Bucket=bucket, Prefix=root+"/events/")
+    pages = s3.get_paginator("list_objects_v2").paginate(Bucket=bucket, Prefix=root + "/events/")
     keys = sorted(obj["Key"] for page in pages for obj in page.get("Contents", []))
-    return [json.loads(fetch(s3,bucket,k)) for k in keys]
+    return [json.loads(fetch(s3, bucket, k)) for k in keys]
 
 
 def safe_restore(s3, bucket, op):
-    current = fetch(s3,bucket,op["manifest_key"])
+    current = fetch(s3, bucket, op["manifest_key"])
     actual = checksum(current)
     if actual == op["before_sha"]:
         return
     if actual != op["after_sha"]:
-        raise RuntimeError("Concurrent change prevents rollback: "+op["manifest_key"])
-    original = fetch(s3,bucket,op["backup_key"]) if op.get("backup_key") else None
+        raise RuntimeError("Concurrent change prevents rollback: " + op["manifest_key"])
+    original = fetch(s3, bucket, op["backup_key"]) if op.get("backup_key") else None
     if checksum(original) != op["before_sha"]:
-        raise RuntimeError("Missing/corrupt backup: "+op["manifest_key"])
+        raise RuntimeError("Missing/corrupt backup: " + op["manifest_key"])
     if original is None:
-        s3.delete_object(Bucket=bucket,Key=op["manifest_key"])
+        s3.delete_object(Bucket=bucket, Key=op["manifest_key"])
     else:
-        s3.put_object(Bucket=bucket,Key=op["manifest_key"],Body=original,ContentType="application/json")
+        s3.put_object(Bucket=bucket, Key=op["manifest_key"], Body=original, ContentType="application/json")
 
 
 def _parallel(items, fn, workers, label, progress_every=200):
     from concurrent.futures import ThreadPoolExecutor, as_completed
+
     done, errors = 0, []
     with ThreadPoolExecutor(max_workers=workers) as pool:
         futures = {pool.submit(fn, item): item for item in items}
@@ -65,8 +67,7 @@ def _parallel(items, fn, workers, label, progress_every=200):
                 errors.append((futures[future]["manifest_key"], str(exc)))
             done += 1
             if done % progress_every == 0 or done == len(items):
-                print(f"[{label}] {done:,}/{len(items):,} ({done/len(items):.1%})",
-                      flush=True)
+                print(f"[{label}] {done:,}/{len(items):,} ({done / len(items):.1%})", flush=True)
     if errors:
         raise RuntimeError(f"{label} failed: {len(errors)} objects; first={errors[0]}")
 
@@ -95,8 +96,7 @@ def _activate_one(s3, bucket, op):
         if original is not None:
             s3.delete_object(Bucket=bucket, Key=key)
     else:
-        params = {"Bucket": bucket, "Key": key,
-                  "Body": op["after"].encode(), "ContentType": "application/json"}
+        params = {"Bucket": bucket, "Key": key, "Body": op["after"].encode(), "ContentType": "application/json"}
         if original is None:
             params["IfNoneMatch"] = "*"
         else:
@@ -111,23 +111,24 @@ def switch_manifests(s3, bucket, root, ops, workers=16, batch_size=200):
     history = entries(s3, bucket, root)
     if not history or history[-1]["state"] != "READY":
         raise RuntimeError("Publication journal is not READY")
+
     def check(op):
         if checksum(fetch(s3, bucket, op["manifest_key"])) != op["before_sha"]:
             raise RuntimeError("Manifest drift: " + op["manifest_key"])
         backup = fetch(s3, bucket, op["backup_key"]) if op.get("backup_key") else None
         if checksum(backup) != op["before_sha"]:
             raise RuntimeError("Missing backup: " + op["manifest_key"])
+
     _parallel(ops, check, workers, "activation-check")
     step = history[-1]["step"] + 1
     write_event(s3, bucket, root, step, "SWITCHING")
     try:
         for i in range(0, len(ops), batch_size):
-            batch = ops[i:i + batch_size]
+            batch = ops[i : i + batch_size]
             _parallel(batch, lambda op: _activate_one(s3, bucket, op), workers, "activate")
             step += 1
-            write_event(s3, bucket, root, step, "SWITCHING",
-                        completed=min(i + batch_size, len(ops)), total=len(ops))
-            print(f"[activate] checkpoint {min(i+batch_size,len(ops)):,}/{len(ops):,}", flush=True)
+            write_event(s3, bucket, root, step, "SWITCHING", completed=min(i + batch_size, len(ops)), total=len(ops))
+            print(f"[activate] checkpoint {min(i + batch_size, len(ops)):,}/{len(ops):,}", flush=True)
         write_event(s3, bucket, root, step + 1, "CACHE_REBUILD_REQUIRED")
     except Exception:
         rollback(s3, bucket, root, ops, workers=workers)

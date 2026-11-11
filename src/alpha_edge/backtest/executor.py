@@ -31,7 +31,10 @@ def mark_to_market(positions_qty: Dict[str, float], prices: Dict[str, float]) ->
             v += float(q) * px
     return float(v)
 
-def target_qty_from_weights(*, weights: Dict[str, float], prices: Dict[str, float], target_notional: float) -> Dict[str, float]:
+
+def target_qty_from_weights(
+    *, weights: Dict[str, float], prices: Dict[str, float], target_notional: float
+) -> Dict[str, float]:
     alloc = weights_to_discrete_shares(
         weights=weights,
         prices=prices,
@@ -41,6 +44,7 @@ def target_qty_from_weights(*, weights: Dict[str, float], prices: Dict[str, floa
         crypto_decimals=8,
     )
     return {t: float(q) for t, q in alloc.shares.items() if t != "CASH"}
+
 
 def rebalance_to_target(
     *,

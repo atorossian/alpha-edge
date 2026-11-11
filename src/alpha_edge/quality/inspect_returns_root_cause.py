@@ -5,6 +5,7 @@ This script is for triage, not production promotion. It joins bad return cells t
 source price_t, price_t-1 and price_t+1 to determine whether the bad return is
 caused by source prices, transformation, calendar alignment, or convention mismatch.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -34,7 +35,9 @@ def download_s3(uri: str, *, region: Optional[str], tmp_dir: Optional[str]) -> s
     root = Path(tmp_dir) if tmp_dir else Path(tempfile.gettempdir())
     root.mkdir(parents=True, exist_ok=True)
     local = root / f"root_cause_{Path(key).stem}{suffix}"
-    boto3.client("s3", region_name=region).download_file(bucket, key, str(local)) if region else boto3.client("s3").download_file(bucket, key, str(local))
+    boto3.client("s3", region_name=region).download_file(bucket, key, str(local)) if region else boto3.client(
+        "s3"
+    ).download_file(bucket, key, str(local))
     return str(local)
 
 
@@ -79,7 +82,21 @@ def main() -> None:
     cells["date"] = pd.to_datetime(cells["date"], errors="coerce").dt.normalize()
     cells = cells.sort_values("abs_return", ascending=False).head(args.top_n)
 
-    base_cols = [c for c in ["date", "asset_id", "ticker", "yahoo_ticker", "close", "adj_close", "adj_close_usd", "fx_rate", "source_timestamp"] if c in prices.columns]
+    base_cols = [
+        c
+        for c in [
+            "date",
+            "asset_id",
+            "ticker",
+            "yahoo_ticker",
+            "close",
+            "adj_close",
+            "adj_close_usd",
+            "fx_rate",
+            "source_timestamp",
+        ]
+        if c in prices.columns
+    ]
     px = prices[base_cols].sort_values(["asset_id", "date"]).copy()
     px["prev_date"] = px.groupby("asset_id")["date"].shift(1)
     px["next_date"] = px.groupby("asset_id")["date"].shift(-1)
@@ -92,7 +109,9 @@ def main() -> None:
     joined = cells.merge(px, on=["date", "asset_id"], how="left")
     joined["matches_log_return"] = np.isclose(joined["return"], joined["calc_log_return"], atol=1e-8, rtol=1e-6)
     joined["matches_arith_return"] = np.isclose(joined["return"], joined["calc_arith_return"], atol=1e-8, rtol=1e-6)
-    joined["reversal_next_day"] = (joined["return"] * joined["next_log_return"] < 0) & (joined["next_log_return"].abs() > 0.5)
+    joined["reversal_next_day"] = (joined["return"] * joined["next_log_return"] < 0) & (
+        joined["next_log_return"].abs() > 0.5
+    )
     joined["likely_root_cause"] = np.select(
         [
             joined["adj_close_usd"].isna(),

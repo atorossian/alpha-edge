@@ -143,6 +143,7 @@ def run_post_ingest_triage(
             write_audit_event(cfg=cfg, event=event, dry_run=False)
             raise
 
+
 def _run_post_ingest_triage_impl(
     *,
     store: MarketStore,
@@ -163,8 +164,7 @@ def _run_post_ingest_triage_impl(
         mapping_validation = pd.DataFrame()
 
     failures_path = (
-        f"s3://{store.bucket}/{store.base_prefix}/ingest_failures/"
-        f"{store.version}/dt={as_of}/failures.parquet"
+        f"s3://{store.bucket}/{store.base_prefix}/ingest_failures/{store.version}/dt={as_of}/failures.parquet"
     )
 
     if verbose:
@@ -198,8 +198,12 @@ def _run_post_ingest_triage_impl(
 
         if verbose:
             print(f"[triage] universe_loaded rows={len(universe)} include_col={'include' in universe.columns}")
-            print(f"[triage] overrides_loaded rows={len(overrides)} cols={list(overrides.columns) if not overrides.empty else []}")
-            print(f"[triage] excluded_loaded rows={len(excluded)} cols={list(excluded.columns) if not excluded.empty else []}")
+            print(
+                f"[triage] overrides_loaded rows={len(overrides)} cols={list(overrides.columns) if not overrides.empty else []}"
+            )
+            print(
+                f"[triage] excluded_loaded rows={len(excluded)} cols={list(excluded.columns) if not excluded.empty else []}"
+            )
 
             # quick look at failures
             cols = [c for c in ["ticker", "yahoo_ticker", "reason", "error"] if c in fails.columns]
@@ -212,8 +216,8 @@ def _run_post_ingest_triage_impl(
             universe=universe,
             overrides=overrides,
             excluded=excluded,
-            verbose=verbose,      # NEW
-            sample_n=sample_n,    # NEW
+            verbose=verbose,  # NEW
+            sample_n=sample_n,  # NEW
         )
 
         if verbose:
@@ -258,7 +262,6 @@ def _run_post_ingest_triage_impl(
         print(f"[triage][local] wrote csvs -> {out_dir}")
     except Exception as e:
         print(f"[triage][local][warn] could not write local triage csvs: {e}")
-
 
     if verbose:
         print("[triage] outputs_written (triage_report/suggested_overrides/suggested_exclusions + mapping artifacts)")

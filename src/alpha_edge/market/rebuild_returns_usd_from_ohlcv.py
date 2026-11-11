@@ -6,7 +6,6 @@ import io
 import json
 import uuid
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any, Dict, Optional
 
 import numpy as np

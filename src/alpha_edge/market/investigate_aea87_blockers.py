@@ -4,6 +4,7 @@ For stale manifests, compares manifest/partition contents with staged replacemen
 and identifies newer dates or divergent overlapping adjusted closes. For quarantines,
 records exact excluded dates and unresolved flagged counts, without auto-waivers.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -49,8 +50,8 @@ def _compare(staged, active, *, table):
     metric = "close_adjusted_usd" if table == "ohlcv_usd" else "ret_log_close_adjusted_usd"
     # Legacy production return partitions may predate the normalized return
     # column. Never misclassify an uncomparable column as matching data.
-    alternatives = ("ret_log_close_adjusted_usd", "ret_close_adjusted_usd",
-                    "ret_adj_close_usd")
+    alternatives = ("ret_log_close_adjusted_usd", "ret_close_adjusted_usd", "ret_adj_close_usd")
+
     def values(frame):
         if metric in frame:
             return pd.to_numeric(frame.loc[common, metric], errors="coerce").to_numpy(), metric
@@ -61,6 +62,7 @@ def _compare(staged, active, *, table):
                     if np.isfinite(simple).all() and (simple > -1).all():
                         return np.log1p(simple), column + " (converted via log1p)"
         return None, None
+
     a, staged_metric = values(staged)
     b, active_metric = values(active)
     comparable = a is not None and b is not None
@@ -125,19 +127,28 @@ def investigate(s3, bucket, market_prefix, reconciliation_id, release_plan_key):
             if (active_df["asset_id"].astype(str) != aid).any() or (stage_df["asset_id"].astype(str) != aid).any():
                 raise ValueError(f"Identity mismatch: {key}")
             comparison = _compare(stage_df, active_df, table=part["table"])
-            changes.append({"table": part["table"], "year": part["year"],
-                            "manifest_key": key, "expected_sha256": part["original_manifest_sha256"],
-                            "current_sha256": actual_sha, **comparison})
-        findings.append({
-            "asset_id": aid,
-            "release_blockers": blocked[aid]["blockers"],
-            "flagged_retained": asset["flagged_retained"],
-            "quarantine_rows": asset["quarantine_rows"],
-            "return_break_dates": asset["return_break_dates"],
-            "changed_manifests": changes,
-            "decision": "MANUAL_REVIEW_REQUIRED",
-            "promotable": False,
-        })
+            changes.append(
+                {
+                    "table": part["table"],
+                    "year": part["year"],
+                    "manifest_key": key,
+                    "expected_sha256": part["original_manifest_sha256"],
+                    "current_sha256": actual_sha,
+                    **comparison,
+                }
+            )
+        findings.append(
+            {
+                "asset_id": aid,
+                "release_blockers": blocked[aid]["blockers"],
+                "flagged_retained": asset["flagged_retained"],
+                "quarantine_rows": asset["quarantine_rows"],
+                "return_break_dates": asset["return_break_dates"],
+                "changed_manifests": changes,
+                "decision": "MANUAL_REVIEW_REQUIRED",
+                "promotable": False,
+            }
+        )
     counts = Counter(reason for x in findings for reason in x["release_blockers"])
     report = {
         "kind": "AEA87_TARGETED_REMEDIATION_EVIDENCE",
@@ -153,11 +164,14 @@ def investigate(s3, bucket, market_prefix, reconciliation_id, release_plan_key):
     }
     rid = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ") + "_" + uuid.uuid4().hex[:8]
     key = root + reconciliation_id + "/remediation/" + rid + "/report.json"
-    s3.put_object(Bucket=bucket, Key=key,
-                  Body=json.dumps(report, indent=2, sort_keys=True, default=str).encode(),
-                  ContentType="application/json", IfNoneMatch="*")
-    print(json.dumps({"blocked_assets_checked": len(findings),
-                      "blocker_counts": dict(counts)}, indent=2))
+    s3.put_object(
+        Bucket=bucket,
+        Key=key,
+        Body=json.dumps(report, indent=2, sort_keys=True, default=str).encode(),
+        ContentType="application/json",
+        IfNoneMatch="*",
+    )
+    print(json.dumps({"blocked_assets_checked": len(findings), "blocker_counts": dict(counts)}, indent=2))
     print(f"REMEDIATION_REPORT s3://{bucket}/{key}")
     return report
 
@@ -170,8 +184,13 @@ def main():
     p.add_argument("--region", default="eu-west-1")
     p.add_argument("--market-prefix", default="market")
     args = p.parse_args()
-    investigate(boto3.client("s3", region_name=args.region), args.bucket,
-                args.market_prefix, args.reconciliation_id, args.release_plan_key)
+    investigate(
+        boto3.client("s3", region_name=args.region),
+        args.bucket,
+        args.market_prefix,
+        args.reconciliation_id,
+        args.release_plan_key,
+    )
 
 
 if __name__ == "__main__":

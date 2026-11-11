@@ -3,11 +3,12 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+
 def sample_as_of_date_from_returns_cache(
     *,
     returns_wide_path: str,
     warmup_days: int = 252 * 5,
-    min_forward_days: int = 252,       # e.g. must have at least 1y after start
+    min_forward_days: int = 252,  # e.g. must have at least 1y after start
     seed: int | None = None,
 ) -> str:
     """

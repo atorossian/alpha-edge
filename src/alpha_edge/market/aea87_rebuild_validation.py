@@ -2,6 +2,7 @@
 
 S3 artifacts are staged by caller. No active writes or inferred missing prices.
 """
+
 from __future__ import annotations
 import numpy as np
 import pandas as pd
@@ -45,9 +46,14 @@ def convert_raw_with_fx(raw, fx, max_lag_days=3):
     if x.duplicated("date").any() or f.duplicated("date").any():
         raise ValueError("Duplicate date in equity or FX input")
     f = f.rename(columns={"date": "fx_quote_date"})
-    x = pd.merge_asof(x.sort_values("date"), f.sort_values("fx_quote_date"),
-                      left_on="date", right_on="fx_quote_date", direction="backward",
-                      tolerance=pd.Timedelta(days=max_lag_days))
+    x = pd.merge_asof(
+        x.sort_values("date"),
+        f.sort_values("fx_quote_date"),
+        left_on="date",
+        right_on="fx_quote_date",
+        direction="backward",
+        tolerance=pd.Timedelta(days=max_lag_days),
+    )
     x["fx_age_calendar_days"] = (x["date"] - x["fx_quote_date"]).dt.days
     for col in ("Open", "High", "Low", "Close", "Adj Close"):
         x[col + "_usd"] = pd.to_numeric(x[col], errors="coerce") * x["fx_to_usd"]
@@ -61,10 +67,14 @@ def corporate_actions_report(raw):
             out[column] = {"events": 0, "available": False}
             continue
         values = pd.to_numeric(raw[column], errors="coerce").fillna(0)
-        out[column] = {"events": int(values.ne(0).sum()), "available": True,
-                       "examples": [{"date": str(d.date()), "value": float(v)}
-                                    for d, v in zip(raw.loc[values.ne(0), "date"].head(20),
-                                                    values[values.ne(0)].head(20))]}
+        out[column] = {
+            "events": int(values.ne(0).sum()),
+            "available": True,
+            "examples": [
+                {"date": str(d.date()), "value": float(v)}
+                for d, v in zip(raw.loc[values.ne(0), "date"].head(20), values[values.ne(0)].head(20))
+            ],
+        }
     return out
 
 
@@ -85,10 +95,12 @@ def coverage_review(old, candidate, comparison, max_disagreement=0):
         reasons.append("MISSING_ADJUSTED_USD_QUOTES")
     if pd.to_numeric(candidate["close_adjusted_usd"], errors="coerce").le(0).any():
         reasons.append("INVALID_ADJUSTED_USD_QUOTES")
-    return {"status": "REVIEW_REQUIRED" if reasons else "COVERAGE_CHECK_PASSED",
-            "not_publication_approval": True,
-            "reasons": reasons,
-            "old_only_dates": [str(x.date()) for x in old_only],
-            "new_only_dates": [str(x.date()) for x in new_only],
-            "old_only_weekend_count": sum(x.weekday() >= 5 for x in old_only),
-            "old_only_weekday_count": sum(x.weekday() < 5 for x in old_only)}
+    return {
+        "status": "REVIEW_REQUIRED" if reasons else "COVERAGE_CHECK_PASSED",
+        "not_publication_approval": True,
+        "reasons": reasons,
+        "old_only_dates": [str(x.date()) for x in old_only],
+        "new_only_dates": [str(x.date()) for x in new_only],
+        "old_only_weekend_count": sum(x.weekday() >= 5 for x in old_only),
+        "old_only_weekday_count": sum(x.weekday() < 5 for x in old_only),
+    }

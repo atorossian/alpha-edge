@@ -1,56 +1,86 @@
 """Source revision comparison never uses v1 or modifies source batches."""
+
 import json
 import hashlib
 import pandas as pd
 import pytest
 
 from alpha_edge.market.compare_bronze_revisions_v2 import (
-    RevisionContractError, compare_batches, compare_table, generate,
+    RevisionContractError,
+    compare_batches,
+    generate,
 )
 
 
-def _batch(tmp_path, batch_id, *, close=25.18, fx=1.12, missing_day=False,
-           adjusted=None, date_shift=False):
+def _batch(tmp_path, batch_id, *, close=25.18, fx=1.12, missing_day=False, adjusted=None, date_shift=False):
     root = tmp_path / batch_id
     root.mkdir()
     dates = ["2026-10-27", "2026-10-28"]
     if missing_day:
         dates = dates[:1]
-    bars = pd.DataFrame([{
-        "asset_id": "A", "provider_symbol": "KESKOB.HE",
-        "currency_original": "EUR",
-        "session_date": day,
-        "source_timestamp": f"{day}T00:00:00+02:00",
-        "source_timezone": "Europe/Helsinki",
-        "open": close, "high": close + 1,
-        "low": close - 1, "close": close,
-        "adj_close": adjusted if adjusted is not None else close,
-        "volume": 1000., "dividends": 0., "stock_splits": 0.,
-    } for day in dates])
+    bars = pd.DataFrame(
+        [
+            {
+                "asset_id": "A",
+                "provider_symbol": "KESKOB.HE",
+                "currency_original": "EUR",
+                "session_date": day,
+                "source_timestamp": f"{day}T00:00:00+02:00",
+                "source_timezone": "Europe/Helsinki",
+                "open": close,
+                "high": close + 1,
+                "low": close - 1,
+                "close": close,
+                "adj_close": adjusted if adjusted is not None else close,
+                "volume": 1000.0,
+                "dividends": 0.0,
+                "stock_splits": 0.0,
+            }
+            for day in dates
+        ]
+    )
     if date_shift:
         bars.loc[0, "source_timestamp"] = "2026-10-27T00:00:00+03:00"
-    quotes = pd.DataFrame([{
-        "provider_symbol": "EURUSD=X", "session_date": day,
-        "quote_close": fx, "source_timestamp": day + "T00:00:00+00:00",
-        "source_timezone": "UTC",
-    } for day in dates])
+    quotes = pd.DataFrame(
+        [
+            {
+                "provider_symbol": "EURUSD=X",
+                "session_date": day,
+                "quote_close": fx,
+                "source_timestamp": day + "T00:00:00+00:00",
+                "source_timezone": "UTC",
+            }
+            for day in dates
+        ]
+    )
     files = {}
-    for name, frame in [("source_ohlcv.parquet", bars),
-                        ("source_fx_quotes.parquet", quotes)]:
+    for name, frame in [("source_ohlcv.parquet", bars), ("source_fx_quotes.parquet", quotes)]:
         target = root / name
         frame.to_parquet(target, index=False)
         files[name] = {"sha256": hashlib.sha256(target.read_bytes()).hexdigest()}
     manifest = {
-        "schema_version": "bronze-v2-1", "batch_id": batch_id,
+        "schema_version": "bronze-v2-1",
+        "batch_id": batch_id,
         "created_at_utc": "2026-11-10T20:04:55Z",
         "files": files,
         "sources": [
-            {"asset_id": "A", "provider_symbol": "KESKOB.HE",
-             "start": "2026-10-27", "end_exclusive": "2026-10-29",
-             "interval": "1d", "auto_adjust": False, "repair": False},
-            {"provider_symbol": "EURUSD=X",
-             "start": "2026-10-27", "end_exclusive": "2026-10-29",
-             "interval": "1d", "auto_adjust": False, "repair": False},
+            {
+                "asset_id": "A",
+                "provider_symbol": "KESKOB.HE",
+                "start": "2026-10-27",
+                "end_exclusive": "2026-10-29",
+                "interval": "1d",
+                "auto_adjust": False,
+                "repair": False,
+            },
+            {
+                "provider_symbol": "EURUSD=X",
+                "start": "2026-10-27",
+                "end_exclusive": "2026-10-29",
+                "interval": "1d",
+                "auto_adjust": False,
+                "repair": False,
+            },
         ],
     }
     (root / "manifest.json").write_text(json.dumps(manifest))
@@ -116,15 +146,31 @@ def test_read_only_output_is_immutable(tmp_path):
 
 def test_revision_materiality_classification():
     from alpha_edge.market.compare_bronze_revisions_v2 import classify_revisions
-    changes = pd.DataFrame([
-        {"asset_id": "A", "session_date": "2025-01-15",
-         "change_type": "revised", "field": "adj_close", "relative_change": 3.5e-7},
-        {"asset_id": "A", "session_date": "2026-11-09",
-         "change_type": "revised", "field": "volume", "relative_change": .02234},
-        {"asset_id": "A", "session_date": "2025-01-15",
-         "change_type": "revised", "field": "close", "relative_change": .027},
-    ])
+
+    changes = pd.DataFrame(
+        [
+            {
+                "asset_id": "A",
+                "session_date": "2025-01-15",
+                "change_type": "revised",
+                "field": "adj_close",
+                "relative_change": 3.5e-7,
+            },
+            {
+                "asset_id": "A",
+                "session_date": "2026-11-09",
+                "change_type": "revised",
+                "field": "volume",
+                "relative_change": 0.02234,
+            },
+            {
+                "asset_id": "A",
+                "session_date": "2025-01-15",
+                "change_type": "revised",
+                "field": "close",
+                "relative_change": 0.027,
+            },
+        ]
+    )
     out = classify_revisions(changes, snapshot_asof="2026-11-10T20:04:55Z")
-    assert out["materiality"].tolist() == [
-        "immaterial_numeric", "provisional_volume", "requires_review"
-    ]
+    assert out["materiality"].tolist() == ["immaterial_numeric", "provisional_volume", "requires_review"]

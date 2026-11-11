@@ -37,7 +37,7 @@ metrics = evaluate_portfolio_candidate(
     days=252,
     n_paths=20000,
     lambda_ruin=0.5,
-    gamma_vol=0.0,   # later you can >0 to penalize LW vol
+    gamma_vol=0.0,  # later you can >0 to penalize LW vol
 )
 
 print("Score:", metrics.score)

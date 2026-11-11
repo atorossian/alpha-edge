@@ -20,6 +20,7 @@ DEFAULT_EQUITY_PATH_KEYS: tuple[str, ...] = (
     "paths",
 )
 
+
 def _default_survival_horizons_for_horizon(horizon_days: int) -> list[int]:
     """
     Build safe default survival horizons that do not exceed the configured horizon.
@@ -42,6 +43,7 @@ def _default_survival_horizons_for_horizon(horizon_days: int) -> list[int]:
         return clipped
 
     return [h]
+
 
 def _as_mapping(obj: object) -> Mapping[str, Any]:
     """
@@ -67,9 +69,7 @@ def _as_mapping(obj: object) -> Mapping[str, Any]:
     if isinstance(data, Mapping):
         return data
 
-    raise TypeError(
-        "portfolio_result must be a mapping, dataclass instance, or object with __dict__"
-    )
+    raise TypeError("portfolio_result must be a mapping, dataclass instance, or object with __dict__")
 
 
 def _extract_by_dotted_key(data: Mapping[str, Any], dotted_key: str) -> Any:
@@ -141,9 +141,7 @@ def extract_equity_paths_from_portfolio_result(
             return normalize_equity_paths(raw)
         except Exception as e:
             last_error = e
-            raise ValueError(
-                f"Found equity paths at key={key!r}, but they could not be normalized: {e}"
-            ) from e
+            raise ValueError(f"Found equity paths at key={key!r}, but they could not be normalized: {e}") from e
 
     available = sorted(str(k) for k in data.keys())
     raise KeyError(
@@ -199,9 +197,7 @@ def build_actuarial_config_from_portfolio_context(
         return ActuarialRiskConfig(
             initial_value=float(initial_value),
             horizon_days=int(horizon_days),
-            survival=SurvivalConfig(
-                horizons_days=_default_survival_horizons_for_horizon(int(horizon_days))
-            ),
+            survival=SurvivalConfig(horizons_days=_default_survival_horizons_for_horizon(int(horizon_days))),
             metadata=meta,
         ).validate()
 

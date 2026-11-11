@@ -145,9 +145,7 @@ def first_hit_times(
     hits = np.asarray(predicate(arr), dtype=bool)
 
     if hits.shape != arr.shape:
-        raise ValueError(
-            "predicate must return a boolean array with the same shape as equity_paths"
-        )
+        raise ValueError("predicate must return a boolean array with the same shape as equity_paths")
 
     any_hit = hits.any(axis=1)
     first_idx = np.argmax(hits, axis=1).astype(float)

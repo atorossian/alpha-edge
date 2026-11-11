@@ -93,11 +93,7 @@ def _parse_goals(s: str) -> tuple[float, float, float]:
 
 
 def _returns_wide_cache_path(cfg: RuntimeConfig, *, min_years: int) -> str:
-    return (
-        f"s3://{cfg_bucket(cfg)}/"
-        f"{cfg_market_root(cfg)}/cache/v1/"
-        f"returns_wide_min{int(min_years)}y.parquet"
-    )
+    return f"s3://{cfg_bucket(cfg)}/{cfg_market_root(cfg)}/cache/v1/returns_wide_min{int(min_years)}y.parquet"
 
 
 def _load_returns_wide(
@@ -160,10 +156,7 @@ def _latest_prices_by_asset_id(cfg: RuntimeConfig) -> dict[str, float]:
     elif "close_raw_usd" in df.columns:
         px_col = "close_raw_usd"
     else:
-        raise RuntimeError(
-            "latest prices snapshot has no usable USD close column. "
-            f"Columns={list(df.columns)}"
-        )
+        raise RuntimeError(f"latest prices snapshot has no usable USD close column. Columns={list(df.columns)}")
 
     df[px_col] = pd.to_numeric(df[px_col], errors="coerce")
     df = df.dropna(subset=["asset_id", px_col])
@@ -217,12 +210,7 @@ def _resolve_asset_key(key: object, resolver: dict[str, str]) -> str | None:
     if not raw or raw.lower() == "nan":
         return None
 
-    return (
-        resolver.get(raw)
-        or resolver.get(raw.upper())
-        or resolver.get(raw.lower())
-        or resolver.get(raw.casefold())
-    )
+    return resolver.get(raw) or resolver.get(raw.upper()) or resolver.get(raw.lower()) or resolver.get(raw.casefold())
 
 
 def _unwrap_positions_payload(raw: Any) -> Any:
@@ -284,6 +272,7 @@ def _unwrap_positions_payload(raw: Any) -> Any:
 
     return raw
 
+
 def _load_current_positions(
     *,
     s3,
@@ -300,9 +289,7 @@ def _load_current_positions(
     )
 
     if not raw:
-        raise RuntimeError(
-            f"Missing current ledger positions: s3://{bucket}/{ledger_key}"
-        )
+        raise RuntimeError(f"Missing current ledger positions: s3://{bucket}/{ledger_key}")
 
     out: dict[str, float] = {}
 
@@ -310,18 +297,9 @@ def _load_current_positions(
         if not isinstance(row, dict):
             return
 
-        asset_key = (
-            row.get("asset_id")
-            or row.get("ticker")
-            or row.get("symbol")
-            or row.get("broker_ticker")
-        )
+        asset_key = row.get("asset_id") or row.get("ticker") or row.get("symbol") or row.get("broker_ticker")
 
-        qty = _safe_float(
-            row.get("quantity")
-            if row.get("quantity") is not None
-            else row.get("qty")
-        )
+        qty = _safe_float(row.get("quantity") if row.get("quantity") is not None else row.get("qty"))
 
         if asset_key and qty is not None and abs(float(qty)) > 0:
             asset_key = str(asset_key)
@@ -373,6 +351,7 @@ def _load_current_positions(
 
     return out
 
+
 def _weights_from_positions(
     *,
     raw_positions_qty: dict[str, float],
@@ -415,11 +394,7 @@ def _weights_from_positions(
             f"missing_returns={missing_returns[:10]}"
         )
 
-    weights = {
-        asset_id: float(exp / gross)
-        for asset_id, exp in exposures.items()
-        if abs(exp) > 0
-    }
+    weights = {asset_id: float(exp / gross) for asset_id, exp in exposures.items() if abs(exp) > 0}
 
     diagnostics = {
         "raw_position_count": int(len(raw_positions_qty)),
@@ -461,11 +436,7 @@ def _shadow_assessment_allowed(transition_assessment: dict[str, Any]) -> bool:
     full_search_required = bool(transition_assessment.get("full_search_required"))
     shadow_required = bool(transition_assessment.get("shadow_portfolio_required"))
 
-    return (
-        rec in {"SHADOW_PORTFOLIO_ACTIVE", "FULL_SEARCH_REQUIRED"}
-        or full_search_required
-        or shadow_required
-    )
+    return rec in {"SHADOW_PORTFOLIO_ACTIVE", "FULL_SEARCH_REQUIRED"} or full_search_required or shadow_required
 
 
 def _s3_list_keys(s3, *, bucket: str, prefix: str) -> list[str]:
@@ -529,11 +500,7 @@ def _discover_latest_quarantine_approved_portfolio_search(
         }
     """
     prefix = f"{root_prefix.strip('/')}/{QUAR_CAND_TABLE}/candidate_id="
-    keys = [
-        k
-        for k in _s3_list_keys(s3, bucket=bucket, prefix=prefix)
-        if k.endswith("/latest.json")
-    ]
+    keys = [k for k in _s3_list_keys(s3, bucket=bucket, prefix=prefix) if k.endswith("/latest.json")]
 
     candidates: list[dict[str, Any]] = []
 
@@ -587,7 +554,7 @@ def _discover_latest_quarantine_approved_portfolio_search(
 
         metrics = cand_state.get("baseline_search_eval")
         if not isinstance(metrics, dict) or not metrics:
-            metrics = (q.get("baseline_eval") if isinstance(q.get("baseline_eval"), dict) else {})
+            metrics = q.get("baseline_eval") if isinstance(q.get("baseline_eval"), dict) else {}
 
         if not isinstance(metrics, dict) or not metrics:
             continue
@@ -615,7 +582,9 @@ def _discover_latest_quarantine_approved_portfolio_search(
             "weights": {str(k): float(v) for k, v in weights.items() if _safe_float(v) is not None},
             "metrics": dict(metrics),
             "health_score": health_score,
-            "health_grade": metrics.get("health_grade") or (metrics.get("health") or {}).get("health_grade") if isinstance(metrics.get("health"), dict) else None,
+            "health_grade": metrics.get("health_grade") or (metrics.get("health") or {}).get("health_grade")
+            if isinstance(metrics.get("health"), dict)
+            else None,
             "source": {
                 "candidate_state_key": key,
                 "portfolio_search_run_id": run_id,
@@ -657,6 +626,7 @@ def _discover_latest_quarantine_approved_portfolio_search(
     )
 
     return candidates[0]
+
 
 def _normalize_weight_dict_to_returns(
     *,
@@ -867,6 +837,7 @@ def _load_regime_fit_diagnostics(
             "reason": f"{type(exc).__name__}: {exc}",
         }
 
+
 def _extract_normalized_health_score(raw: Any) -> float | None:
     """
     Extract only a normalized portfolio health score.
@@ -917,12 +888,15 @@ def _load_current_health(
     bucket: str,
     root_prefix: str,
 ) -> tuple[float | None, dict[str, Any]]:
-    raw = s3_load_latest_json(
-        s3,
-        bucket=bucket,
-        root_prefix=root_prefix,
-        table="health",
-    ) or {}
+    raw = (
+        s3_load_latest_json(
+            s3,
+            bucket=bucket,
+            root_prefix=root_prefix,
+            table="health",
+        )
+        or {}
+    )
 
     if not isinstance(raw, dict):
         return None, {}
@@ -930,6 +904,7 @@ def _load_current_health(
     health_score = _extract_normalized_health_score(raw)
 
     return health_score, raw
+
 
 def run_shadow_portfolio_assessment_job(
     *,
@@ -1035,7 +1010,9 @@ def run_shadow_portfolio_assessment_job(
 
     from alpha_edge.core.schemas import ScoreConfig
 
-    score_config = ScoreConfig(**score_config_raw) if isinstance(score_config_raw, dict) and score_config_raw else ScoreConfig()
+    score_config = (
+        ScoreConfig(**score_config_raw) if isinstance(score_config_raw, dict) and score_config_raw else ScoreConfig()
+    )
 
     resolver = _load_universe_resolution_maps()
     prices_by_asset_id = _latest_prices_by_asset_id(cfg)
@@ -1361,7 +1338,9 @@ def main() -> None:
                 source_mode="shadow_portfolio_assessment",
                 status=("dry_run" if is_dry_run else "success"),
                 input_args=vars(args),
-                output_keys=[] if is_dry_run else [
+                output_keys=[]
+                if is_dry_run
+                else [
                     f"{cfg_engine_root(cfg)}/{SHADOW_PORTFOLIO_TABLE}/dt={payload.get('as_of')}/shadow_portfolio_assessment.json",
                     f"{cfg_engine_root(cfg)}/{SHADOW_PORTFOLIO_TABLE}/latest.json",
                 ],

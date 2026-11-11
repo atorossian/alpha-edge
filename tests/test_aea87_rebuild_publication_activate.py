@@ -2,7 +2,8 @@ import hashlib
 import json
 import pytest
 from alpha_edge.market.aea87_rebuild_publication_activate import (
-    require_ready_plan, convert_to_transaction_ops,
+    require_ready_plan,
+    convert_to_transaction_ops,
 )
 
 
@@ -12,8 +13,10 @@ class InMemoryS3:
 
     def get_object(self, Bucket, Key):
         from io import BytesIO
+
         if Key not in self.items:
             from botocore.exceptions import ClientError
+
             raise ClientError({"Error": {"Code": "NoSuchKey"}}, "GetObject")
         return {"Body": BytesIO(self.items[Key])}
 
@@ -33,14 +36,27 @@ def sample():
         backup = "backup/" + table
         dest = "new/" + table
         objects.update({key: old, backup: old, dest: part})
-        ops.append({"asset_id": "HAE_ID", "table": table,
-                    "year": 2025, "manifest_key": key, "before_missing": False,
-                    "before_sha": sha(old), "backup_key": backup,
-                    "part_key": dest, "part_sha": sha(part),
-                    "after": new, "after_sha": sha(new.encode())})
-    return InMemoryS3(objects), {"asset_id":"HAE_ID",
-                                "active_histories_modified":False,
-                                "status":"PREPARED_NOT_PUBLISHED","operations":ops}
+        ops.append(
+            {
+                "asset_id": "HAE_ID",
+                "table": table,
+                "year": 2025,
+                "manifest_key": key,
+                "before_missing": False,
+                "before_sha": sha(old),
+                "backup_key": backup,
+                "part_key": dest,
+                "part_sha": sha(part),
+                "after": new,
+                "after_sha": sha(new.encode()),
+            }
+        )
+    return InMemoryS3(objects), {
+        "asset_id": "HAE_ID",
+        "active_histories_modified": False,
+        "status": "PREPARED_NOT_PUBLISHED",
+        "operations": ops,
+    }
 
 
 def test_prepared_publication_requires_verified_backups():
@@ -84,16 +100,21 @@ def test_missing_original_manifest_without_legacy_inventory_is_blocked():
 
 def test_downstream_backup_and_restore_exact_bytes(monkeypatch):
     from alpha_edge.market import aea87_rebuild_publication_activate as module
+
     class MutableS3(InMemoryS3):
         def put_object(self, Bucket, Key, Body, **kwargs):
             if kwargs.get("IfNoneMatch") == "*" and Key in self.items:
                 raise AssertionError("Overwrite during immutable staging")
             self.items[Key] = Body
+
         def delete_object(self, Bucket, Key):
             self.items.pop(Key, None)
-    monkeypatch.setattr(module, "DOWNSTREAM",
-                        ["market/snapshots/v1/latest_returns.parquet",
-                         "market/cache/v1/returns_wide_min5y.parquet"])
+
+    monkeypatch.setattr(
+        module,
+        "DOWNSTREAM",
+        ["market/snapshots/v1/latest_returns.parquet", "market/cache/v1/returns_wide_min5y.parquet"],
+    )
     initial = b"original-cache"
     s3 = MutableS3({"market/cache/v1/returns_wide_min5y.parquet": initial})
     previous = module.backup_downstream(s3, "test", "release/transaction")

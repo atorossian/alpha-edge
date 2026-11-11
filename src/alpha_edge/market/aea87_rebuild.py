@@ -10,19 +10,18 @@ during --confirm-prod-write execution. All affected prices and returns are
 replaced under active manifests, snapshots/cache refreshed, and rollback
 attempted on failure. Non-approvable instruments receive S3 exception reports.
 """
+
 from __future__ import annotations
 import argparse
 import json
 import hashlib
 import uuid
 import time
-from collections import Counter
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import boto3
 import pandas as pd
-from botocore.exceptions import ClientError
 
 from alpha_edge import paths
 from alpha_edge.core.audit import make_run_id, build_audit_event, write_audit_event
@@ -32,10 +31,18 @@ from alpha_edge.core.market_store import MarketStore
 from alpha_edge.market.aea87_full_history_rebuild import run as download_and_stage
 from alpha_edge.market.aea87_rebuild_publication_prepare import prepare
 from alpha_edge.market.aea87_rebuild_publication_activate import (
-    backup_downstream, restore_downstream, convert_to_transaction_ops, require_ready_plan,
+    backup_downstream,
+    restore_downstream,
+    convert_to_transaction_ops,
+    require_ready_plan,
 )
 from alpha_edge.market.aea87_publication_transaction import (
-    fetch, checksum, put_once, write_event, entries, switch_manifests, rollback,
+    fetch,
+    put_once,
+    write_event,
+    entries,
+    switch_manifests,
+    rollback,
 )
 from alpha_edge.market.aea87_release_finalize import finalize
 
@@ -62,8 +69,11 @@ def selected_from_latest(s3, bucket, *, only=None):
         if missing:
             raise ValueError("Assets missing from validation report: " + ",".join(missing))
         selected = sorted(set(only))
-    return selected, {"validation_run_id": report["run_id"], "classification_counts":report["classification_counts"],
-                      "complete_universe": True}
+    return selected, {
+        "validation_run_id": report["run_id"],
+        "classification_counts": report["classification_counts"],
+        "complete_universe": True,
+    }
 
 
 P1_SOURCE_RELEASE = "aea87_rebuild_20261103T140216Z_57fb3b66"
@@ -71,7 +81,8 @@ P1_REASONS = {"BLOCKED_COVERAGE", "ValueError"}
 P1_DATE_REPAIR_ASSETS = {
     # Weekend sessions found in finalized publication evidence; revalidated
     # against original ticker and exchange before being overwritten.
-    "EQHcaa24a3efdba259a", "EQHf14bb7ccefdc6856",
+    "EQHcaa24a3efdba259a",
+    "EQHf14bb7ccefdc6856",
 }
 
 
@@ -88,10 +99,7 @@ def select_p1_assets(s3, bucket, latest_selected, release=P1_SOURCE_RELEASE):
     report = json.loads(body)
     if report.get("release_id") != release or report.get("status") != "COMPLETED_WITH_EXCEPTIONS":
         raise RuntimeError("P1 requires the completed original release report")
-    unresolved = {
-        item["asset_id"] for item in report["exceptions"]
-        if item.get("reason") in P1_REASONS
-    }
+    unresolved = {item["asset_id"] for item in report["exceptions"] if item.get("reason") in P1_REASONS}
     # Weekend-only corruption can pass the numerical screen. Confirm these
     # exceptional overrides exist in the latest complete universe report
     # rather than silently expanding the normal implicated selection.
@@ -151,14 +159,16 @@ def find_reusable_source(s3, bucket, batch, args):
         try:
             summary = json.loads(summary_bytes)
             manifest = json.loads(manifest_bytes)
-            if (summary.get("run_id") != run_id
-                    or summary.get("status") != "STAGING_ONLY"
-                    or summary.get("schema") != "aea87_full_history_rebuild_v2_local_session_dates"
-                    or summary.get("active_histories_modified") is not False
-                    or summary.get("start") != args.start
-                    or summary.get("end_exclusive") != args.end_exclusive
-                    or set(summary.get("assets", {})) != set(batch)
-                    or manifest.get("run_id") != run_id):
+            if (
+                summary.get("run_id") != run_id
+                or summary.get("status") != "STAGING_ONLY"
+                or summary.get("schema") != "aea87_full_history_rebuild_v2_local_session_dates"
+                or summary.get("active_histories_modified") is not False
+                or summary.get("start") != args.start
+                or summary.get("end_exclusive") != args.end_exclusive
+                or set(summary.get("assets", {})) != set(batch)
+                or manifest.get("run_id") != run_id
+            ):
                 continue
             index = {obj["key"]: obj for obj in manifest["objects"]}
             if not _source_file_valid(s3, bucket, index, summary_key):
@@ -176,16 +186,22 @@ def find_reusable_source(s3, bucket, batch, args):
                     break
                 if item.get("status") == "STAGED_FOR_REVIEW":
                     asset_prefix = source_prefix + "assets/" + _safe_asset_folder(aid) + "/"
-                    for name in ("raw_yahoo.parquet", "candidate_ohlcv_usd.parquet",
-                                 "candidate_returns_usd.parquet", "provider_metadata.json"):
+                    for name in (
+                        "raw_yahoo.parquet",
+                        "candidate_ohlcv_usd.parquet",
+                        "candidate_returns_usd.parquet",
+                        "provider_metadata.json",
+                    ):
                         if not _source_file_valid(s3, bucket, index, asset_prefix + name):
                             valid = False
                             break
                 if not valid:
                     break
             if valid:
-                print(f"[aea87_rebuild] Reusing verified immutable source run {run_id} "
-                      f"for {len(batch)} assets", flush=True)
+                print(
+                    f"[aea87_rebuild] Reusing verified immutable source run {run_id} for {len(batch)} assets",
+                    flush=True,
+                )
                 return summary
         except (ValueError, KeyError, TypeError, IndexError):
             continue
@@ -195,8 +211,7 @@ def find_reusable_source(s3, bucket, batch, args):
 def find_reusable_plan(s3, bucket, source_run, asset_id):
     """Reuse staged publication plans only when all active checksums match."""
     original_release = source_run.split("_source_", 1)[0]
-    key = (ROOT + "/" + original_release + "_" + _safe_asset_folder(asset_id)
-           + "/plan.json")
+    key = ROOT + "/" + original_release + "_" + _safe_asset_folder(asset_id) + "/plan.json"
     body = fetch(s3, bucket, key)
     if body is None:
         return None
@@ -207,8 +222,10 @@ def find_reusable_plan(s3, bucket, source_run, asset_id):
         require_ready_plan(s3, bucket, plan)
         return plan
     except (ValueError, KeyError, TypeError) as exc:
-        print(f"[aea87_rebuild] Existing prepared plan for {asset_id} "
-              f"not reusable ({exc}); reconstructing plan", flush=True)
+        print(
+            f"[aea87_rebuild] Existing prepared plan for {asset_id} not reusable ({exc}); reconstructing plan",
+            flush=True,
+        )
         return None
 
 
@@ -230,15 +247,16 @@ def _verify_active_histories(store, plans):
             if not expected:
                 raise RuntimeError("Cannot verify empty published history: " + aid)
             first, last = min(expected), max(expected)
-            active = (store.read_ohlcv_usd([aid], start=first, end=last)
-                      if table == "ohlcv_usd" else
-                      store.read_returns_usd([aid], start=first, end=last))
+            active = (
+                store.read_ohlcv_usd([aid], start=first, end=last)
+                if table == "ohlcv_usd"
+                else store.read_returns_usd([aid], start=first, end=last)
+            )
             if active.empty or "date" not in active:
                 raise RuntimeError("Published history unreadable: " + aid + "/" + table)
             actual = pd.to_datetime(active["date"], utc=True).dt.strftime("%Y-%m-%d")
             if actual.duplicated().any() or set(actual) != expected:
-                raise RuntimeError("Published dates differ from reconstructed candidate: "
-                                   + aid + "/" + table)
+                raise RuntimeError("Published dates differ from reconstructed candidate: " + aid + "/" + table)
 
 
 def _publish_batch(s3, bucket, store, plans, publication_id):
@@ -280,16 +298,21 @@ def _publish_batch(s3, bucket, store, plans, publication_id):
         # Control Layer, with the same run ID as the journal.
         cfg = load_runtime_config("prod")
         event = build_audit_event(
-            cfg=cfg, run_id=publication_id.split("_batch_")[0],
-            event_type="rebuild", entity_type="market_data",
-            entity_id=publication_id, as_of=None,
-            source_script="aea87_rebuild", source_mode="publication_rollback",
+            cfg=cfg,
+            run_id=publication_id.split("_batch_")[0],
+            event_type="rebuild",
+            entity_type="market_data",
+            entity_id=publication_id,
+            as_of=None,
+            source_script="aea87_rebuild",
+            source_mode="publication_rollback",
             status="failed",
-            input_args={"publication_id":publication_id},
+            input_args={"publication_id": publication_id},
             output_keys=[op["manifest_key"] for op in ops],
             backup_keys=[op["backup_key"] for op in ops if op.get("backup_key")],
             metadata={"rollback_completed": True, "recovered_assets": [p["asset_id"] for p in plans]},
-            error=f"{type(exc).__name__}: {exc}")
+            error=f"{type(exc).__name__}: {exc}",
+        )
         write_audit_event(cfg=cfg, event=event)
         raise RuntimeError("Publication failed; original manifests and downstream backups restored") from exc
 
@@ -308,10 +331,17 @@ def run(args):
     if not asset_ids:
         print("Validation found no implicated assets. Production unchanged.")
         return
-    release = getattr(args, "run_id", None) or ("aea87_rebuild_" + datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "_" + uuid.uuid4().hex[:8])
+    release = getattr(args, "run_id", None) or (
+        "aea87_rebuild_" + datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "_" + uuid.uuid4().hex[:8]
+    )
     root = f"{ROOT}/{release}"
-    started = {"status":"STARTED", "asset_count":len(asset_ids), "selected_assets":asset_ids,
-               **report_metadata, "active_modified":False}
+    started = {
+        "status": "STARTED",
+        "asset_count": len(asset_ids),
+        "selected_assets": asset_ids,
+        **report_metadata,
+        "active_modified": False,
+    }
     _write_report(s3, args.bucket, root, "selection.json", started)
     print(f"[aea87_rebuild] {len(asset_ids)} implicated assets selected; immutable raw data -> S3", flush=True)
 
@@ -323,28 +353,45 @@ def run(args):
     batch_size = args.batch_size
 
     def progress(processed, phase, last_asset=None):
-        state = {"run_id": release, "status": phase if phase in {"COMPLETED", "COMPLETED_WITH_EXCEPTIONS", "FAILED"} else "RUNNING", "phase": phase,
-                 "processed": processed, "total": total,
-                 "published": len(published), "exceptions": len(exceptions),
-                 "last_asset_id": last_asset,
-                 "elapsed_seconds": round(time.monotonic() - started_at, 1),
-                 "timestamp_utc": datetime.now(timezone.utc).isoformat()}
+        state = {
+            "run_id": release,
+            "status": phase if phase in {"COMPLETED", "COMPLETED_WITH_EXCEPTIONS", "FAILED"} else "RUNNING",
+            "phase": phase,
+            "processed": processed,
+            "total": total,
+            "published": len(published),
+            "exceptions": len(exceptions),
+            "last_asset_id": last_asset,
+            "elapsed_seconds": round(time.monotonic() - started_at, 1),
+            "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+        }
         # Mutable run-specific checkpoint: write during work, not only at the end.
-        s3.put_object(Bucket=args.bucket, Key=root + "/progress/latest.json",
-                      Body=json.dumps(state).encode(), ContentType="application/json")
-        print(f"[aea87_rebuild] {phase}: {processed}/{total} "
-              f"published={len(published)} exceptions={len(exceptions)} "
-              f"elapsed={state['elapsed_seconds']}s", flush=True)
+        s3.put_object(
+            Bucket=args.bucket,
+            Key=root + "/progress/latest.json",
+            Body=json.dumps(state).encode(),
+            ContentType="application/json",
+        )
+        print(
+            f"[aea87_rebuild] {phase}: {processed}/{total} "
+            f"published={len(published)} exceptions={len(exceptions)} "
+            f"elapsed={state['elapsed_seconds']}s",
+            flush=True,
+        )
 
     progress(0, "STARTED")
     for offset in range(0, total, batch_size):
-        batch = asset_ids[offset:offset + batch_size]
-        print(f"[aea87_rebuild] Batch {offset//batch_size+1}: fresh history for "
-              f"{len(batch)} assets", flush=True)
+        batch = asset_ids[offset : offset + batch_size]
+        print(f"[aea87_rebuild] Batch {offset // batch_size + 1}: fresh history for {len(batch)} assets", flush=True)
         download_args = SimpleNamespace(
-            asset_ids=",".join(batch), universe=args.universe, bucket=args.bucket,
-            region=args.region, start=args.start, end_exclusive=args.end_exclusive,
-            run_id=release + "_source_" + str(offset//batch_size+1).zfill(4))
+            asset_ids=",".join(batch),
+            universe=args.universe,
+            bucket=args.bucket,
+            region=args.region,
+            start=args.start,
+            end_exclusive=args.end_exclusive,
+            run_id=release + "_source_" + str(offset // batch_size + 1).zfill(4),
+        )
         staged = find_reusable_source(s3, args.bucket, batch, download_args)
         if staged is None:
             staged = download_and_stage(download_args)
@@ -356,86 +403,144 @@ def run(args):
         for aid in batch:
             entry = staged["assets"].get(aid, {})
             if entry.get("status") != "STAGED_FOR_REVIEW":
-                exceptions.append({"asset_id":aid, "stage":"SOURCE",
-                                   "reason":entry.get("status"), "detail":entry.get("error")})
+                exceptions.append(
+                    {"asset_id": aid, "stage": "SOURCE", "reason": entry.get("status"), "detail": entry.get("error")}
+                )
                 continue
             try:
                 outcome = find_reusable_plan(s3, args.bucket, source_run, aid)
                 if outcome is None:
-                    outcome = prepare(s3, store, args.bucket, source_run, aid,
-                                      args.end_exclusive,
-                                      release + "_" + _safe_asset_folder(aid))
+                    outcome = prepare(
+                        s3,
+                        store,
+                        args.bucket,
+                        source_run,
+                        aid,
+                        args.end_exclusive,
+                        release + "_" + _safe_asset_folder(aid),
+                    )
                 if outcome.get("status") == "PREPARED_NOT_PUBLISHED":
                     candidates.append(outcome)
                 else:
-                    exceptions.append({"asset_id":aid, "stage":"RECONSTRUCTION",
-                                       "reason":outcome.get("status"),
-                                       "blockers":outcome.get("blockers")})
+                    exceptions.append(
+                        {
+                            "asset_id": aid,
+                            "stage": "RECONSTRUCTION",
+                            "reason": outcome.get("status"),
+                            "blockers": outcome.get("blockers"),
+                        }
+                    )
             except Exception as exc:
-                exceptions.append({"asset_id":aid, "stage":"RECONSTRUCTION",
-                                   "reason":type(exc).__name__, "detail":str(exc)})
+                exceptions.append(
+                    {"asset_id": aid, "stage": "RECONSTRUCTION", "reason": type(exc).__name__, "detail": str(exc)}
+                )
                 print(f"[aea87_rebuild] {aid}: reconstruction exception {exc}", flush=True)
 
         progress(offset + len(batch), "SOURCE_AND_PREPARATION_COMPLETE", batch[-1])
         if candidates:
-            print(f"[aea87_rebuild] Publishing {len(candidates)} qualifying assets "
-                  f"in batch {offset//batch_size+1}", flush=True)
-            _publish_batch(s3, args.bucket, store, candidates,
-                           release + "_batch_" + str(offset//batch_size+1).zfill(4))
+            print(
+                f"[aea87_rebuild] Publishing {len(candidates)} qualifying assets in batch {offset // batch_size + 1}",
+                flush=True,
+            )
+            _publish_batch(
+                s3, args.bucket, store, candidates, release + "_batch_" + str(offset // batch_size + 1).zfill(4)
+            )
             published.extend(p["asset_id"] for p in candidates)
             # Use the established Alpha Edge audit trail, not a parallel journal.
             audit_cfg = load_runtime_config("prod")
             if audit_cfg.bucket != args.bucket or audit_cfg.region != args.region:
                 raise RuntimeError("Audit target differs from production data target")
-            batch_id = release + "_batch_" + str(offset//batch_size+1).zfill(4)
+            batch_id = release + "_batch_" + str(offset // batch_size + 1).zfill(4)
             ops = [op for plan in candidates for op in plan["operations"]]
             event = build_audit_event(
-                cfg=audit_cfg, run_id=release, event_type="rebuild",
-                entity_type="market_data", entity_id=batch_id,
-                as_of=args.end_exclusive, source_script="aea87_rebuild",
-                source_mode="production_reconstruction", status="success",
-                input_args={"batch_index":offset//batch_size+1,
-                            "source_run":source_run,"asset_count":len(candidates)},
+                cfg=audit_cfg,
+                run_id=release,
+                event_type="rebuild",
+                entity_type="market_data",
+                entity_id=batch_id,
+                as_of=args.end_exclusive,
+                source_script="aea87_rebuild",
+                source_mode="production_reconstruction",
+                status="success",
+                input_args={
+                    "batch_index": offset // batch_size + 1,
+                    "source_run": source_run,
+                    "asset_count": len(candidates),
+                },
                 output_keys=[op["manifest_key"] for op in ops],
                 backup_keys=[op["backup_key"] for op in ops if op.get("backup_key")],
-                metadata={"affected_assets":[p["asset_id"] for p in candidates],
-                          "manifest_count":len(ops),
-                          "before_sha256_by_key":{op["manifest_key"]:op["before_sha"] for op in ops},
-                          "after_sha256_by_key":{op["manifest_key"]:op["after_sha"] for op in ops},
-                          "publication_root":f"{ROOT}/{batch_id}/transaction"})
+                metadata={
+                    "affected_assets": [p["asset_id"] for p in candidates],
+                    "manifest_count": len(ops),
+                    "before_sha256_by_key": {op["manifest_key"]: op["before_sha"] for op in ops},
+                    "after_sha256_by_key": {op["manifest_key"]: op["after_sha"] for op in ops},
+                    "publication_root": f"{ROOT}/{batch_id}/transaction",
+                },
+            )
             write_audit_event(cfg=audit_cfg, event=event)
         # Preserve independent completed batches and exceptions after every cutover.
         progress(offset + len(batch), "BATCH_COMPLETE", batch[-1])
-        _write_report(s3, args.bucket, root,
-                      f"batches/{offset//batch_size+1:04d}.json",
-                      {"batch": offset//batch_size+1, "assets": batch,
-                       "source_run":source_run,
-                       "published":[p["asset_id"] for p in candidates],
-                       "exceptions":[x for x in exceptions if x["asset_id"] in batch]})
+        _write_report(
+            s3,
+            args.bucket,
+            root,
+            f"batches/{offset // batch_size + 1:04d}.json",
+            {
+                "batch": offset // batch_size + 1,
+                "assets": batch,
+                "source_run": source_run,
+                "published": [p["asset_id"] for p in candidates],
+                "exceptions": [x for x in exceptions if x["asset_id"] in batch],
+            },
+        )
 
-    completed = {"status": ("COMPLETED_WITH_EXCEPTIONS" if exceptions else "COMPLETED")
-                 if published else "FAILED",
-                 "release_id":release, "source_runs":source_runs,
-                 "selected":total, "published":sorted(published),
-                 "exceptions":exceptions, "active_modified":bool(published),
-                 "validation_run_id": report_metadata["validation_run_id"]}
+    completed = {
+        "status": ("COMPLETED_WITH_EXCEPTIONS" if exceptions else "COMPLETED") if published else "FAILED",
+        "release_id": release,
+        "source_runs": source_runs,
+        "selected": total,
+        "published": sorted(published),
+        "exceptions": exceptions,
+        "active_modified": bool(published),
+        "validation_run_id": report_metadata["validation_run_id"],
+    }
     uri = _write_report(s3, args.bucket, root, "result.json", completed)
     audit_cfg = load_runtime_config("prod")
     summary_event = build_audit_event(
-        cfg=audit_cfg, run_id=release, event_type="rebuild",
-        entity_type="market_data", entity_id=release,
-        as_of=args.end_exclusive, source_script="aea87_rebuild",
-        source_mode="production_reconstruction", status="success" if published else "failed",
-        input_args={"asset_count":total,"validation_run_id":report_metadata["validation_run_id"]},
-        output_keys=[root+"/result.json"],
-        metadata={"selected":total,"published":len(published),
-                  "unresolved":len(exceptions),"result_status":completed["status"],
-                  "source_runs":source_runs})
+        cfg=audit_cfg,
+        run_id=release,
+        event_type="rebuild",
+        entity_type="market_data",
+        entity_id=release,
+        as_of=args.end_exclusive,
+        source_script="aea87_rebuild",
+        source_mode="production_reconstruction",
+        status="success" if published else "failed",
+        input_args={"asset_count": total, "validation_run_id": report_metadata["validation_run_id"]},
+        output_keys=[root + "/result.json"],
+        metadata={
+            "selected": total,
+            "published": len(published),
+            "unresolved": len(exceptions),
+            "result_status": completed["status"],
+            "source_runs": source_runs,
+        },
+    )
     write_audit_event(cfg=audit_cfg, event=summary_event)
     progress(total, completed["status"])
-    print(json.dumps({"status":completed["status"], "selected":total,
-                      "published":len(published), "unresolved":len(exceptions),
-                      "s3_report":uri}, indent=2), flush=True)
+    print(
+        json.dumps(
+            {
+                "status": completed["status"],
+                "selected": total,
+                "published": len(published),
+                "unresolved": len(exceptions),
+                "s3_report": uri,
+            },
+            indent=2,
+        ),
+        flush=True,
+    )
     if not published:
         raise RuntimeError("No defensible replacements could be published; see S3 report")
 
@@ -447,7 +552,9 @@ def main():
     p.add_argument("--region", default="eu-west-1")
     p.add_argument("--start", default="2010-01-01")
     p.add_argument("--end-exclusive", default=datetime.now(timezone.utc).date().isoformat())
-    p.add_argument("--asset-ids", help="Optional targeted selection; default ALL implicated assets from complete validation")
+    p.add_argument(
+        "--asset-ids", help="Optional targeted selection; default ALL implicated assets from complete validation"
+    )
     p.add_argument("--batch-size", type=int, default=25, help="Internal durable publication batch size (default 25)")
     p.add_argument("--p1-only", action="store_true", help="Only 287 P1 exceptions and 2 published session-date defects")
     p.add_argument("--confirm-prod-write", action="store_true")
@@ -462,30 +569,43 @@ def main():
     if cfg.bucket != a.bucket or cfg.region != a.region:
         p.error("Production runtime audit bucket/region mismatch")
     a.run_id = make_run_id("aea87_rebuild")
-    with capture_script_run(cfg=cfg, script_name="aea87_rebuild",
-                            input_args=vars(a), run_id=a.run_id):
+    with capture_script_run(cfg=cfg, script_name="aea87_rebuild", input_args=vars(a), run_id=a.run_id):
         try:
             run(a)
         except Exception as exc:
             try:
                 s3 = boto3.client("s3", region_name=a.region)
                 fail_key = f"{ROOT}/{a.run_id}/progress/latest.json"
-                s3.put_object(Bucket=a.bucket, Key=fail_key,
-                    Body=json.dumps({"run_id":a.run_id,"status":"FAILED",
-                                     "timestamp_utc":datetime.now(timezone.utc).isoformat(),
-                                     "error":f"{type(exc).__name__}: {exc}"}).encode(),
-                    ContentType="application/json")
+                s3.put_object(
+                    Bucket=a.bucket,
+                    Key=fail_key,
+                    Body=json.dumps(
+                        {
+                            "run_id": a.run_id,
+                            "status": "FAILED",
+                            "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+                            "error": f"{type(exc).__name__}: {exc}",
+                        }
+                    ).encode(),
+                    ContentType="application/json",
+                )
             except Exception:
                 # Failure of progress reporting cannot conceal the original error.
                 pass
             event = build_audit_event(
-                cfg=cfg, run_id=a.run_id, event_type="rebuild",
-                entity_type="market_data", entity_id=None,
-                as_of=a.end_exclusive, source_script="aea87_rebuild",
-                source_mode="production_reconstruction", status="failed",
+                cfg=cfg,
+                run_id=a.run_id,
+                event_type="rebuild",
+                entity_type="market_data",
+                entity_id=None,
+                as_of=a.end_exclusive,
+                source_script="aea87_rebuild",
+                source_mode="production_reconstruction",
+                status="failed",
                 input_args=vars(a),
-                metadata={"recovery":"check publication journal and batch checkpoints"},
-                error=f"{type(exc).__name__}: {exc}")
+                metadata={"recovery": "check publication journal and batch checkpoints"},
+                error=f"{type(exc).__name__}: {exc}",
+            )
             write_audit_event(cfg=cfg, event=event)
             raise
 

@@ -28,15 +28,54 @@ FRACTIONAL_EQUITY_TICKERS = {
 FRACTIONAL_EQUITY_ASSET_IDS = set()
 
 FX_BASES = {
-    "EUR", "USD", "GBP", "JPY", "CHF", "AUD", "NZD", "CAD",
-    "SEK", "NOK", "DKK", "CNH", "HKD", "SGD", "MXN", "ZAR",
+    "EUR",
+    "USD",
+    "GBP",
+    "JPY",
+    "CHF",
+    "AUD",
+    "NZD",
+    "CAD",
+    "SEK",
+    "NOK",
+    "DKK",
+    "CNH",
+    "HKD",
+    "SGD",
+    "MXN",
+    "ZAR",
 }
 
 CRYPTO_BASES = {
-    "BTC", "ETH", "SOL", "ADA", "XRP", "DOT", "LTC", "BNB",
-    "AVAX", "LINK", "MATIC", "ATOM", "NEAR", "UNI", "AAVE",
-    "TRX", "ETC", "DOGE", "HBAR", "SUI", "DASH", "BCH", "QTUM",
-    "APT", "ARB", "INJ", "MANA", "NEO", "RENDER",
+    "BTC",
+    "ETH",
+    "SOL",
+    "ADA",
+    "XRP",
+    "DOT",
+    "LTC",
+    "BNB",
+    "AVAX",
+    "LINK",
+    "MATIC",
+    "ATOM",
+    "NEAR",
+    "UNI",
+    "AAVE",
+    "TRX",
+    "ETC",
+    "DOGE",
+    "HBAR",
+    "SUI",
+    "DASH",
+    "BCH",
+    "QTUM",
+    "APT",
+    "ARB",
+    "INJ",
+    "MANA",
+    "NEO",
+    "RENDER",
 }
 
 CRYPTO_QUOTES = {"USD", "USDT", "USDC", "EUR"}
@@ -516,7 +555,9 @@ def _process_asset_chain(trades: List[TradeRow]) -> tuple[list[RepairRow], list[
         elif t.side == "SELL" and t.action_tag == "close":
             if open_short_qty > QTY_TOL:
                 manual_rows.append(
-                    _manual_row(t, "SELL close encountered while short chain is still open", quantity_policy=quantity_policy)
+                    _manual_row(
+                        t, "SELL close encountered while short chain is still open", quantity_policy=quantity_policy
+                    )
                 )
                 continue
 
@@ -551,7 +592,9 @@ def _process_asset_chain(trades: List[TradeRow]) -> tuple[list[RepairRow], list[
         elif t.side == "SELL" and t.action_tag == "reduce":
             if open_short_qty > QTY_TOL:
                 manual_rows.append(
-                    _manual_row(t, "SELL reduce encountered while short chain is still open", quantity_policy=quantity_policy)
+                    _manual_row(
+                        t, "SELL reduce encountered while short chain is still open", quantity_policy=quantity_policy
+                    )
                 )
                 continue
 
@@ -575,7 +618,9 @@ def _process_asset_chain(trades: List[TradeRow]) -> tuple[list[RepairRow], list[
 
             if candidate_qty is None:
                 manual_rows.append(
-                    _manual_row(t, "SELL reduce missing both usable quantity and value", quantity_policy=quantity_policy)
+                    _manual_row(
+                        t, "SELL reduce missing both usable quantity and value", quantity_policy=quantity_policy
+                    )
                 )
                 continue
 
@@ -604,7 +649,9 @@ def _process_asset_chain(trades: List[TradeRow]) -> tuple[list[RepairRow], list[
         elif t.side == "SELL" and t.action_tag in {"open", "add"}:
             if open_long_qty > QTY_TOL:
                 manual_rows.append(
-                    _manual_row(t, "SELL open/add encountered while long chain is still open", quantity_policy=quantity_policy)
+                    _manual_row(
+                        t, "SELL open/add encountered while long chain is still open", quantity_policy=quantity_policy
+                    )
                 )
                 continue
 
@@ -646,7 +693,9 @@ def _process_asset_chain(trades: List[TradeRow]) -> tuple[list[RepairRow], list[
         elif t.side == "BUY" and t.action_tag == "close":
             if open_long_qty > QTY_TOL:
                 manual_rows.append(
-                    _manual_row(t, "BUY close encountered while long chain is still open", quantity_policy=quantity_policy)
+                    _manual_row(
+                        t, "BUY close encountered while long chain is still open", quantity_policy=quantity_policy
+                    )
                 )
                 continue
 
@@ -681,7 +730,9 @@ def _process_asset_chain(trades: List[TradeRow]) -> tuple[list[RepairRow], list[
         elif t.side == "BUY" and t.action_tag == "reduce":
             if open_long_qty > QTY_TOL:
                 manual_rows.append(
-                    _manual_row(t, "BUY reduce encountered while long chain is still open", quantity_policy=quantity_policy)
+                    _manual_row(
+                        t, "BUY reduce encountered while long chain is still open", quantity_policy=quantity_policy
+                    )
                 )
                 continue
 

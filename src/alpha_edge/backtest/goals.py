@@ -6,6 +6,7 @@ from typing import List, Optional, Tuple
 
 Goals3 = Tuple[float, float, float]
 
+
 def goals3_from_goalpath(gp: GoalPath) -> Goals3:
     """
     Returns a 3-goal window starting at gp.idx.

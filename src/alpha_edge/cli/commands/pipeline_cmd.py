@@ -292,9 +292,7 @@ def morning(
         "--dry-run",
         help="Print child commands only; do not execute them.",
     ),
-<<<<<<< Updated upstream
-        run_transition: bool = typer.Option(
-=======
+
     run_barrier_monitor: bool = typer.Option(
         False,
         "--run-barrier-monitor",
@@ -319,7 +317,6 @@ def morning(
         help="Disable the barrier monitor daily liquidation throttle.",
     ),
     run_transition: bool = typer.Option(
->>>>>>> Stashed changes
         False,
         "--run-transition",
         help=(

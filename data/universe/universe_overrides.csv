@@ -140,3 +140,10 @@ EA6F8A2B8A81FF41,ALV,ALV.DE,1,Allianz SE,triage:add_suffix_by_region_hint;conf=H
 A17CD4A39DA129F8,CA,CA.PA,1,Carrefour S.A.,triage:add_suffix_by_region_hint;conf=HIGH
 3FC16F40E497A6EC,LANC,MZTI,1,Lancaster Colony Corp.,Asset changed tickers
 0C743F6DBAA2E867,VSCO,VSXY,1,Victoria's Secret & Co.,Asset changed tickers
+852B457B0D5032F1,HYPE-USD,HYPE32196-USD,1,HYPE-USD,Asset shown differently in Yahoo Finance
+5E262727DC314688,PPLI,PPLI,1,IAC Inc.,Asset changed tickers
+131D81A5B9ED7DDE,BK,BNY,1,Bank of New York Mellon Corp.,Asset changed tickers
+867CA8A3C8E2DB7B,LKFT,LKFT.AS,1,Lakefront Biotherapeutics N.V.,Asset changed ticker and name
+00B5174861BDA51D,FDP,DMC,1,Del Monte Corp.,Asset changed ticker and name
+A4FD41DC5078668D,EQR,VMRK,1,Vivmark Residential,Asset changed ticker and name
+2E7800C32FE1BF6C,PSTG,P,1,Everpure Inc.,Asset changed ticker and name

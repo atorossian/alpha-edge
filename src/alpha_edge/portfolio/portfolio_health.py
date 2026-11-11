@@ -4,8 +4,6 @@ from __future__ import annotations
 from dataclasses import asdict
 from pathlib import Path
 import json
-import math
-from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -13,7 +11,6 @@ import pandas as pd
 from alpha_edge.core.schemas import PortfolioHealth, EvalMetrics
 from alpha_edge.portfolio.goal_probs import extract_p_hit_map
 from alpha_edge.portfolio.alpha_report import compute_alpha_report
-
 
 
 # -----------------------------
@@ -61,13 +58,13 @@ def build_portfolio_health(
             # CAPM (true alpha)
             capm1 = w1.get("capm", {}) or {}
             alpha_1y = float(capm1.get("alpha_ann", float("nan")))
-            beta_1y  = float(capm1.get("beta", float("nan")))
-            r2_1y    = float(capm1.get("r2", float("nan")))
+            beta_1y = float(capm1.get("beta", float("nan")))
+            r2_1y = float(capm1.get("r2", float("nan")))
 
             capm3 = w3.get("capm", {}) or {}
             alpha_3m = float(capm3.get("alpha_ann", float("nan")))
-            beta_3m  = float(capm3.get("beta", float("nan")))
-            r2_3m    = float(capm3.get("r2", float("nan")))
+            beta_3m = float(capm3.get("beta", float("nan")))
+            r2_3m = float(capm3.get("r2", float("nan")))
 
             info1 = w1.get("info", {}) or {}
             ir_1y = float(info1.get("info_ratio", float("nan")))
@@ -94,12 +91,9 @@ def build_portfolio_health(
         ruin_prob=float(eval_metrics.ruin_prob_1y),
         ann_return=float(eval_metrics.ann_return),
         sharpe=float(eval_metrics.sharpe),
-
         # legacy field: keep it, but it is EXCESS RETURN, not alpha
         alpha_vs_bench=float(excess_1y),
-
         alpha_report_json=alpha_report_json,
-
         # 1y diagnostics
         alpha_1y=(None if not np.isfinite(alpha_1y) else float(alpha_1y)),
         beta_1y=(None if not np.isfinite(beta_1y) else float(beta_1y)),
@@ -107,7 +101,6 @@ def build_portfolio_health(
         info_ratio_1y=(None if not np.isfinite(ir_1y) else float(ir_1y)),
         tracking_error_1y=(None if not np.isfinite(te_1y) else float(te_1y)),
         excess_return_1y=(None if not np.isfinite(excess_1y) else float(excess_1y)),
-
         # 3m diagnostics
         alpha_3m=(None if not np.isfinite(alpha_3m) else float(alpha_3m)),
         beta_3m=(None if not np.isfinite(beta_3m) else float(beta_3m)),
@@ -116,7 +109,6 @@ def build_portfolio_health(
         tracking_error_3m=(None if not np.isfinite(te_3m) else float(te_3m)),
         excess_return_3m=(None if not np.isfinite(excess_3m) else float(excess_3m)),
     )
-
 
 
 def should_reoptimize(

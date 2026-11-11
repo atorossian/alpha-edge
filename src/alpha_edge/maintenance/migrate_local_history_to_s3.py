@@ -4,7 +4,7 @@ from __future__ import annotations
 import argparse
 import re
 from pathlib import Path
-from typing import Iterable, List, Tuple
+from typing import List, Tuple
 
 import boto3
 
@@ -28,7 +28,6 @@ DEFAULT_TABLES = [
     "holdings",
     "health",
     "regimes/hmm",
-
     # Legacy local names mapped below if present.
     "portfolio_search_runs",
     "portfolio_search_candidates",
@@ -316,7 +315,9 @@ def parse_args() -> argparse.Namespace:
         help="Deprecated compatibility flag. Default behavior is already dry-run unless --execute is passed.",
     )
 
-    ap.add_argument("--reason", default=None, help="Required for real maintenance writes/deletes. Stored in audit trail.")
+    ap.add_argument(
+        "--reason", default=None, help="Required for real maintenance writes/deletes. Stored in audit trail."
+    )
 
     return ap.parse_args()
 
@@ -436,7 +437,6 @@ def main() -> None:
         print("\n[UPLOAD DONE]")
 
 
-
 # ----------------------------
 # Audit/logging entrypoint wrapper
 # ----------------------------
@@ -454,31 +454,59 @@ def main_with_audit() -> None:
         captured_output_keys.append(str(key))
         return original_upload_file(s3, bucket=bucket, key=key, path=path, dry_run=dry_run)
 
-    with capture_script_run(cfg=cfg, script_name="migrate_local_history_to_s3.py", input_args=vars(args), dry_run=is_dry_run) as run_id:
+    with capture_script_run(
+        cfg=cfg, script_name="migrate_local_history_to_s3.py", input_args=vars(args), dry_run=is_dry_run
+    ) as run_id:
         globals()["_upload_file"] = _audited_upload_file
         try:
             main()
             output_keys = sorted(set(captured_output_keys))
             event = build_audit_event(
-                cfg=cfg, run_id=run_id, event_type="migrate", entity_type="local_history_to_s3",
-                entity_id=None, as_of=None, source_script="migrate_local_history_to_s3.py",
-                source_mode="migrate_local_history_to_s3", status=("dry_run" if is_dry_run else "success"),
-                reason=getattr(args, "reason", None), input_args=vars(args), output_keys=([] if is_dry_run else output_keys),
-                metadata={"tier": "tier_2", "payload_policy": "large_dataset_metadata_only", "planned_output_keys": output_keys,
-                          "planned_output_count": len(output_keys), "local_root": getattr(args, "local_root", None),
-                          "tables": getattr(args, "tables", None), "write_latest": not bool(getattr(args, "no_latest", False)),
-                          "execute": bool(getattr(args, "execute", False))},
+                cfg=cfg,
+                run_id=run_id,
+                event_type="migrate",
+                entity_type="local_history_to_s3",
+                entity_id=None,
+                as_of=None,
+                source_script="migrate_local_history_to_s3.py",
+                source_mode="migrate_local_history_to_s3",
+                status=("dry_run" if is_dry_run else "success"),
+                reason=getattr(args, "reason", None),
+                input_args=vars(args),
+                output_keys=([] if is_dry_run else output_keys),
+                metadata={
+                    "tier": "tier_2",
+                    "payload_policy": "large_dataset_metadata_only",
+                    "planned_output_keys": output_keys,
+                    "planned_output_count": len(output_keys),
+                    "local_root": getattr(args, "local_root", None),
+                    "tables": getattr(args, "tables", None),
+                    "write_latest": not bool(getattr(args, "no_latest", False)),
+                    "execute": bool(getattr(args, "execute", False)),
+                },
             )
             write_audit_event(cfg=cfg, event=event, dry_run=is_dry_run)
         except Exception as exc:
             output_keys = sorted(set(captured_output_keys))
             event = build_audit_event(
-                cfg=cfg, run_id=run_id, event_type="migrate", entity_type="local_history_to_s3",
-                entity_id=None, as_of=None, source_script="migrate_local_history_to_s3.py",
-                source_mode="migrate_local_history_to_s3", status="failed", reason=getattr(args, "reason", None),
-                input_args=vars(args), metadata={"tier": "tier_2", "payload_policy": "large_dataset_metadata_only",
-                                                "planned_output_keys": output_keys, "planned_output_count": len(output_keys),
-                                                "execute": bool(getattr(args, "execute", False))},
+                cfg=cfg,
+                run_id=run_id,
+                event_type="migrate",
+                entity_type="local_history_to_s3",
+                entity_id=None,
+                as_of=None,
+                source_script="migrate_local_history_to_s3.py",
+                source_mode="migrate_local_history_to_s3",
+                status="failed",
+                reason=getattr(args, "reason", None),
+                input_args=vars(args),
+                metadata={
+                    "tier": "tier_2",
+                    "payload_policy": "large_dataset_metadata_only",
+                    "planned_output_keys": output_keys,
+                    "planned_output_count": len(output_keys),
+                    "execute": bool(getattr(args, "execute", False)),
+                },
                 error=f"{type(exc).__name__}: {exc}",
             )
             write_audit_event(cfg=cfg, event=event, dry_run=is_dry_run)

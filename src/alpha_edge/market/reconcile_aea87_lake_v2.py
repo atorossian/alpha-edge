@@ -5,6 +5,7 @@ tool never queries or modifies active S3 datasets. Comparison never assumes
 that legacy 'ret_close_adjusted_usd' is arithmetic: callers must assert its
 semantics or returns are marked NOT_COMPARABLE.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -62,10 +63,15 @@ def _canonical(df: pd.DataFrame, *, required: set[str], label: str) -> pd.DataFr
 
 
 def reconcile(
-    candidate_dir: Path, legacy_prices: Path, legacy_returns: Path,
-    *, return_kind: str = "unknown",
-    price_atol: float = 1e-8, price_rtol: float = 1e-6,
-    return_atol: float = 1e-9, return_rtol: float = 1e-6,
+    candidate_dir: Path,
+    legacy_prices: Path,
+    legacy_returns: Path,
+    *,
+    return_kind: str = "unknown",
+    price_atol: float = 1e-8,
+    price_rtol: float = 1e-6,
+    return_atol: float = 1e-9,
+    return_rtol: float = 1e-6,
 ) -> tuple[pd.DataFrame, pd.DataFrame, dict]:
     """Return (full outer join detail, asset summary, reproducible manifest)."""
     if return_kind not in {"simple", "log", "unknown"}:
@@ -75,39 +81,52 @@ def reconcile(
     manifest, _ = validate_local_candidate(candidate_dir)
     candidate = _canonical(
         pd.read_parquet(candidate_dir / "gold.parquet"),
-        required={"asset_id", "session_date", PRICE_COL, V2_RETURN_COL, V2_LOG_COL,
-                  "quality_status", "return_quality_status"},
+        required={
+            "asset_id",
+            "session_date",
+            PRICE_COL,
+            V2_RETURN_COL,
+            V2_LOG_COL,
+            "quality_status",
+            "return_quality_status",
+        },
         label="V2 Gold",
     )
-    old_prices = _canonical(
-        _read(legacy_prices), required={"asset_id", PRICE_COL}, label="AEA-87 prices"
-    )
+    old_prices = _canonical(_read(legacy_prices), required={"asset_id", PRICE_COL}, label="AEA-87 prices")
     old_returns = _canonical(
-        _read(legacy_returns), required={"asset_id", LEGACY_RETURN_COL},
+        _read(legacy_returns),
+        required={"asset_id", LEGACY_RETURN_COL},
         label="AEA-87 returns",
     )
     keys = ["asset_id", "session_date"]
-    price_table = old_prices[keys + [PRICE_COL]].rename(
-        columns={PRICE_COL: "legacy_close_adjusted_usd"}
+    price_table = old_prices[keys + [PRICE_COL]].rename(columns={PRICE_COL: "legacy_close_adjusted_usd"})
+    return_table = old_returns[keys + [LEGACY_RETURN_COL]].rename(columns={LEGACY_RETURN_COL: "legacy_return"})
+    old = price_table.merge(
+        return_table, on=keys, how="outer", indicator="legacy_price_return_presence", validate="one_to_one"
     )
-    return_table = old_returns[keys + [LEGACY_RETURN_COL]].rename(
-        columns={LEGACY_RETURN_COL: "legacy_return"}
-    )
-    old = price_table.merge(return_table, on=keys, how="outer", indicator="legacy_price_return_presence",
-                            validate="one_to_one")
-    v2_cols = keys + [PRICE_COL, V2_RETURN_COL, V2_LOG_COL,
-                      "quality_status", "return_quality_status"]
-    for optional in ("provider_symbol", "currency_original", "observation_origin",
-                     "correction_id", "verification_status", "quality_reason"):
+    v2_cols = keys + [PRICE_COL, V2_RETURN_COL, V2_LOG_COL, "quality_status", "return_quality_status"]
+    for optional in (
+        "provider_symbol",
+        "currency_original",
+        "observation_origin",
+        "correction_id",
+        "verification_status",
+        "quality_reason",
+    ):
         if optional in candidate.columns:
             v2_cols.append(optional)
-    new = candidate[v2_cols].rename(columns={
-        PRICE_COL: "v2_close_adjusted_usd",
-        V2_RETURN_COL: "v2_return_simple",
-        V2_LOG_COL: "v2_return_log",
-    })
-    detail = old.merge(new, on=keys, how="outer", indicator="historical_presence",
-                       validate="one_to_one").sort_values(keys).reset_index(drop=True)
+    new = candidate[v2_cols].rename(
+        columns={
+            PRICE_COL: "v2_close_adjusted_usd",
+            V2_RETURN_COL: "v2_return_simple",
+            V2_LOG_COL: "v2_return_log",
+        }
+    )
+    detail = (
+        old.merge(new, on=keys, how="outer", indicator="historical_presence", validate="one_to_one")
+        .sort_values(keys)
+        .reset_index(drop=True)
+    )
 
     both = detail["historical_presence"].eq("both")
     lp = pd.to_numeric(detail["legacy_close_adjusted_usd"], errors="coerce")
@@ -122,7 +141,8 @@ def reconcile(
     )
     detail["price_comparison"] = np.select(
         [~both, both & ~prices_finite, both & close],
-        ["not_shared_session", "unavailable_price", "match"], default="mismatch"
+        ["not_shared_session", "unavailable_price", "match"],
+        default="mismatch",
     )
 
     lr = pd.to_numeric(detail["legacy_return"], errors="coerce")
@@ -141,43 +161,43 @@ def reconcile(
         detail["return_comparison"] = np.select(
             [~both, both & ~returns_finite, both & close_ret],
             ["not_shared_session", "unavailable_return", "match"],
-            default="mismatch"
+            default="mismatch",
         )
 
     detail["review_reason"] = ""
+
     def add_reason(mask: pd.Series, reason: str) -> None:
         detail.loc[mask, "review_reason"] += reason + ";"
+
     add_reason(detail["historical_presence"].eq("left_only"), "aea87_only_session")
     add_reason(detail["historical_presence"].eq("right_only"), "v2_only_session")
-    add_reason(detail["legacy_price_return_presence"].eq("left_only").fillna(False),
-               "aea87_price_without_return")
-    add_reason(detail["legacy_price_return_presence"].eq("right_only").fillna(False),
-               "aea87_return_without_price")
+    add_reason(detail["legacy_price_return_presence"].eq("left_only").fillna(False), "aea87_price_without_return")
+    add_reason(detail["legacy_price_return_presence"].eq("right_only").fillna(False), "aea87_return_without_price")
     add_reason(detail["price_comparison"].eq("mismatch"), "price_mismatch")
     add_reason(detail["price_comparison"].eq("unavailable_price"), "price_unavailable")
     add_reason(detail["return_comparison"].eq("mismatch"), "return_mismatch")
     add_reason(detail["return_comparison"].eq("unavailable_return"), "return_unavailable")
     if "observation_origin" in detail:
-        add_reason(detail["observation_origin"].eq("user_supplied_manual").fillna(False),
-                   "manual_correction")
+        add_reason(detail["observation_origin"].eq("user_supplied_manual").fillna(False), "manual_correction")
     if "quality_status" in detail:
-        add_reason(detail["quality_status"].eq("quarantined").fillna(False),
-                   "v2_quarantined")
+        add_reason(detail["quality_status"].eq("quarantined").fillna(False), "v2_quarantined")
     detail["review_reason"] = detail["review_reason"].str.rstrip(";")
     summaries = []
     for asset_id, frame in detail.groupby("asset_id", sort=True):
-        summaries.append({
-            "asset_id": asset_id,
-            "shared_sessions": int(frame["historical_presence"].eq("both").sum()),
-            "aea87_only_sessions": int(frame["historical_presence"].eq("left_only").sum()),
-            "v2_only_sessions": int(frame["historical_presence"].eq("right_only").sum()),
-            "price_matches": int(frame["price_comparison"].eq("match").sum()),
-            "price_mismatches": int(frame["price_comparison"].eq("mismatch").sum()),
-            "price_unavailable": int(frame["price_comparison"].eq("unavailable_price").sum()),
-            "return_matches": int(frame["return_comparison"].eq("match").sum()),
-            "return_mismatches": int(frame["return_comparison"].eq("mismatch").sum()),
-            "review_rows": int(frame["review_reason"].ne("").sum()),
-        })
+        summaries.append(
+            {
+                "asset_id": asset_id,
+                "shared_sessions": int(frame["historical_presence"].eq("both").sum()),
+                "aea87_only_sessions": int(frame["historical_presence"].eq("left_only").sum()),
+                "v2_only_sessions": int(frame["historical_presence"].eq("right_only").sum()),
+                "price_matches": int(frame["price_comparison"].eq("match").sum()),
+                "price_mismatches": int(frame["price_comparison"].eq("mismatch").sum()),
+                "price_unavailable": int(frame["price_comparison"].eq("unavailable_price").sum()),
+                "return_matches": int(frame["return_comparison"].eq("match").sum()),
+                "return_mismatches": int(frame["return_comparison"].eq("mismatch").sum()),
+                "review_rows": int(frame["review_reason"].ne("").sum()),
+            }
+        )
     summary = pd.DataFrame(summaries)
     source = {
         "schema": "alpha_edge_aea87_lake_v2_reconciliation_1",
@@ -186,34 +206,41 @@ def reconcile(
         "legacy_returns_sha256": _sha(legacy_returns),
         "legacy_return_kind": return_kind,
         "tolerance": {
-            "price_atol": price_atol, "price_rtol": price_rtol,
-            "return_atol": return_atol, "return_rtol": return_rtol,
+            "price_atol": price_atol,
+            "price_rtol": price_rtol,
+            "return_atol": return_atol,
+            "return_rtol": return_rtol,
         },
         "legacy_price_rows": len(old_prices),
         "legacy_return_rows": len(old_returns),
         "v2_gold_rows": len(candidate),
         "joined_rows": len(detail),
         "assets": len(summary),
-        "comparison_status": "review_required" if (
-            detail["review_reason"].ne("").any() or return_kind == "unknown"
+        "comparison_status": "review_required"
+        if (
+            detail["review_reason"].ne("").any()
+            or return_kind == "unknown"
             or manifest.get("acceptance") != "initial_contract_pass"
-        ) else "comparison_pass",
+        )
+        else "comparison_pass",
         "note": "Historical equivalence is not production approval. Missing/ambiguous legacy "
-                "return conventions must be explicitly resolved. Session-date aliases are "
-                "interpreted as exchange date labels, not UTC instants.",
+        "return conventions must be explicitly resolved. Session-date aliases are "
+        "interpreted as exchange date labels, not UTC instants.",
     }
     return detail, summary, source
 
 
 def generate(
-    candidate_dir: Path, legacy_prices: Path, legacy_returns: Path, *,
-    output: Path, return_kind: str = "unknown",
+    candidate_dir: Path,
+    legacy_prices: Path,
+    legacy_returns: Path,
+    *,
+    output: Path,
+    return_kind: str = "unknown",
 ) -> dict:
     if output.exists():
         raise FileExistsError(f"Refusing to overwrite existing reconciliation: {output}")
-    detail, summary, manifest = reconcile(
-        candidate_dir, legacy_prices, legacy_returns, return_kind=return_kind
-    )
+    detail, summary, manifest = reconcile(candidate_dir, legacy_prices, legacy_returns, return_kind=return_kind)
     output.mkdir(parents=True)
     detail_path = output / "session_differences.csv"
     summary_path = output / "asset_reconciliation_summary.csv"
@@ -232,14 +259,21 @@ def main() -> None:
     parser.add_argument("--candidate-dir", type=Path, required=True)
     parser.add_argument("--legacy-prices", type=Path, required=True)
     parser.add_argument("--legacy-returns", type=Path, required=True)
-    parser.add_argument("--legacy-return-kind", choices=["unknown", "simple", "log"],
-                        default="unknown")
+    parser.add_argument("--legacy-return-kind", choices=["unknown", "simple", "log"], default="unknown")
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
-    print(json.dumps(generate(
-        args.candidate_dir, args.legacy_prices, args.legacy_returns,
-        output=args.output, return_kind=args.legacy_return_kind,
-    ), indent=2))
+    print(
+        json.dumps(
+            generate(
+                args.candidate_dir,
+                args.legacy_prices,
+                args.legacy_returns,
+                output=args.output,
+                return_kind=args.legacy_return_kind,
+            ),
+            indent=2,
+        )
+    )
 
 
 if __name__ == "__main__":

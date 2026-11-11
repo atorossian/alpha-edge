@@ -10,7 +10,9 @@ from alpha_edge.core.runtime import load_runtime_config
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description="Verify dividend count, duplicate fingerprints, and native-currency totals.")
+    ap = argparse.ArgumentParser(
+        description="Verify dividend count, duplicate fingerprints, and native-currency totals."
+    )
     ap.add_argument("--env", default="prod", choices=["dev", "staging", "prod"])
     args = ap.parse_args()
 
@@ -25,11 +27,9 @@ def main() -> None:
         if token:
             kwargs["ContinuationToken"] = token
         resp = s3.list_objects_v2(**kwargs)
-        keys.extend([
-            x["Key"]
-            for x in resp.get("Contents", [])
-            if x["Key"].endswith(".json") and "/dividend_" in x["Key"]
-        ])
+        keys.extend(
+            [x["Key"] for x in resp.get("Contents", []) if x["Key"].endswith(".json") and "/dividend_" in x["Key"]]
+        )
         if not resp.get("IsTruncated"):
             break
         token = resp.get("NextContinuationToken")

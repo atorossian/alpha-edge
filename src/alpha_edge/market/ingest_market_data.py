@@ -98,6 +98,7 @@ def _make_market_store(*, bucket: str, region: str, market_root: str) -> MarketS
             )
         return MarketStore(bucket=bucket, region=region)
 
+
 # -------------------------
 # timezone helpers (STANDARD: tz-aware UTC everywhere)
 # -------------------------
@@ -105,6 +106,7 @@ def _to_utc_ts(x) -> pd.Timestamp:
     """Parse anything into a tz-aware UTC Timestamp (or NaT)."""
     t = pd.to_datetime(x, errors="coerce", utc=True)
     return pd.Timestamp(t) if pd.notna(t) else pd.NaT
+
 
 def _valid_latest_price_rows(ohlcv_usd: pd.DataFrame) -> pd.DataFrame:
     """
@@ -341,6 +343,7 @@ def _yf_pop_error_for(symbol: str) -> str | None:
     """
     try:
         import yfinance.shared as yfs  # type: ignore
+
         if not hasattr(yfs, "_ERRORS"):
             return None
 
@@ -449,6 +452,7 @@ def fetch_yahoo_currency(ticker: str, session=None) -> dict:
 
     return out
 
+
 def _as_1d_series(df: pd.DataFrame, col: str) -> pd.Series:
     """
     Return a single Series for a column name.
@@ -515,10 +519,7 @@ def download_ohlcv(
             best_score = -1
 
             for level in range(df.columns.nlevels):
-                vals = [
-                    str(x).strip().replace(" ", "_").lower()
-                    for x in df.columns.get_level_values(level)
-                ]
+                vals = [str(x).strip().replace(" ", "_").lower() for x in df.columns.get_level_values(level)]
                 score = sum(v in field_names for v in vals)
                 if score > best_score:
                     best_score = score
@@ -533,9 +534,7 @@ def download_ohlcv(
                     continue
                 symbols = {str(x).strip().upper() for x in df.columns.get_level_values(level)}
                 if symbols != {str(ticker).strip().upper()}:
-                    raise ValueError(
-                        f"OHLCV[{ticker}]: unexpected symbol level {level}: {sorted(symbols)}"
-                    )
+                    raise ValueError(f"OHLCV[{ticker}]: unexpected symbol level {level}: {sorted(symbols)}")
             df.columns = df.columns.get_level_values(best_level)
 
         df.columns = [str(c).strip().replace(" ", "_").lower() for c in df.columns]
@@ -699,10 +698,48 @@ def validate_mapping_continuity(
 
 
 _FIAT_CCY = {
-    "USD", "EUR", "GBP", "JPY", "CHF", "CAD", "AUD", "NZD", "SEK", "NOK", "DKK",
-    "CNY", "CNH", "HKD", "SGD", "KRW", "TWD", "INR", "BRL", "MXN", "ZAR", "RUB",
-    "PLN", "CZK", "HUF", "TRY", "ILS", "SAR", "AED", "QAR", "KWD", "BHD", "OMR",
-    "THB", "MYR", "IDR", "PHP", "VND", "CLP", "COP", "PEN", "ARS",
+    "USD",
+    "EUR",
+    "GBP",
+    "JPY",
+    "CHF",
+    "CAD",
+    "AUD",
+    "NZD",
+    "SEK",
+    "NOK",
+    "DKK",
+    "CNY",
+    "CNH",
+    "HKD",
+    "SGD",
+    "KRW",
+    "TWD",
+    "INR",
+    "BRL",
+    "MXN",
+    "ZAR",
+    "RUB",
+    "PLN",
+    "CZK",
+    "HUF",
+    "TRY",
+    "ILS",
+    "SAR",
+    "AED",
+    "QAR",
+    "KWD",
+    "BHD",
+    "OMR",
+    "THB",
+    "MYR",
+    "IDR",
+    "PHP",
+    "VND",
+    "CLP",
+    "COP",
+    "PEN",
+    "ARS",
 }
 
 
@@ -925,12 +962,7 @@ class RateLimiter:
 
 
 def call_yf_with_retries(
-    fn,
-    *,
-    sem: threading.Semaphore,
-    limiter: RateLimiter,
-    attempts: int = 2,
-    base_sleep: float = 0.4
+    fn, *, sem: threading.Semaphore, limiter: RateLimiter, attempts: int = 2, base_sleep: float = 0.4
 ):
     """
     Wrap any yfinance call with:
@@ -1035,9 +1067,7 @@ def ingest(
     u["yahoo_ticker"] = u.get("yahoo_ticker", u["ticker"]).astype(str).str.strip()
 
     u["yahoo_ticker_norm"] = (
-        u["yahoo_ticker"]
-        .apply(_normalize_fx_symbol_to_yahoo)
-        .apply(_normalize_crypto_symbol_to_yahoo)
+        u["yahoo_ticker"].apply(_normalize_fx_symbol_to_yahoo).apply(_normalize_crypto_symbol_to_yahoo)
     )
 
     if "currency" in u.columns:
@@ -1059,9 +1089,7 @@ def ingest(
         needed = {"currency", "date", "fx_to_usd", "validation_status"}
         if not needed.issubset(validated_fx.columns):
             raise ValueError("Validated FX table missing required columns")
-        validated_fx = validated_fx.loc[
-            validated_fx["validation_status"].isin(["VALID", "VALID_AFTER_GAP"])
-        ].copy()
+        validated_fx = validated_fx.loc[validated_fx["validation_status"].isin(["VALID", "VALID_AFTER_GAP"])].copy()
         validated_fx["date"] = pd.to_datetime(validated_fx["date"], utc=True).dt.normalize()
         validated_fx["currency"] = validated_fx["currency"].astype(str).str.upper()
         if validated_fx.duplicated(["currency", "date"]).any():
@@ -1136,7 +1164,7 @@ def ingest(
     except Exception:
         prev_adjusted_px_map = {}
 
-    latest_prices_rows: list[dict] = []             # compatibility combined snapshot
+    latest_prices_rows: list[dict] = []  # compatibility combined snapshot
     latest_prices_raw_rows: list[dict] = []
     latest_prices_adjusted_rows: list[dict] = []
     latest_returns_rows: list[dict] = []
@@ -1156,8 +1184,10 @@ def ingest(
             return
 
         now = time.time()
-        if (not force) and (done % int(flush_failures_every) != 0) and (
-            (now - last_flush_ts) < float(flush_failures_min_seconds)
+        if (
+            (not force)
+            and (done % int(flush_failures_every) != 0)
+            and ((now - last_flush_ts) < float(flush_failures_min_seconds))
         ):
             return
 
@@ -1254,7 +1284,14 @@ def ingest(
 
         try:
             df = call_yf_with_retries(
-                lambda: download_ohlcv(yahoo_sym, start=start, end=end, interval=interval, session=None, allow_cache=not bool(repair_bad_cells)),
+                lambda: download_ohlcv(
+                    yahoo_sym,
+                    start=start,
+                    end=end,
+                    interval=interval,
+                    session=None,
+                    allow_cache=not bool(repair_bad_cells),
+                ),
                 sem=yf_sem,
                 limiter=limiter,
             )
@@ -1324,7 +1361,11 @@ def ingest(
                     df["fx_to_usd"] = fx_s.values
                     if df["fx_to_usd"].isna().any():
                         if repair_bad_cells:
-                            return {"status":"repair_missing_validated_fx", "asset_id":asset_id, "error":f"{ccy}: no validated rate for historical dates"}
+                            return {
+                                "status": "repair_missing_validated_fx",
+                                "asset_id": asset_id,
+                                "error": f"{ccy}: no validated rate for historical dates",
+                            }
                         df = df.dropna(subset=["fx_to_usd"])
                         if df.empty:
                             return {
@@ -1339,7 +1380,7 @@ def ingest(
             df["asset_id"] = asset_id
             df["ticker"] = ticker
             df["yahoo_ticker"] = yahoo_sym
-            df["currency"] = ("USD" if is_fx_asset else ccy)
+            df["currency"] = "USD" if is_fx_asset else ccy
 
             # Phase 0 explicit semantics
             close_s = _to_numeric_1d(df, "close")
@@ -1357,9 +1398,12 @@ def ingest(
                 rates = pd.to_numeric(df["fx_to_usd"], errors="coerce")
                 expected = local * rates
                 ok = (
-                    np.isfinite(local) & (local > 0)
-                    & np.isfinite(rates) & (rates > 0)
-                    & np.isfinite(usd) & (usd > 0)
+                    np.isfinite(local)
+                    & (local > 0)
+                    & np.isfinite(rates)
+                    & (rates > 0)
+                    & np.isfinite(usd)
+                    & (usd > 0)
                     & np.isclose(usd, expected, rtol=1e-10, atol=1e-10)
                 )
                 if not bool(ok.all()):
@@ -1408,31 +1452,35 @@ def ingest(
                 have_dates = set(man.get("dates", []))
                 have_parts = set(man.get("parts", []))
 
-                to_write = (g.copy() if repair_bad_cells else g[~g["date_str"].isin(have_dates)].copy())
+                to_write = g.copy() if repair_bad_cells else g[~g["date_str"].isin(have_dates)].copy()
                 if to_write.empty:
                     continue
                 if repair_bad_cells and have_dates and not have_dates.issubset(set(to_write["date_str"])):
-                    return {"status":"repair_incomplete_source", "asset_id":asset_id,
-                            "error":f"{year}: fresh source missing {len(have_dates - set(to_write['date_str']))} existing dates; original preserved"}
+                    return {
+                        "status": "repair_incomplete_source",
+                        "asset_id": asset_id,
+                        "error": f"{year}: fresh source missing {len(have_dates - set(to_write['date_str']))} existing dates; original preserved",
+                    }
                 if repair_bad_cells:
                     # Preserve old objects. Publish new immutable part first, then switch
                     # active manifest references. Back up the old manifest for rollback.
-                    import json as _json
                     backup_key = f"{store.base_prefix}/repairs/aea87/full_history/asset_id={asset_id}/year={year}/ohlcv_manifest.json"
                     manifest_key = store._manifest_key(table="ohlcv_usd", asset_id=asset_id, year=int(year))
                     try:
                         original_manifest = store._get_bytes(manifest_key)
                         if store._key_exists(backup_key):
-                            return {"status":"repair_backup_exists", "asset_id":asset_id, "error":backup_key}
+                            return {"status": "repair_backup_exists", "asset_id": asset_id, "error": backup_key}
                         store._put_bytes(backup_key, original_manifest, "application/json")
                     except Exception as exc:
-                        return {"status":"repair_backup_failed", "asset_id":asset_id, "error":str(exc)}
+                        return {"status": "repair_backup_failed", "asset_id": asset_id, "error": str(exc)}
                 written_parts = store.write_ohlcv_usd_partitioned(to_write.drop(columns=["date_str"]))
                 rows_written += int(to_write.shape[0])
                 new_dates = sorted(set(to_write["date_str"].tolist()))
                 newly_written_dates.update(new_dates)
                 store.write_asset_year_manifest(
-                    table="ohlcv_usd", asset_id=asset_id, year=int(year),
+                    table="ohlcv_usd",
+                    asset_id=asset_id,
+                    year=int(year),
                     dates=(new_dates if repair_bad_cells else list(have_dates.union(new_dates))),
                     parts=(written_parts if repair_bad_cells else list(have_parts.union(written_parts))),
                 )
@@ -1444,8 +1492,10 @@ def ingest(
             px = ohlcv_usd[["date", "close_adjusted_usd"]].copy()
             px["date"] = pd.to_datetime(px["date"], errors="coerce", utc=True).dt.normalize()
             px["close_adjusted_usd"] = pd.to_numeric(px["close_adjusted_usd"], errors="coerce")
-            px = px.dropna(subset=["date", "close_adjusted_usd"]).sort_values("date").drop_duplicates(
-                subset=["date"], keep="last"
+            px = (
+                px.dropna(subset=["date", "close_adjusted_usd"])
+                .sort_values("date")
+                .drop_duplicates(subset=["date"], keep="last")
             )
 
             if (not is_force) and (asset_id in prev_adjusted_px_map) and (not px.empty):
@@ -1482,7 +1532,9 @@ def ingest(
                             "date": ret_new["date"].values,
                             "asset_id": asset_id,
                             "ticker": ticker,
-                            "ret_log_close_adjusted_usd": ret_new["ret_log_close_adjusted_usd"].astype("float64").values,
+                            "ret_log_close_adjusted_usd": ret_new["ret_log_close_adjusted_usd"]
+                            .astype("float64")
+                            .values,
                         }
                     )
 
@@ -1496,25 +1548,30 @@ def ingest(
                         rg = rg.drop(columns=["year"]).copy()
                         rg["date_str"] = rg["date"].dt.strftime("%Y-%m-%d")
 
-                        rman = store.read_asset_year_manifest(table="returns_usd", asset_id=asset_id, year=int(year)) or {}
+                        rman = (
+                            store.read_asset_year_manifest(table="returns_usd", asset_id=asset_id, year=int(year)) or {}
+                        )
                         have_dates = set(rman.get("dates", []))
                         have_parts = set(rman.get("parts", []))
 
-                        r_to_write = (rg.copy() if repair_bad_cells else rg[~rg["date_str"].isin(have_dates)].copy())
+                        r_to_write = rg.copy() if repair_bad_cells else rg[~rg["date_str"].isin(have_dates)].copy()
                         if r_to_write.empty:
                             continue
 
                         if repair_bad_cells:
-                            import json as _json
                             rkey = store._manifest_key(table="returns_usd", asset_id=asset_id, year=int(year))
                             backup = f"{store.base_prefix}/repairs/aea87/full_history/asset_id={asset_id}/year={year}/returns_manifest.json"
                             try:
                                 prior = store._get_bytes(rkey)
                                 if store._key_exists(backup):
-                                    return {"status":"repair_backup_exists", "asset_id":asset_id, "error":backup}
+                                    return {"status": "repair_backup_exists", "asset_id": asset_id, "error": backup}
                                 store._put_bytes(backup, prior, "application/json")
                             except Exception as exc:
-                                return {"status":"repair_returns_backup_failed", "asset_id":asset_id, "error":str(exc)}
+                                return {
+                                    "status": "repair_returns_backup_failed",
+                                    "asset_id": asset_id,
+                                    "error": str(exc),
+                                }
                         written_parts = store.write_returns_usd_partitioned(r_to_write.drop(columns=["date_str"]))
                         returns_written += int(r_to_write.shape[0])
 
@@ -1555,8 +1612,7 @@ def ingest(
 
             if raw_latest_date != last_date:
                 last_price_row["_freshness"] = (
-                    f"ignored_incomplete_latest_bar: raw_latest_date={raw_latest_date} "
-                    f"snapshot_date={last_date}"
+                    f"ignored_incomplete_latest_bar: raw_latest_date={raw_latest_date} snapshot_date={last_date}"
                 )
             elif freshness_note:
                 last_price_row["_freshness"] = freshness_note
@@ -1629,7 +1685,9 @@ def ingest(
                     prev_adjusted_px_map[aid] = float(res["last_close_adjusted_usd"])
 
                 if res.get("freshness_note"):
-                    print(f"[freshness][warn] {res.get('ticker')} {res.get('yahoo_ticker')} {res.get('freshness_note')}")
+                    print(
+                        f"[freshness][warn] {res.get('ticker')} {res.get('yahoo_ticker')} {res.get('freshness_note')}"
+                    )
 
             elif st in {"skip_up_to_date", "skip_already_ingested"}:
                 skipped += 1
@@ -1656,7 +1714,7 @@ def ingest(
                 print(
                     f"[ingest] done={done}/{n_total} ok={ok} skipped={skipped} failed={failed} "
                     f"rets_written={total_returns_written} fx_cached={len(fx_cache)} "
-                    f"rate={rate:.2f} assets/s elapsed={elapsed/60:.1f}m"
+                    f"rate={rate:.2f} assets/s elapsed={elapsed / 60:.1f}m"
                 )
 
     # ---------- SNAPSHOTS / STATE WRITE ----------
@@ -1810,9 +1868,8 @@ def ingest(
     print(f"[FX] currencies_downloaded={len(fx_cache)} -> {sorted(fx_cache.keys())}")
     print(f"state_entries={len(last_state)}")
     print(f"expected_last_closed_day_utc={expected_last.strftime('%Y-%m-%d')}")
-    print(f"elapsed_s={time.time()-t_start:.1f}")
+    print(f"elapsed_s={time.time() - t_start:.1f}")
     print(f"[cache] dir={_CACHE_DIR}")
-
 
 
 def publish_validated_fx_from_local(*, input_dir: str, run_id: str, store: MarketStore, upload: bool) -> str:
@@ -1820,6 +1877,7 @@ def publish_validated_fx_from_local(*, input_dir: str, run_id: str, store: Marke
     import json
     from pathlib import Path
     import pandas as pd
+
     root = Path(input_dir)
     report_path = root / "validation_report.json"
     data_path = root / "fx_history_all.parquet"
@@ -1857,10 +1915,17 @@ def publish_validated_fx_from_local(*, input_dir: str, run_id: str, store: Marke
     return dest
 
 
-
-def repair_full_histories(*, cfg, bad_cells: str, fx_parquet: str, universe_path: str,
-                          start: str, end: str | None, max_assets: int | None,
-                          confirm_prod_write: bool) -> None:
+def repair_full_histories(
+    *,
+    cfg,
+    bad_cells: str,
+    fx_parquet: str,
+    universe_path: str,
+    start: str,
+    end: str | None,
+    max_assets: int | None,
+    confirm_prod_write: bool,
+) -> None:
     """AEA-87 direct full-history replacement, with per-asset manifest rollback.
 
     This is intentionally separate from the ordinary append-only ingestion loop.
@@ -1880,7 +1945,8 @@ def repair_full_histories(*, cfg, bad_cells: str, fx_parquet: str, universe_path
         raise ValueError("Historical repair requires --env prod")
 
     store = _make_market_store(
-        bucket=_cfg_bucket(cfg), region=_cfg_region(cfg),
+        bucket=_cfg_bucket(cfg),
+        region=_cfg_region(cfg),
         market_root=_cfg_market_root(cfg),
     )
     bad = pd.read_csv(bad_cells)
@@ -1913,6 +1979,7 @@ def repair_full_histories(*, cfg, bad_cells: str, fx_parquet: str, universe_path
     fx_lookup = {c: g.set_index("date")["fx_to_usd"] for c, g in fx.groupby("currency")}
 
     report = []
+
     # Preserve all active historical years even when Yahoo no longer serves them.
     def existing_history(aid: str) -> pd.DataFrame:
         prefix = f"{store.manifests_prefix}/ohlcv_usd/asset_id={aid}/"
@@ -1939,9 +2006,9 @@ def repair_full_histories(*, cfg, bad_cells: str, fx_parquet: str, universe_path
     total = len(universe)
     for seq, (_, asset) in enumerate(universe.iterrows(), 1):
         aid = str(asset["asset_id"]).strip()
-        yahoo = _normalize_crypto_symbol_to_yahoo(_normalize_fx_symbol_to_yahoo(
-            str(asset.get("yahoo_ticker") or asset.get("ticker")).strip().upper()
-        ))
+        yahoo = _normalize_crypto_symbol_to_yahoo(
+            _normalize_fx_symbol_to_yahoo(str(asset.get("yahoo_ticker") or asset.get("ticker")).strip().upper())
+        )
         ticker = str(asset.get("ticker") or yahoo)
         currency = _clean_ccy(asset.get("currency"))
         if aid.startswith("CRYPTO:") or _is_fx_pair_like_symbol(yahoo):
@@ -1952,8 +2019,7 @@ def repair_full_histories(*, cfg, bad_cells: str, fx_parquet: str, universe_path
         print(f"[repair] {seq}/{total} {aid} ({yahoo})")
         updated = []
         try:
-            downloaded = download_ohlcv(yahoo, start=start, end=end,
-                                        interval="1d", allow_cache=False)
+            downloaded = download_ohlcv(yahoo, start=start, end=end, interval="1d", allow_cache=False)
             if downloaded.empty:
                 raise ValueError("Fresh Yahoo history is empty")
             downloaded["date"] = pd.to_datetime(downloaded["date"], utc=True).dt.normalize()
@@ -1975,7 +2041,9 @@ def repair_full_histories(*, cfg, bad_cells: str, fx_parquet: str, universe_path
                 # Missing FX does not authorize an invented conversion rate.
                 # Prefer the original bar at these dates and flag it as retained.
                 if rate.isna().any():
-                    print(f"[repair][coverage] {aid}: {int(rate.isna().sum())} downloaded rows lack validated FX; retaining old where present")
+                    print(
+                        f"[repair][coverage] {aid}: {int(rate.isna().sum())} downloaded rows lack validated FX; retaining old where present"
+                    )
             for col in ["open", "high", "low", "close", "adj_close", "volume", "fx_to_usd"]:
                 downloaded[col] = pd.to_numeric(downloaded[col], errors="coerce")
             if downloaded["close"].isna().all() or downloaded["adj_close"].isna().all():
@@ -1988,13 +2056,32 @@ def repair_full_histories(*, cfg, bad_cells: str, fx_parquet: str, universe_path
             downloaded["close_adjusted_usd"] = downloaded["adj_close"] * downloaded["fx_to_usd"]
             downloaded["close_usd"] = downloaded["close_raw_usd"]
             downloaded["adj_close_usd"] = downloaded["close_adjusted_usd"]
-            cols = ["date", "asset_id", "ticker", "yahoo_ticker", "open", "high",
-                    "low", "close", "adj_close", "volume", "currency", "fx_to_usd",
-                    "close_raw_usd", "close_adjusted_usd", "close_usd", "adj_close_usd"]
+            cols = [
+                "date",
+                "asset_id",
+                "ticker",
+                "yahoo_ticker",
+                "open",
+                "high",
+                "low",
+                "close",
+                "adj_close",
+                "volume",
+                "currency",
+                "fx_to_usd",
+                "close_raw_usd",
+                "close_adjusted_usd",
+                "close_usd",
+                "adj_close_usd",
+            ]
             prices = downloaded[cols].copy()
-            prices = prices.loc[prices["close"].notna() & prices["adj_close"].notna()
-                                & prices["fx_to_usd"].notna()
-                                & prices["close"].gt(0) & prices["adj_close"].gt(0)]
+            prices = prices.loc[
+                prices["close"].notna()
+                & prices["adj_close"].notna()
+                & prices["fx_to_usd"].notna()
+                & prices["close"].gt(0)
+                & prices["adj_close"].gt(0)
+            ]
             replaced_count = len(prices)
             if not historical.empty:
                 historical = historical.copy()
@@ -2012,12 +2099,15 @@ def repair_full_histories(*, cfg, bad_cells: str, fx_parquet: str, universe_path
                     historical_rate = fx_lookup[currency].reindex(pd.DatetimeIndex(retained["date"]))
                     reconvert = historical_rate.notna().to_numpy()
                     retained.loc[reconvert, "fx_to_usd"] = historical_rate.to_numpy()[reconvert]
-                    for raw_col, usd_col in (("close", "close_raw_usd"), ("adj_close", "close_adjusted_usd"),
-                                             ("close", "close_usd"), ("adj_close", "adj_close_usd")):
-                        retained.loc[reconvert, usd_col] = (
-                            pd.to_numeric(retained.loc[reconvert, raw_col], errors="coerce")
-                            * pd.to_numeric(retained.loc[reconvert, "fx_to_usd"], errors="coerce")
-                        )
+                    for raw_col, usd_col in (
+                        ("close", "close_raw_usd"),
+                        ("adj_close", "close_adjusted_usd"),
+                        ("close", "close_usd"),
+                        ("adj_close", "adj_close_usd"),
+                    ):
+                        retained.loc[reconvert, usd_col] = pd.to_numeric(
+                            retained.loc[reconvert, raw_col], errors="coerce"
+                        ) * pd.to_numeric(retained.loc[reconvert, "fx_to_usd"], errors="coerce")
                 prices = pd.concat([retained, prices], ignore_index=True)
             else:
                 original_dates = set()
@@ -2030,12 +2120,16 @@ def repair_full_histories(*, cfg, bad_cells: str, fx_parquet: str, universe_path
                 raise ValueError("No valid refreshed observations, refusing replacement")
             px = prices[["date", "close_adjusted_usd"]].dropna()
             px = px.loc[px["close_adjusted_usd"].gt(0)].copy()
-            px["ret_log_close_adjusted_usd"] = np.log(
-                px["close_adjusted_usd"] / px["close_adjusted_usd"].shift(1)
-            )
+            px["ret_log_close_adjusted_usd"] = np.log(px["close_adjusted_usd"] / px["close_adjusted_usd"].shift(1))
             px = px.replace([np.inf, -np.inf], np.nan).dropna(subset=["ret_log_close_adjusted_usd"])
-            returns = pd.DataFrame({"date": px["date"], "asset_id": aid, "ticker": ticker,
-                                    "ret_log_close_adjusted_usd": px["ret_log_close_adjusted_usd"]})
+            returns = pd.DataFrame(
+                {
+                    "date": px["date"],
+                    "asset_id": aid,
+                    "ticker": ticker,
+                    "ret_log_close_adjusted_usd": px["ret_log_close_adjusted_usd"],
+                }
+            )
             returns["ret_close_adjusted_usd"] = np.expm1(returns["ret_log_close_adjusted_usd"])
             returns["ret_adj_close_usd"] = returns["ret_close_adjusted_usd"]
 
@@ -2071,7 +2165,9 @@ def repair_full_histories(*, cfg, bad_cells: str, fx_parquet: str, universe_path
             # Back up all manifests before switching any references.
             for table, year, key, old, g, payload in pending:
                 if old is not None:
-                    backup = f"{store.base_prefix}/repairs/aea87/{run_id}/asset_id={aid}/{table}/{year}/old_manifest.json"
+                    backup = (
+                        f"{store.base_prefix}/repairs/aea87/{run_id}/asset_id={aid}/{table}/{year}/old_manifest.json"
+                    )
                     store._put_bytes(backup, old, "application/json")
                     if store._get_bytes(backup) != old:
                         raise IOError("Manifest backup verification failed")
@@ -2084,9 +2180,11 @@ def repair_full_histories(*, cfg, bad_cells: str, fx_parquet: str, universe_path
                 if hashlib.sha256(store._get_bytes(part)).digest() != hashlib.sha256(payload).digest():
                     raise IOError("Staged partition checksum mismatch")
                 manifest = {
-                    "asset_id": aid, "year": year,
+                    "asset_id": aid,
+                    "year": year,
                     "dates": sorted(g["date"].dt.strftime("%Y-%m-%d").unique().tolist()),
-                    "parts": [part], "repair_run_id": run_id,
+                    "parts": [part],
+                    "repair_run_id": run_id,
                 }
                 staged.append((key, old, manifest))
 
@@ -2096,12 +2194,23 @@ def repair_full_histories(*, cfg, bad_cells: str, fx_parquet: str, universe_path
                 store._put_bytes(key, json.dumps(manifest, indent=2).encode(), "application/json")
                 updated.append((key, old))
 
-            report.append({"asset_id": aid, "status": "REPLACED", "price_rows": len(prices),
-                           "refreshed_rows": replaced_count, "preserved_rows": preserved_count,
-                           "unrefreshed_flagged_dates": len(set(pd.to_datetime(
-                               bad.loc[bad["asset_id"].eq(aid), "date"], utc=True
-                           ).dt.normalize()) & (original_dates - refreshed_dates)) if "date" in bad else None,
-                           "return_rows": len(returns), "manifests": len(staged)})
+            report.append(
+                {
+                    "asset_id": aid,
+                    "status": "REPLACED",
+                    "price_rows": len(prices),
+                    "refreshed_rows": replaced_count,
+                    "preserved_rows": preserved_count,
+                    "unrefreshed_flagged_dates": len(
+                        set(pd.to_datetime(bad.loc[bad["asset_id"].eq(aid), "date"], utc=True).dt.normalize())
+                        & (original_dates - refreshed_dates)
+                    )
+                    if "date" in bad
+                    else None,
+                    "return_rows": len(returns),
+                    "manifests": len(staged),
+                }
+            )
         except Exception as exc:
             rollback_failed = False
             for key, old in reversed(updated):
@@ -2112,9 +2221,13 @@ def repair_full_histories(*, cfg, bad_cells: str, fx_parquet: str, universe_path
                         store._put_bytes(key, old, "application/json")
                 except Exception:
                     rollback_failed = True
-            report.append({"asset_id": aid,
-                           "status": "ROLLBACK_FAILED" if rollback_failed else "FAILED_OR_ROLLED_BACK",
-                           "error": str(exc)})
+            report.append(
+                {
+                    "asset_id": aid,
+                    "status": "ROLLBACK_FAILED" if rollback_failed else "FAILED_OR_ROLLED_BACK",
+                    "error": str(exc),
+                }
+            )
             print(f"[repair][error] {aid}: {exc}")
             if rollback_failed:
                 pd.DataFrame(report).to_csv(report_file, index=False)
@@ -2126,14 +2239,24 @@ def repair_full_histories(*, cfg, bad_cells: str, fx_parquet: str, universe_path
     print("[repair] results:", counts)
     unresolved_count = sum(int(r.get("unrefreshed_flagged_dates") or 0) for r in report)
     if unresolved_count:
-        print(f"[repair][warning] {unresolved_count} previously flagged dates were preserved from old S3; NOT considered repaired")
+        print(
+            f"[repair][warning] {unresolved_count} previously flagged dates were preserved from old S3; NOT considered repaired"
+        )
     if any(r["status"] != "REPLACED" for r in report) or missing or unresolved_count:
         raise RuntimeError("Repair incomplete: inspect campaign report; wide cache not rebuilt")
     # Rebuild derived wide returns cache only after all targeted assets are committed.
     import subprocess
     import sys
-    cmd = [sys.executable, "-m", "alpha_edge.market.build_returns_wide_cache",
-           "--env", "prod", "--confirm-prod-write", "--force"]
+
+    cmd = [
+        sys.executable,
+        "-m",
+        "alpha_edge.market.build_returns_wide_cache",
+        "--env",
+        "prod",
+        "--confirm-prod-write",
+        "--force",
+    ]
     print("[repair] rebuilding wide returns cache:", " ".join(cmd))
     subprocess.run(cmd, check=True)
     print("[repair] OHLCV, returns and wide-cache repair completed")
@@ -2162,8 +2285,16 @@ def parse_args() -> argparse.Namespace:
 
     ap.add_argument("--repair-mode", choices=["prepare", "promote"], default="prepare")
     ap.add_argument("--repair-run-id", default=None)
-    ap.add_argument("--repair-asset-ids", default=None, help="Comma-separated canonical asset_ids; prepare only these anomalous assets")
-    ap.add_argument("--repair-reset-asset-ids", default=None, help="Comma-separated IDs to replace with fresh history only (must be selected)")
+    ap.add_argument(
+        "--repair-asset-ids",
+        default=None,
+        help="Comma-separated canonical asset_ids; prepare only these anomalous assets",
+    )
+    ap.add_argument(
+        "--repair-reset-asset-ids",
+        default=None,
+        help="Comma-separated IDs to replace with fresh history only (must be selected)",
+    )
     ap.add_argument("--repair-bad-cells", help="AEA-87: CSV of anomalous asset IDs for full-history replacement")
     ap.add_argument("--repair-fx-parquet", help="AEA-87: validated local eight-currency FX Parquet")
     ap.add_argument("--ignore-existing-state", action="store_true")
@@ -2183,15 +2314,21 @@ def _main_impl() -> None:
         raise ValueError("--repair-asset-ids requires --repair-bad-cells and --repair-mode prepare")
     if args.repair_bad_cells:
         from alpha_edge.market.historical_repair import run as run_historical_repair
-        run_historical_repair(cfg=cfg, bad_cells=args.repair_bad_cells,
-                              fx_parquet=args.repair_fx_parquet,
-                              universe_path=args.universe_path,
-                              start=args.start, end=args.end,
-                              max_assets=args.max_assets,
-                              confirm_prod_write=args.confirm_prod_write,
-                              mode=args.repair_mode, run_id=args.repair_run_id,
-                              repair_asset_ids=args.repair_asset_ids,
-                              reset_asset_ids=args.repair_reset_asset_ids)
+
+        run_historical_repair(
+            cfg=cfg,
+            bad_cells=args.repair_bad_cells,
+            fx_parquet=args.repair_fx_parquet,
+            universe_path=args.universe_path,
+            start=args.start,
+            end=args.end,
+            max_assets=args.max_assets,
+            confirm_prod_write=args.confirm_prod_write,
+            mode=args.repair_mode,
+            run_id=args.repair_run_id,
+            repair_asset_ids=args.repair_asset_ids,
+            reset_asset_ids=args.repair_reset_asset_ids,
+        )
         return
     if args.fx_input_dir:
         if args.fx_upload:
@@ -2267,7 +2404,9 @@ def main_with_audit() -> None:
                 event_type="build_dataset",
                 entity_type="ingest_market_data",
                 entity_id=None,
-                as_of=str(getattr(args, "as_of", None) or getattr(args, "dt", None) or getattr(args, "run_dt", None) or ""),
+                as_of=str(
+                    getattr(args, "as_of", None) or getattr(args, "dt", None) or getattr(args, "run_dt", None) or ""
+                ),
                 source_script="ingest_market_data.py",
                 source_mode="market_data_ingestion",
                 status=("dry_run" if is_dry_run else "success"),
@@ -2286,7 +2425,9 @@ def main_with_audit() -> None:
                 event_type="build_dataset",
                 entity_type="ingest_market_data",
                 entity_id=None,
-                as_of=str(getattr(args, "as_of", None) or getattr(args, "dt", None) or getattr(args, "run_dt", None) or ""),
+                as_of=str(
+                    getattr(args, "as_of", None) or getattr(args, "dt", None) or getattr(args, "run_dt", None) or ""
+                ),
                 source_script="ingest_market_data.py",
                 source_mode="market_data_ingestion",
                 status="failed",

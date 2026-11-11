@@ -10,10 +10,7 @@ class Settings:
 
     # Athena
     athena_workgroup: str = os.getenv("ATHENA_WORKGROUP", "primary")
-    athena_output: str = os.getenv(
-        "ATHENA_OUTPUT",
-        f"s3://{bucket}/_athena/results/"
-    )
+    athena_output: str = os.getenv("ATHENA_OUTPUT", f"s3://{bucket}/_athena/results/")
 
     # Databases (Glue/Athena)
     db_curated: str = os.getenv("DB_CURATED", "curated")

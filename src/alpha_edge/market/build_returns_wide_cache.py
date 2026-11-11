@@ -114,21 +114,15 @@ def _load_active_asset_ids_from_universe(
     universe["asset_id"] = universe["asset_id"].astype(str).str.strip()
 
     if "include" in universe.columns:
-        universe = universe[
-            universe["include"].fillna(1).astype(int) == 1
-        ].copy()
+        universe = universe[universe["include"].fillna(1).astype(int) == 1].copy()
 
-    active = set(
-        universe.loc[universe["asset_id"] != "", "asset_id"].tolist()
-    )
+    active = set(universe.loc[universe["asset_id"] != "", "asset_id"].tolist())
 
     if excluded_csv:
         try:
             excluded = pd.read_csv(excluded_csv)
             if "asset_id" in excluded.columns:
-                excluded_ids = set(
-                    excluded["asset_id"].astype(str).str.strip().tolist()
-                )
+                excluded_ids = set(excluded["asset_id"].astype(str).str.strip().tolist())
                 active -= excluded_ids
         except FileNotFoundError:
             pass
@@ -141,18 +135,12 @@ def _discover_return_asset_ids(store: MarketStore) -> list[str]:
     keys = store._list_keys(root_prefix)
 
     if not keys:
-        raise RuntimeError(
-            f"No objects found under s3://{store.bucket}/{root_prefix}"
-        )
+        raise RuntimeError(f"No objects found under s3://{store.bucket}/{root_prefix}")
 
     asset_ids: set[str] = set()
 
     for key in keys:
-        if (
-            "/asset_id=" not in key
-            or "/year=" not in key
-            or not key.endswith(".parquet")
-        ):
+        if "/asset_id=" not in key or "/year=" not in key or not key.endswith(".parquet"):
             continue
 
         try:
@@ -163,9 +151,7 @@ def _discover_return_asset_ids(store: MarketStore) -> list[str]:
             continue
 
     if not asset_ids:
-        raise RuntimeError(
-            "Could not discover asset_id partitions under returns root."
-        )
+        raise RuntimeError("Could not discover asset_id partitions under returns root.")
 
     return sorted(asset_ids)
 
@@ -181,11 +167,15 @@ def _normalize_existing_wide(
     out = wide.copy()
 
     if "date" in out.columns:
-        out["date"] = pd.to_datetime(
-            out["date"],
-            errors="coerce",
-            utc=True,
-        ).dt.tz_convert(None).dt.normalize()
+        out["date"] = (
+            pd.to_datetime(
+                out["date"],
+                errors="coerce",
+                utc=True,
+            )
+            .dt.tz_convert(None)
+            .dt.normalize()
+        )
         out = out.dropna(subset=["date"]).set_index("date")
     else:
         idx = pd.to_datetime(out.index, errors="coerce", utc=True)
@@ -218,10 +208,7 @@ def _read_existing_cache(
             dtype=dtype,
         )
     except Exception as exc:
-        raise RuntimeError(
-            f"Could not read existing cache "
-            f"s3://{store.bucket}/{cache_key}: {exc}"
-        ) from exc
+        raise RuntimeError(f"Could not read existing cache s3://{store.bucket}/{cache_key}: {exc}") from exc
 
 
 def _extract_return_series(
@@ -253,11 +240,15 @@ def _extract_return_series(
     if "date" not in df.columns:
         raise RuntimeError("Returns data is missing the 'date' column.")
 
-    dates = pd.to_datetime(
-        df["date"],
-        errors="coerce",
-        utc=True,
-    ).dt.tz_convert(None).dt.normalize()
+    dates = (
+        pd.to_datetime(
+            df["date"],
+            errors="coerce",
+            utc=True,
+        )
+        .dt.tz_convert(None)
+        .dt.normalize()
+    )
 
     values_log = None
     values_simple_adj = None
@@ -281,11 +272,7 @@ def _extract_return_series(
             errors="coerce",
         )
 
-    if (
-        values_simple_adj is None
-        and values_simple_close_adjusted is None
-        and values_log is None
-    ):
+    if values_simple_adj is None and values_simple_close_adjusted is None and values_log is None:
         raise RuntimeError(
             "Returns data contains none of: "
             "'ret_adj_close_usd', 'ret_close_adjusted_usd', "
@@ -330,15 +317,9 @@ def _extract_return_series(
     ).dropna(subset=["date", "return_value"])
 
     if strict_window:
-        normalized = normalized[
-            (normalized["date"] >= start_ts)
-            & (normalized["date"] <= end_ts)
-        ]
+        normalized = normalized[(normalized["date"] >= start_ts) & (normalized["date"] <= end_ts)]
 
-    normalized = (
-        normalized.sort_values("date", kind="stable")
-        .drop_duplicates(subset=["date"], keep="last")
-    )
+    normalized = normalized.sort_values("date", kind="stable").drop_duplicates(subset=["date"], keep="last")
 
     if normalized.empty:
         return pd.Series(dtype=dtype, name=asset_id)
@@ -350,19 +331,14 @@ def _extract_return_series(
     series.attrs["return_source"] = return_source
     series.attrs["return_type"] = "simple"
     series.attrs["n_log_non_null"] = int(values_log.notna().sum()) if values_log is not None else 0
-    series.attrs["n_simple_adj_non_null"] = (
-        int(values_simple_adj.notna().sum())
-        if values_simple_adj is not None
-        else 0
-    )
+    series.attrs["n_simple_adj_non_null"] = int(values_simple_adj.notna().sum()) if values_simple_adj is not None else 0
     series.attrs["n_simple_close_adjusted_non_null"] = (
-        int(values_simple_close_adjusted.notna().sum())
-        if values_simple_close_adjusted is not None
-        else 0
+        int(values_simple_close_adjusted.notna().sum()) if values_simple_close_adjusted is not None else 0
     )
     series.attrs["n_combined_non_null"] = int(series.notna().sum())
 
     return series
+
 
 def _qualifies_full_history(
     *,
@@ -400,23 +376,15 @@ def _merge_incremental_cache(
     if existing.empty:
         preserved = pd.DataFrame()
     else:
-        preserved = existing.loc[
-            existing.index < replacement_start
-        ].copy()
+        preserved = existing.loc[existing.index < replacement_start].copy()
 
     existing_overlap = (
-        existing.loc[existing.index >= replacement_start].copy()
-        if not existing.empty
-        else pd.DataFrame()
+        existing.loc[existing.index >= replacement_start].copy() if not existing.empty else pd.DataFrame()
     )
 
     if not existing_overlap.empty:
         existing_overlap = existing_overlap.drop(
-            columns=[
-                col
-                for col in existing_overlap.columns
-                if col in selected_set
-            ],
+            columns=[col for col in existing_overlap.columns if col in selected_set],
             errors="ignore",
         )
 
@@ -447,20 +415,10 @@ def build_returns_wide_cache(
     store = _make_market_store(cfg)
 
     start_ts = _to_day_naive(cfg.start)
-    end_ts = (
-        _to_day_naive(cfg.end)
-        if cfg.end
-        else _to_day_naive(pd.Timestamp.utcnow())
-    )
+    end_ts = _to_day_naive(cfg.end) if cfg.end else _to_day_naive(pd.Timestamp.utcnow())
 
-    meta_key = (
-        f"{cfg.cache_prefix}/"
-        f"returns_wide_min{int(cfg.min_years)}y.meta.json"
-    )
-    cache_key = (
-        f"{cfg.cache_prefix}/"
-        f"returns_wide_min{int(cfg.min_years)}y.parquet"
-    )
+    meta_key = f"{cfg.cache_prefix}/returns_wide_min{int(cfg.min_years)}y.meta.json"
+    cache_key = f"{cfg.cache_prefix}/returns_wide_min{int(cfg.min_years)}y.parquet"
 
     asset_ids_all = _discover_return_asset_ids(store)
 
@@ -472,14 +430,10 @@ def build_returns_wide_cache(
             universe_csv=cfg.universe_csv,
             excluded_csv=cfg.excluded_csv,
         )
-        selected_asset_ids = sorted(
-            set(asset_ids_all).intersection(active_asset_ids)
-        )
+        selected_asset_ids = sorted(set(asset_ids_all).intersection(active_asset_ids))
 
     if not selected_asset_ids:
-        raise RuntimeError(
-            "No assets selected for returns-wide cache after filtering."
-        )
+        raise RuntimeError("No assets selected for returns-wide cache after filtering.")
 
     existing = _read_existing_cache(
         store=store,
@@ -489,11 +443,7 @@ def build_returns_wide_cache(
 
     latest_state = store.read_returns_latest_state()
     source_latest = _safe_date(latest_state.get("last_date"))
-    existing_last = (
-        _safe_date(existing.index.max())
-        if not existing.empty
-        else None
-    )
+    existing_last = _safe_date(existing.index.max()) if not existing.empty else None
 
     if (
         cfg.mode == "incremental"
@@ -505,12 +455,8 @@ def build_returns_wide_cache(
         existing_assets = set(existing.columns)
         selected_assets = set(selected_asset_ids)
 
-        if (
-            existing_assets == selected_assets
-            or (
-                not cfg.filter_to_active_universe
-                and selected_assets.issubset(existing_assets)
-            )
+        if existing_assets == selected_assets or (
+            not cfg.filter_to_active_universe and selected_assets.issubset(existing_assets)
         ):
             print(
                 "[SKIP] returns-wide cache up to date: "
@@ -537,15 +483,9 @@ def build_returns_wide_cache(
     existing_asset_ids = set(existing.columns)
     selected_asset_set = set(selected_asset_ids)
 
-    existing_selected_assets = sorted(
-        selected_asset_set.intersection(existing_asset_ids)
-    )
-    new_asset_ids = sorted(
-        selected_asset_set.difference(existing_asset_ids)
-    )
-    removed_asset_ids = sorted(
-        existing_asset_ids.difference(selected_asset_set)
-    )
+    existing_selected_assets = sorted(selected_asset_set.intersection(existing_asset_ids))
+    new_asset_ids = sorted(selected_asset_set.difference(existing_asset_ids))
+    removed_asset_ids = sorted(existing_asset_ids.difference(selected_asset_set))
 
     if cfg.mode == "full":
         existing_selected_assets = []
@@ -555,9 +495,7 @@ def build_returns_wide_cache(
         anchor = existing_last or start_ts
         replacement_start = max(
             start_ts,
-            anchor - pd.Timedelta(
-                days=int(cfg.replacement_calendar_days)
-            ),
+            anchor - pd.Timedelta(days=int(cfg.replacement_calendar_days)),
         )
 
     print("\n=== BUILD RETURNS WIDE CACHE ===")
@@ -580,9 +518,7 @@ def build_returns_wide_cache(
     print(f"dry_run:                {cfg.dry_run}")
     print("")
 
-    s3_semaphore = threading.Semaphore(
-        int(cfg.s3_max_concurrency)
-    )
+    s3_semaphore = threading.Semaphore(int(cfg.s3_max_concurrency))
 
     def _read_asset(
         asset_id: str,
@@ -617,12 +553,10 @@ def build_returns_wide_cache(
                 }
 
             if full_history:
-                qualifies, status, nobs, span_days = (
-                    _qualifies_full_history(
-                        series=series,
-                        min_years=cfg.min_years,
-                        min_obs=cfg.min_obs,
-                    )
+                qualifies, status, nobs, span_days = _qualifies_full_history(
+                    series=series,
+                    min_years=cfg.min_years,
+                    min_obs=cfg.min_obs,
                 )
 
                 if not qualifies:
@@ -659,12 +593,8 @@ def build_returns_wide_cache(
                 "error": f"{type(exc).__name__}: {exc}"[:1000],
             }
 
-    jobs: list[tuple[str, bool]] = [
-        (asset_id, False)
-        for asset_id in existing_selected_assets
-    ] + [
-        (asset_id, True)
-        for asset_id in new_asset_ids
+    jobs: list[tuple[str, bool]] = [(asset_id, False) for asset_id in existing_selected_assets] + [
+        (asset_id, True) for asset_id in new_asset_ids
     ]
 
     update_series: list[pd.Series] = []
@@ -683,9 +613,7 @@ def build_returns_wide_cache(
         "fail": 0,
     }
 
-    with ThreadPoolExecutor(
-        max_workers=int(cfg.max_workers)
-    ) as executor:
+    with ThreadPoolExecutor(max_workers=int(cfg.max_workers)) as executor:
         futures = {
             executor.submit(
                 _read_asset,
@@ -741,10 +669,7 @@ def build_returns_wide_cache(
                     }
                 )
 
-            if (
-                done % int(cfg.progress_every) == 0
-                or done == len(jobs)
-            ):
+            if done % int(cfg.progress_every) == 0 or done == len(jobs):
                 print(
                     f"[cache] progress {done}/{len(jobs)} "
                     f"updated={counters['keep_update']} "
@@ -758,9 +683,7 @@ def build_returns_wide_cache(
     if cfg.mode == "full":
         all_series = new_series
         if not all_series:
-            raise RuntimeError(
-                "No assets qualified for the full returns-wide cache."
-            )
+            raise RuntimeError("No assets qualified for the full returns-wide cache.")
 
         wide = pd.concat(
             all_series,
@@ -768,11 +691,7 @@ def build_returns_wide_cache(
             join="outer",
         ).sort_index()
     else:
-        overlap_updates = (
-            pd.concat(update_series, axis=1, join="outer")
-            if update_series
-            else pd.DataFrame()
-        )
+        overlap_updates = pd.concat(update_series, axis=1, join="outer") if update_series else pd.DataFrame()
 
         if new_series:
             new_asset_frame = pd.concat(
@@ -803,17 +722,10 @@ def build_returns_wide_cache(
             ]
 
     if cfg.filter_to_active_universe:
-        kept_active_columns = [
-            column
-            for column in wide.columns
-            if column in selected_asset_set
-        ]
+        kept_active_columns = [column for column in wide.columns if column in selected_asset_set]
         wide = wide[kept_active_columns]
 
-    wide = wide[
-        (wide.index >= start_ts)
-        & (wide.index <= end_ts)
-    ]
+    wide = wide[(wide.index >= start_ts) & (wide.index <= end_ts)]
     wide = wide[~wide.index.duplicated(keep="last")]
     wide = wide.loc[
         :,
@@ -833,22 +745,17 @@ def build_returns_wide_cache(
     # Consumers must explicitly handle missing returns and eligible asset dates.
     # Validate BEFORE any write to production cache.
     from alpha_edge.quality.returns_contract import assert_no_critical
+
     quality_report = assert_no_critical(wide)
 
     wide = wide.astype(cfg.dtype)
 
-    empty_columns = [
-        column
-        for column in wide.columns
-        if wide[column].notna().sum() == 0
-    ]
+    empty_columns = [column for column in wide.columns if wide[column].notna().sum() == 0]
     if empty_columns:
         wide = wide.drop(columns=empty_columns)
 
     if wide.empty or wide.shape[1] == 0:
-        raise RuntimeError(
-            "Resulting returns-wide cache is empty."
-        )
+        raise RuntimeError("Resulting returns-wide cache is empty.")
 
     if not cfg.dry_run:
         store._put_bytes(
@@ -857,20 +764,14 @@ def build_returns_wide_cache(
             content_type="application/octet-stream",
         )
     else:
-        print(
-            f"[DRY RUN] Would write cache: "
-            f"s3://{store.bucket}/{cache_key} "
-            f"shape={wide.shape}"
-        )
+        print(f"[DRY RUN] Would write cache: s3://{store.bucket}/{cache_key} shape={wide.shape}")
 
     meta = {
         "mode": cfg.mode,
         "bucket": cfg.bucket,
         "region": cfg.region,
         "market_root": cfg.market_root,
-        "returns_root": (
-            f"s3://{store.bucket}/{store.returns_prefix}"
-        ),
+        "returns_root": (f"s3://{store.bucket}/{store.returns_prefix}"),
         "cache_key": cache_key,
         "cache_uri": f"s3://{store.bucket}/{cache_key}",
         "min_years": float(cfg.min_years),
@@ -878,34 +779,18 @@ def build_returns_wide_cache(
         "start": str(start_ts.date()),
         "end": str(end_ts.date()),
         "replacement_start": str(replacement_start.date()),
-        "replacement_calendar_days": int(
-            cfg.replacement_calendar_days
-        ),
+        "replacement_calendar_days": int(cfg.replacement_calendar_days),
         "n_days": int(wide.shape[0]),
         "n_assets": int(wide.shape[1]),
         "quality": quality_report,
         "dtype": cfg.dtype,
-        "first_date": str(
-            pd.Timestamp(wide.index.min()).date()
-        ),
-        "last_date": str(
-            pd.Timestamp(wide.index.max()).date()
-        ),
-        "source_latest_date": (
-            str(source_latest.date())
-            if source_latest is not None
-            else None
-        ),
-        "existing_cache_last_date": (
-            str(existing_last.date())
-            if existing_last is not None
-            else None
-        ),
+        "first_date": str(pd.Timestamp(wide.index.min()).date()),
+        "last_date": str(pd.Timestamp(wide.index.max()).date()),
+        "source_latest_date": (str(source_latest.date()) if source_latest is not None else None),
+        "existing_cache_last_date": (str(existing_last.date()) if existing_last is not None else None),
         "assets_discovered_all": int(len(asset_ids_all)),
         "assets_selected": int(len(selected_asset_ids)),
-        "existing_assets_updated": int(
-            counters["keep_update"]
-        ),
+        "existing_assets_updated": int(counters["keep_update"]),
         "new_assets_backfilled": int(counters["keep_new"]),
         "removed_assets": int(len(removed_asset_ids)),
         "removed_assets_sample": removed_asset_ids[:50],
@@ -918,37 +803,26 @@ def build_returns_wide_cache(
         "empty_sample": empty_sample,
         "failures_sample": failures[:50],
         "assets_sample": list(wide.columns[:20]),
-        "as_of_utc": pd.Timestamp.utcnow().strftime(
-            "%Y-%m-%dT%H:%M:%SZ"
-        ),
+        "as_of_utc": pd.Timestamp.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
         "notes": {
             "build_strategy": (
                 "full per-asset build"
                 if cfg.mode == "full"
-                else (
-                    "incremental date overlap for existing assets "
-                    "+ full-history eligibility check for new assets"
-                )
+                else ("incremental date overlap for existing assets + full-history eligibility check for new assets")
             ),
             "return_type": "simple",
             "return_column_preferred": "ret_adj_close_usd",
             "return_column_compat": "ret_close_adjusted_usd",
-            "return_column_log_fallback": (
-                "ret_log_close_adjusted_usd converted with np.expm1"
-            ),
+            "return_column_log_fallback": ("ret_log_close_adjusted_usd converted with np.expm1"),
             "missing_return_fill_policy": "fillna_0_after_outer_join",
             "missing_return_fill_reason": (
                 "Returns are filled with 0.0 for non-trading calendar dates. "
                 "Returns are never forward-filled because that would repeat prior returns."
             ),
             "max_workers": int(cfg.max_workers),
-            "s3_max_concurrency": int(
-                cfg.s3_max_concurrency
-            ),
+            "s3_max_concurrency": int(cfg.s3_max_concurrency),
             "strict_window": bool(cfg.strict_window),
-            "filter_to_active_universe": bool(
-                cfg.filter_to_active_universe
-            ),
+            "filter_to_active_universe": bool(cfg.filter_to_active_universe),
             "universe_csv": cfg.universe_csv,
             "excluded_csv": cfg.excluded_csv,
         },
@@ -982,9 +856,7 @@ def build_returns_wide_cache(
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="Build Alpha Edge returns-wide cache."
-    )
+    parser = argparse.ArgumentParser(description="Build Alpha Edge returns-wide cache.")
 
     parser.add_argument(
         "--env",
@@ -1058,30 +930,14 @@ def main() -> None:
             bool(args.confirm_prod_write),
         )
 
-    bucket = str(
-        args.bucket or runtime_cfg.bucket
-    ).strip()
-    region = str(
-        args.region or runtime_cfg.region
-    ).strip()
-    market_root = str(
-        args.market_root or runtime_cfg.market_root
-    ).strip("/")
+    bucket = str(args.bucket or runtime_cfg.bucket).strip()
+    region = str(args.region or runtime_cfg.region).strip()
+    market_root = str(args.market_root or runtime_cfg.market_root).strip("/")
 
-    universe_csv = str(
-        args.universe_csv
-        or (paths.universe_dir() / "universe.csv")
-    )
-    excluded_csv = str(
-        args.excluded_csv
-        or (paths.universe_dir() / "asset_excluded.csv")
-    )
+    universe_csv = str(args.universe_csv or (paths.universe_dir() / "universe.csv"))
+    excluded_csv = str(args.excluded_csv or (paths.universe_dir() / "asset_excluded.csv"))
 
-    cache_prefix = (
-        str(args.cache_prefix).strip("/")
-        if args.cache_prefix
-        else f"{market_root}/cache/v1"
-    )
+    cache_prefix = str(args.cache_prefix).strip("/") if args.cache_prefix else f"{market_root}/cache/v1"
 
     input_args = vars(args).copy()
     input_args.update(
@@ -1115,25 +971,15 @@ def main() -> None:
                 min_obs=int(args.min_obs),
                 dtype=str(args.dtype),
                 force=bool(args.force),
-                replacement_calendar_days=int(
-                    args.replacement_calendar_days
-                ),
-                max_new_assets_full_build=int(
-                    args.max_new_assets_full_build
-                ),
+                replacement_calendar_days=int(args.replacement_calendar_days),
+                max_new_assets_full_build=int(args.max_new_assets_full_build),
                 progress_every=int(args.progress_every),
                 max_workers=int(args.max_workers),
-                s3_max_concurrency=int(
-                    args.s3_max_concurrency
-                ),
-                strict_window=(
-                    not bool(args.no_strict_window)
-                ),
+                s3_max_concurrency=int(args.s3_max_concurrency),
+                strict_window=(not bool(args.no_strict_window)),
                 universe_csv=universe_csv,
                 excluded_csv=excluded_csv,
-                filter_to_active_universe=(
-                    not bool(args.no_universe_filter)
-                ),
+                filter_to_active_universe=(not bool(args.no_universe_filter)),
                 dry_run=dry_run,
             )
 
@@ -1144,10 +990,7 @@ def main() -> None:
                 run_id=run_id,
                 event_type="build_dataset",
                 entity_type="returns_wide_cache",
-                entity_id=(
-                    f"returns_wide_min"
-                    f"{int(config.min_years)}y"
-                ),
+                entity_id=(f"returns_wide_min{int(config.min_years)}y"),
                 as_of=result["meta"].get("last_date"),
                 source_script="build_returns_wide_cache.py",
                 source_mode=config.mode,
@@ -1159,9 +1002,7 @@ def main() -> None:
                 ],
                 metadata={
                     "tier": "tier_1",
-                    "payload_policy": (
-                        "large_dataset_metadata_only"
-                    ),
+                    "payload_policy": ("large_dataset_metadata_only"),
                     **dict(result["meta"]),
                 },
             )
@@ -1185,9 +1026,7 @@ def main() -> None:
                 input_args=input_args,
                 metadata={
                     "tier": "tier_1",
-                    "payload_policy": (
-                        "large_dataset_metadata_only"
-                    ),
+                    "payload_policy": ("large_dataset_metadata_only"),
                 },
                 error=f"{type(exc).__name__}: {exc}",
             )

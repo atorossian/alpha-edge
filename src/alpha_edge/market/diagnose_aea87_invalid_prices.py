@@ -2,6 +2,7 @@
 
 Read-only: fetches only staged OHLCV for chosen assets, no production writes.
 """
+
 import argparse
 import io
 import json
@@ -40,17 +41,44 @@ def main():
             total += len(d)
             invalid += int(bad.sum())
             if bad.any():
-                cols = [c for c in ("date", "ticker", "yahoo_ticker", "currency", "adj_close", "fx_to_usd", "close_adjusted_usd") if c in d.columns]
+                cols = [
+                    c
+                    for c in (
+                        "date",
+                        "ticker",
+                        "yahoo_ticker",
+                        "currency",
+                        "adj_close",
+                        "fx_to_usd",
+                        "close_adjusted_usd",
+                    )
+                    if c in d.columns
+                ]
                 for row in d.loc[bad, cols].to_dict("records"):
                     val = row.get("close_adjusted_usd")
-                    reason = "MISSING_OR_NONNUMERIC" if pd.isna(val) else ("NONFINITE" if not np.isfinite(float(val)) else "NONPOSITIVE")
+                    reason = (
+                        "MISSING_OR_NONNUMERIC"
+                        if pd.isna(val)
+                        else ("NONFINITE" if not np.isfinite(float(val)) else "NONPOSITIVE")
+                    )
                     by_reason[reason] = by_reason.get(reason, 0) + 1
                     if len(samples) < 30:
                         row["date"] = str(row.get("date"))
                         row["failure_reason"] = reason
                         samples.append({k: (None if pd.isna(v) else v) for k, v in row.items()})
-        print(json.dumps({"asset_id": aid, "rows_checked": total, "invalid_rows": invalid,
-                          "reasons": by_reason, "sample": samples}, indent=2, default=str))
+        print(
+            json.dumps(
+                {
+                    "asset_id": aid,
+                    "rows_checked": total,
+                    "invalid_rows": invalid,
+                    "reasons": by_reason,
+                    "sample": samples,
+                },
+                indent=2,
+                default=str,
+            )
+        )
 
 
 if __name__ == "__main__":

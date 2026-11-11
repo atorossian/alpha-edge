@@ -16,8 +16,6 @@ from alpha_edge.core.data_loader import (
     s3_load_latest_json_asof,
 )
 from alpha_edge.core.runtime import RuntimeConfig, load_runtime_config, require_prod_confirmation
-from alpha_edge.core.audit import build_audit_event, write_audit_event
-from alpha_edge.core.run_logging import capture_script_run
 from alpha_edge.jobs.run_daily_report import run_daily_cycle_asof
 
 
@@ -69,7 +67,7 @@ def list_trade_dts(s3, *, bucket: str, engine_root: str) -> List[str]:
         parts = str(k).split("/")
         for p in parts:
             if p.startswith("dt=") and len(p) == len("dt=YYYY-MM-DD"):
-                dts.add(p[len("dt="):])
+                dts.add(p[len("dt=") :])
                 break
 
     return sorted(dts)
@@ -142,13 +140,16 @@ def maybe_rebuild_ledger_for_dt(
 
 
 def load_equity_asof(s3, *, bucket: str, account_root: str, dt_str: str) -> Optional[float]:
-    payload = s3_load_latest_json_asof(
-        s3,
-        bucket=bucket,
-        root_prefix=account_root,
-        table="ledger/pnl",
-        as_of=dt_str,
-    ) or {}
+    payload = (
+        s3_load_latest_json_asof(
+            s3,
+            bucket=bucket,
+            root_prefix=account_root,
+            table="ledger/pnl",
+            as_of=dt_str,
+        )
+        or {}
+    )
 
     if isinstance(payload, dict) and isinstance(payload.get("summary"), dict):
         summary = payload["summary"]
@@ -198,7 +199,6 @@ def parse_args() -> argparse.Namespace:
 # Main
 # ----------------------------
 def _main_impl(args: argparse.Namespace) -> None:
-
     cfg = load_runtime_config(args.env)
 
     bucket = str(args.bucket or cfg_bucket(cfg))

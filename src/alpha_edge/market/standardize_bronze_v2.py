@@ -4,13 +4,17 @@ No network access or production publication. Converts *explicitly configured*
 FX symbols, audits expected trading sessions, and prevents returns bridging
 missing sessions. Original source columns remain available in Silver/Gold.
 """
+
 from __future__ import annotations
 
 import numpy as np
 import pandas as pd
 
 from alpha_edge.market.data_lake_v2 import (
-    DataContractError, QualityPolicy, calculate_returns, standardize_bars,
+    DataContractError,
+    QualityPolicy,
+    calculate_returns,
+    standardize_bars,
     validate_raw_bars,
 )
 
@@ -68,16 +72,9 @@ def normalize_bronze_fx_quotes(
         subset["currency_original"] = currency
         subset["fx_quote_direction"] = direction
         subset["fx_quote_symbol"] = symbol
-        subset["fx_to_usd"] = (
-            subset["quote_close"] if direction == "direct"
-            else 1.0 / subset["quote_close"]
-        )
+        subset["fx_to_usd"] = subset["quote_close"] if direction == "direct" else 1.0 / subset["quote_close"]
         dup = subset.duplicated("fx_date", keep=False)
-        invalid = (
-            subset["fx_date"].isna()
-            | ~np.isfinite(subset["quote_close"])
-            | subset["quote_close"].le(0)
-        )
+        invalid = subset["fx_date"].isna() | ~np.isfinite(subset["quote_close"]) | subset["quote_close"].le(0)
         # Check only adjacent *available* dates; missing intervals are
         # separately recorded as gaps, not automatically interpreted as jumps.
         prev_date = subset["fx_date"].shift()
@@ -92,14 +89,25 @@ def normalize_bronze_fx_quotes(
         subset["fx_quote_change_abs"] = movement
         subset["fx_gap_calendar_days"] = days
         results.append(subset)
-    evidence = pd.concat(results, ignore_index=True) if results else pd.DataFrame(columns=[
-        *q.columns, "currency_original", "fx_quote_direction", "fx_quote_symbol",
-        "fx_to_usd", "fx_validation_status", "fx_quote_change_abs", "fx_gap_calendar_days",
-    ])
+    evidence = (
+        pd.concat(results, ignore_index=True)
+        if results
+        else pd.DataFrame(
+            columns=[
+                *q.columns,
+                "currency_original",
+                "fx_quote_direction",
+                "fx_quote_symbol",
+                "fx_to_usd",
+                "fx_validation_status",
+                "fx_quote_change_abs",
+                "fx_gap_calendar_days",
+            ]
+        )
+    )
     accepted = evidence.loc[
         evidence["fx_validation_status"].eq("accepted"),
-        ["currency_original", "fx_date", "fx_to_usd",
-         "fx_quote_symbol", "fx_quote_direction", "quote_close"],
+        ["currency_original", "fx_date", "fx_to_usd", "fx_quote_symbol", "fx_quote_direction", "quote_close"],
     ].copy()
     if accepted.empty:
         accepted["fx_date"] = pd.to_datetime(accepted["fx_date"])
@@ -138,44 +146,60 @@ def audit_asset_sessions(
         observed = _dates(group["session_date"]).dropna()
         if observed.empty:
             raise DataContractError(f"{symbol}: no valid session dates")
-        expected = pd.DatetimeIndex(
-            calendar.valid_days(start_date=observed.min(), end_date=observed.max())
-        ).tz_localize(None).normalize()
+        expected = (
+            pd.DatetimeIndex(calendar.valid_days(start_date=observed.min(), end_date=observed.max()))
+            .tz_localize(None)
+            .normalize()
+        )
         observed_set = set(observed.dt.normalize())
         expected_set = set(expected)
         missing_days = sorted(expected_set - observed_set)
         unexpected_days = sorted(observed_set - expected_set)
         for day in missing_days:
-            report.append({
-                "asset_id": asset_id, "provider_symbol": symbol,
-                "session_date": day, "issue": "missing_expected_session",
-                "calendar_id": calendar_id,
-            })
+            report.append(
+                {
+                    "asset_id": asset_id,
+                    "provider_symbol": symbol,
+                    "session_date": day,
+                    "issue": "missing_expected_session",
+                    "calendar_id": calendar_id,
+                }
+            )
         for day in unexpected_days:
-            report.append({
-                "asset_id": asset_id, "provider_symbol": symbol,
-                "session_date": day, "issue": "unexpected_session",
-                "calendar_id": calendar_id,
-            })
+            report.append(
+                {
+                    "asset_id": asset_id,
+                    "provider_symbol": symbol,
+                    "session_date": day,
+                    "issue": "unexpected_session",
+                    "calendar_id": calendar_id,
+                }
+            )
         for _, row in group.iterrows():
             current = pd.Timestamp(str(row["session_date"])[:10])
             prev_expected = expected[expected < current]
             prior = prev_expected[-1] if len(prev_expected) else pd.NaT
             previous_missing = pd.notna(prior) and prior not in observed_set
-            evidence.append({
-                "asset_id": asset_id, "provider_symbol": symbol,
-                "session_date": current, "calendar_id": calendar_id,
-                "is_expected_session": current in expected_set,
-                "previous_expected_session_missing": bool(previous_missing),
-            })
+            evidence.append(
+                {
+                    "asset_id": asset_id,
+                    "provider_symbol": symbol,
+                    "session_date": current,
+                    "calendar_id": calendar_id,
+                    "is_expected_session": current in expected_set,
+                    "previous_expected_session_missing": bool(previous_missing),
+                }
+            )
     return pd.DataFrame(evidence), pd.DataFrame(
         report, columns=["asset_id", "provider_symbol", "session_date", "issue", "calendar_id"]
     )
 
 
 def build_silver_gold_from_bronze(
-    bars: pd.DataFrame, quotes: pd.DataFrame,
-    *, policy: QualityPolicy = QualityPolicy(),
+    bars: pd.DataFrame,
+    quotes: pd.DataFrame,
+    *,
+    policy: QualityPolicy = QualityPolicy(),
     calendars: dict[str, str] | None = None,
     pairs: dict[str, tuple[str, str]] | None = None,
 ) -> dict[str, pd.DataFrame]:
@@ -192,21 +216,22 @@ def build_silver_gold_from_bronze(
         raise DataContractError("Session audit returned duplicate session keys")
     flagged = bronze.merge(
         session_flags.drop(columns=["provider_symbol"]),
-        on=["asset_id", "session_date"], how="left", validate="one_to_one",
+        on=["asset_id", "session_date"],
+        how="left",
+        validate="one_to_one",
     )
     missing_flag = flagged["previous_expected_session_missing"].fillna(False).astype(bool)
     unexpected_flag = ~flagged["is_expected_session"].fillna(False).astype(bool)
     # A missing prior exchange session breaks the *return*, not the validity
     # of the current source price. Preserve the price and its USD valuation.
     # Unknown/unexpected session labels, however, are source quality concerns.
-    flagged["return_quality_reason"] = np.where(
-        missing_flag, "prior_expected_session_missing", ""
-    )
+    flagged["return_quality_reason"] = np.where(missing_flag, "prior_expected_session_missing", "")
     flagged.loc[unexpected_flag, "quality_reason"] = (
         flagged.loc[unexpected_flag, "quality_reason"].where(
             flagged.loc[unexpected_flag, "quality_reason"].eq(""),
             flagged.loc[unexpected_flag, "quality_reason"] + ";",
-        ) + "unexpected_exchange_session"
+        )
+        + "unexpected_exchange_session"
     )
     flagged.loc[unexpected_flag, "quality_status"] = "quarantined"
     silver = standardize_bars(flagged, rates, policy=policy)
@@ -216,18 +241,16 @@ def build_silver_gold_from_bronze(
     if "source_timestamp" in silver.columns:
         strings = silver["source_timestamp"].astype("string")
         aware = strings.str.contains(r"(?:Z|[+-]\d{2}:\d{2})$", regex=True, na=False)
-        silver["source_timestamp_utc"] = pd.to_datetime(
-            strings.where(aware), errors="coerce", utc=True, format="mixed"
-        )
+        silver["source_timestamp_utc"] = pd.to_datetime(strings.where(aware), errors="coerce", utc=True, format="mixed")
         silver["source_timestamp_semantics"] = "provider_daily_bar_label_not_close_time"
     # Preserve FX lineage through the conversion, including original quote,
     # quote direction and source symbol. Never substitute an unaccepted quote.
-    fx_lineage = rates[
-        ["currency_original", "fx_date", "fx_quote_symbol", "fx_quote_direction", "quote_close"]
-    ].copy()
+    fx_lineage = rates[["currency_original", "fx_date", "fx_quote_symbol", "fx_quote_direction", "quote_close"]].copy()
     silver = silver.merge(
-        fx_lineage, on=["currency_original", "fx_date"],
-        how="left", validate="many_to_one",
+        fx_lineage,
+        on=["currency_original", "fx_date"],
+        how="left",
+        validate="many_to_one",
     )
     if len(silver) != len(bronze):
         raise DataContractError("Silver row count does not reconcile with Bronze")
@@ -236,8 +259,7 @@ def build_silver_gold_from_bronze(
     # Suppress the spurious multi-session return crossing a missing bar,
     # but permit the following day's return if both prices are accepted.
     gap = gold["return_quality_reason"].eq("prior_expected_session_missing")
-    gold.loc[gap, ["ret_simple_close_adjusted_usd",
-                   "ret_log_close_adjusted_usd"]] = np.nan
+    gold.loc[gap, ["ret_simple_close_adjusted_usd", "ret_log_close_adjusted_usd"]] = np.nan
     gold.loc[gap, "return_quality_status"] = "unavailable"
     return {
         "bronze_validated": bronze,

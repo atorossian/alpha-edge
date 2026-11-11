@@ -32,7 +32,6 @@ from alpha_edge.core.schemas import (
     SurvivalConfig,
 )
 from alpha_edge.risk.actuarial.portfolio_search_output import (
-    attach_actuarial_diagnostic_to_output_payload,
     build_portfolio_search_actuarial_diagnostic_section,
     maybe_print_actuarial_diagnostic_section,
 )
@@ -69,9 +68,7 @@ DATA_QUALITY_SEVERE_FLAG_PREFIXES = (
     "diagnostic_exception",
 )
 
-DATA_QUALITY_ALLOWED_MISSING_RETURNS_WIDE_FLAGS = (
-    "missing_returns_wide_asset_id",
-)
+DATA_QUALITY_ALLOWED_MISSING_RETURNS_WIDE_FLAGS = ("missing_returns_wide_asset_id",)
 
 
 def cfg_bucket(cfg: RuntimeConfig) -> str:
@@ -116,11 +113,7 @@ def returns_cache_prefix(cfg: RuntimeConfig) -> str:
 
 
 def returns_cache_uri(cfg: RuntimeConfig, *, min_years: float) -> str:
-    return (
-        f"s3://{cfg_bucket(cfg)}/"
-        f"{returns_cache_prefix(cfg)}/"
-        f"returns_wide_min{int(float(min_years))}y.parquet"
-    )
+    return f"s3://{cfg_bucket(cfg)}/{returns_cache_prefix(cfg)}/returns_wide_min{int(float(min_years))}y.parquet"
 
 
 def latest_prices_snapshot_ref(cfg: RuntimeConfig) -> str:
@@ -170,6 +163,7 @@ def make_cache_config(cfg: RuntimeConfig, *, min_years: float) -> CacheConfig:
         min_years=float(min_years),
     )
 
+
 def s3_key_exists(s3, *, bucket: str, key: str) -> bool:
     try:
         s3.head_object(Bucket=bucket, Key=key)
@@ -182,10 +176,8 @@ def s3_key_exists(s3, *, bucket: str, key: str) -> bool:
 
 
 def returns_cache_key(cfg: RuntimeConfig, *, min_years: float) -> str:
-    return (
-        f"{returns_cache_prefix(cfg)}/"
-        f"returns_wide_min{int(float(min_years))}y.parquet"
-    )
+    return f"{returns_cache_prefix(cfg)}/returns_wide_min{int(float(min_years))}y.parquet"
+
 
 def _split_flags(value: object) -> set[str]:
     if value is None:
@@ -227,9 +219,7 @@ def _load_latest_market_data_quality_summary(
     market_root = str(market_root).strip("/")
     table_prefix = f"{market_root}/{DATA_QUALITY_TABLE}".strip("/")
 
-    latest_path = (
-        f"s3://{bucket}/{table_prefix}/latest/market_data_integrity_summary.parquet"
-    )
+    latest_path = f"s3://{bucket}/{table_prefix}/latest/market_data_integrity_summary.parquet"
 
     attempted_paths = [latest_path]
 
@@ -258,10 +248,7 @@ def _load_latest_market_data_quality_summary(
 
             for obj in resp.get("Contents", []) or []:
                 key = str(obj.get("Key", ""))
-                if (
-                    "/dt=" in key
-                    and key.endswith("market_data_integrity_summary.parquet")
-                ):
+                if "/dt=" in key and key.endswith("market_data_integrity_summary.parquet"):
                     keys.append(key)
 
             if not resp.get("IsTruncated"):
@@ -292,16 +279,11 @@ def _load_latest_market_data_quality_summary(
         source_path = fallback_path
 
     if df is None or df.empty:
-        raise RuntimeError(
-            "Market data-quality summary is empty. "
-            f"Attempted paths: {attempted_paths}"
-        )
+        raise RuntimeError(f"Market data-quality summary is empty. Attempted paths: {attempted_paths}")
 
     if "asset_id" not in df.columns:
         raise RuntimeError(
-            "Market data-quality summary missing 'asset_id'. "
-            f"Loaded from: {source_path}. "
-            f"Columns={list(df.columns)}"
+            f"Market data-quality summary missing 'asset_id'. Loaded from: {source_path}. Columns={list(df.columns)}"
         )
 
     out = df.copy()
@@ -475,6 +457,7 @@ def print_weights_table(
     for aid, sym, w in clean:
         print(f"{sym:<16} {aid:<22} {w:>11.2%}")
 
+
 def print_shares_table(
     shares: dict[str, float],
     *,
@@ -627,10 +610,7 @@ def evalmetrics_to_row(m) -> dict:
 def weights_to_rows(weights: dict[str, float], *, tag: str) -> list[dict]:
     # The calculation key is now asset_id. Keep ticker as a backward-compatible
     # column name for older parquet consumers, but store the same value in asset_id.
-    return [
-        {"tag": tag, "asset_id": str(t), "ticker": str(t), "weight": float(w)}
-        for t, w in weights.items()
-    ]
+    return [{"tag": tag, "asset_id": str(t), "ticker": str(t), "weight": float(w)} for t, w in weights.items()]
 
 
 def _safe_float(x, default=np.nan) -> float:
@@ -647,7 +627,6 @@ def _parse_goals(s: str) -> tuple[float, float, float]:
     return (float(parts[0]), float(parts[1]), float(parts[2]))
 
 
-
 def _norm_asset_key(value: object) -> str:
     if value is None:
         return ""
@@ -655,6 +634,7 @@ def _norm_asset_key(value: object) -> str:
     if text.lower() == "nan":
         return ""
     return text
+
 
 def _build_asset_key_canonical_map(*key_sets: object) -> dict[str, str]:
     """
@@ -735,6 +715,7 @@ def _canonicalize_asset_keyed_dict(
 
     return out
 
+
 def _realized_weights_from_shares(
     shares: dict[str, float],
     prices: dict[str, float],
@@ -775,9 +756,7 @@ def _realized_weights_from_shares(
         gross += abs(float(exp))
 
     if gross <= 0 or not np.isfinite(gross):
-        raise RuntimeError(
-            "Executable allocation produced zero gross notional; cannot re-evaluate final portfolio."
-        )
+        raise RuntimeError("Executable allocation produced zero gross notional; cannot re-evaluate final portfolio.")
 
     weights = {asset_id: float(v / gross) for asset_id, v in exposures.items()}
     return weights, float(gross), exposures
@@ -820,6 +799,7 @@ def _weights_l1_drift(
         drift += abs(float(tw.get(k, 0.0) or 0.0) - float(ew.get(k, 0.0) or 0.0))
 
     return float(drift)
+
 
 def build_rounding_impact_rows(
     theoretical_weights: dict[str, float],
@@ -871,6 +851,7 @@ def build_rounding_impact_rows(
     rows.sort(key=lambda r: (-abs(float(r["delta_weight"])), str(r["asset_id"])))
     return rows
 
+
 def compute_execution_quality(
     *,
     theoretical_metrics,
@@ -919,7 +900,6 @@ def compute_execution_quality(
         "mdd_worsening": float(abs(float(final_metrics.max_drawdown)) - abs(float(theoretical_metrics.max_drawdown))),
         "rounding_impact": rounding_rows,
     }
-
 
 
 def _clamp01(x: float) -> float:
@@ -1007,7 +987,9 @@ def compute_portfolio_health_score(
         ),
         "cash": _safe_ratio_good(float(execution_quality.get("cash_weight", np.nan)), max_cash_weight),
         "weight_drift": _safe_ratio_good(float(execution_quality.get("weight_drift_l1", np.nan)), max_weight_drift_l1),
-        "dropped_weight": _safe_ratio_good(float(execution_quality.get("dropped_theoretical_weight", np.nan)), max_dropped_weight),
+        "dropped_weight": _safe_ratio_good(
+            float(execution_quality.get("dropped_theoretical_weight", np.nan)), max_dropped_weight
+        ),
     }
 
     risk_component = float(np.mean([components["ruin"], components["max_drawdown"], components["cvar_95"]]))
@@ -1024,7 +1006,9 @@ def compute_portfolio_health_score(
         )
     )
     execution_component = float(
-        np.mean([components["deployment"], components["cash"], components["weight_drift"], components["dropped_weight"]])
+        np.mean(
+            [components["deployment"], components["cash"], components["weight_drift"], components["dropped_weight"]]
+        )
     )
 
     weights = {
@@ -1140,9 +1124,7 @@ def validate_final_executable(
         reasons.append(f"CDaR95 {final_cdar:.2%} above executable cap {float(max_executable_cdar_95):.2%}")
 
     if np.isfinite(final_stability) and final_stability > float(max_stability_energy):
-        reasons.append(
-            f"stability energy {final_stability:.4f} above executable cap {float(max_stability_energy):.4f}"
-        )
+        reasons.append(f"stability energy {final_stability:.4f} above executable cap {float(max_stability_energy):.4f}")
 
     if float(execution_quality["cash_weight"]) > float(max_cash_weight):
         reasons.append(
@@ -1270,6 +1252,7 @@ def _display_symbol(asset_id: object, asset_display: dict[str, dict] | None = No
 
     return aid
 
+
 def print_execution_quality(execution_quality: dict) -> None:
     print("\n=== Execution quality ===")
     print(f"{'Target notional':<32} {_fmt_money(execution_quality.get('target_notional')):>16} USD")
@@ -1297,9 +1280,7 @@ def print_rounding_impact_table(
         return
 
     print(
-        f"{'Symbol':<16} {'Asset ID':<22} "
-        f"{'Theory W':>10} {'Exec W':>10} {'Delta':>10} "
-        f"{'Shares':>14} {'Status':>10}"
+        f"{'Symbol':<16} {'Asset ID':<22} {'Theory W':>10} {'Exec W':>10} {'Delta':>10} {'Shares':>14} {'Status':>10}"
     )
     print("-" * 98)
 
@@ -1315,13 +1296,23 @@ def print_rounding_impact_table(
             f"{str(r.get('status', '')):>10}"
         )
 
+
 def print_executable_validation(validation: dict) -> None:
     status = str(validation.get("status", "unknown")).upper()
     print("\n=== Executable validation ===")
     print(f"Status: {status}")
     if "health_score" in validation:
-        print(f"Health score: {_fmt_float(validation.get('health_score'), 1)} / 100 ({validation.get('health_grade', 'n/a')})")
-    print("Optimizer score floor: " + ("disabled" if validation.get("thresholds", {}).get("min_executable_score") is None else str(validation.get("thresholds", {}).get("min_executable_score"))))
+        print(
+            f"Health score: {_fmt_float(validation.get('health_score'), 1)} / 100 ({validation.get('health_grade', 'n/a')})"
+        )
+    print(
+        "Optimizer score floor: "
+        + (
+            "disabled"
+            if validation.get("thresholds", {}).get("min_executable_score") is None
+            else str(validation.get("thresholds", {}).get("min_executable_score"))
+        )
+    )
 
     reasons = validation.get("reasons") or []
     if not reasons:
@@ -1331,7 +1322,6 @@ def print_executable_validation(validation: dict) -> None:
     print("Reasons:")
     for reason in reasons:
         print(f"  - {reason}")
-
 
 
 def _candidate_fingerprint(weights: dict[str, float], *, ndigits: int = 8) -> tuple[tuple[str, float], ...]:
@@ -1419,7 +1409,9 @@ def print_executable_candidate_summary(candidates: list[dict], *, max_rows: int 
         return
 
     accepted = [c for c in candidates if bool(c.get("validation", {}).get("passed", False))]
-    print(f"Candidates evaluated: {len(candidates)} | Accepted: {len(accepted)} | Rejected: {len(candidates) - len(accepted)}")
+    print(
+        f"Candidates evaluated: {len(candidates)} | Accepted: {len(accepted)} | Rejected: {len(candidates) - len(accepted)}"
+    )
     print("-" * 128)
     print(
         f"{'Rank':>4} {'Label':<30} {'Status':<9} {'Health':>8} {'OptScore':>9} {'P(main)':>9} "
@@ -1555,7 +1547,8 @@ def _evaluate_executable_candidate(
     canonical_share_keys = {_norm_asset_key(k) for k in (alloc_shares or {}).keys()}
 
     unmapped_share_keys = sorted(
-        k for k in raw_share_keys
+        k
+        for k in raw_share_keys
         if k
         and k.upper() != "CASH"
         and (
@@ -1817,7 +1810,9 @@ def run_portfolio_search_asof(
 
     dup_asset = u[u["asset_id"].duplicated(keep=False)].sort_values("asset_id")
     if not dup_asset.empty:
-        cols = [c for c in ["asset_id", "ticker", "yahoo_ticker_norm", "yahoo_ticker", "name"] if c in dup_asset.columns]
+        cols = [
+            c for c in ["asset_id", "ticker", "yahoo_ticker_norm", "yahoo_ticker", "name"] if c in dup_asset.columns
+        ]
         raise RuntimeError(
             "Duplicate active asset_id values found in universe. asset_id must be unique.\n"
             + dup_asset[cols].head(50).to_string(index=False)
@@ -1880,18 +1875,17 @@ def run_portfolio_search_asof(
     else:
         hmm_payload_wrapped = {}
         if use_market_hmm:
-            hmm_payload_wrapped = s3_load_latest_json(
-                s3,
-                bucket=bucket,
-                root_prefix=engine_root,
-                table="regimes/market_hmm",
-            ) or {}
+            hmm_payload_wrapped = (
+                s3_load_latest_json(
+                    s3,
+                    bucket=bucket,
+                    root_prefix=engine_root,
+                    table="regimes/market_hmm",
+                )
+                or {}
+            )
 
-        lr = (
-            (hmm_payload_wrapped.get("leverage_recommendation") or {})
-            if isinstance(hmm_payload_wrapped, dict)
-            else {}
-        )
+        lr = (hmm_payload_wrapped.get("leverage_recommendation") or {}) if isinstance(hmm_payload_wrapped, dict) else {}
 
         if isinstance(lr, dict) and lr.get("leverage") is not None:
             lev_rec = dict(lr)
@@ -1994,11 +1988,15 @@ def run_portfolio_search_asof(
     # Normalize index BEFORE cleaning. The cache can start in 2010, while many assets
     # only have 5y of valid history. Cleaning the full 2010-now matrix would drop
     # newer but valid assets because of pre-inception NaNs.
-    returns_wide.index = pd.to_datetime(
-        returns_wide.index,
-        errors="coerce",
-        utc=True,
-    ).tz_convert(None).normalize()
+    returns_wide.index = (
+        pd.to_datetime(
+            returns_wide.index,
+            errors="coerce",
+            utc=True,
+        )
+        .tz_convert(None)
+        .normalize()
+    )
 
     returns_wide = returns_wide.loc[~returns_wide.index.isna()].copy()
     returns_wide = returns_wide.loc[returns_wide.index <= as_of_ts].copy()
@@ -2007,9 +2005,7 @@ def run_portfolio_search_asof(
     returns_wide = returns_wide.sort_index()
 
     if returns_wide.shape[0] < 252:
-        raise RuntimeError(
-            f"Not enough returns history up to as_of={as_of_market_date}: rows={returns_wide.shape[0]}"
-        )
+        raise RuntimeError(f"Not enough returns history up to as_of={as_of_market_date}: rows={returns_wide.shape[0]}")
 
     # Portfolio search should evaluate on the same effective horizon required by the
     # cache, not on the full 2010-now sparse matrix.
@@ -2047,9 +2043,7 @@ def run_portfolio_search_asof(
     before_cols = int(returns_wide.shape[1])
     returns_wide.columns = [str(c).strip() for c in returns_wide.columns]
 
-    returns_wide = returns_wide[
-        [c for c in returns_wide.columns if str(c).strip() in eligible_asset_ids]
-    ].copy()
+    returns_wide = returns_wide[[c for c in returns_wide.columns if str(c).strip() in eligible_asset_ids]].copy()
 
     after_gate_cols = int(returns_wide.shape[1])
 
@@ -2061,10 +2055,7 @@ def run_portfolio_search_asof(
     )
 
     if after_gate_cols == 0:
-        raise RuntimeError(
-            "Data-quality gate removed all returns_wide assets. "
-            f"Gate meta: {dq_gate_meta}"
-        )
+        raise RuntimeError(f"Data-quality gate removed all returns_wide assets. Gate meta: {dq_gate_meta}")
 
     # Clean only after:
     #   1. date slicing to the effective portfolio-search window
@@ -2074,16 +2065,11 @@ def run_portfolio_search_asof(
     # full 2010-now cache.
     returns_wide, diag = clean_returns_matrix(returns_wide)
 
-    print(
-        "[returns_clean] "
-        f"assets_after_clean={returns_wide.shape[1]} "
-        f"rows_after_clean={returns_wide.shape[0]}"
-    )
+    print(f"[returns_clean] assets_after_clean={returns_wide.shape[1]} rows_after_clean={returns_wide.shape[0]}")
 
     if returns_wide.shape[1] == 0:
         raise RuntimeError(
-            "No returns_wide assets remain after data-quality gate and cleaning. "
-            f"Gate meta: {dq_gate_meta} diag={diag}"
+            f"No returns_wide assets remain after data-quality gate and cleaning. Gate meta: {dq_gate_meta} diag={diag}"
         )
 
     if "asset_id" in u.columns:
@@ -2092,17 +2078,10 @@ def run_portfolio_search_asof(
         u = u[u["asset_id"].isin(eligible_asset_ids)].copy()
         after_u = int(len(u))
 
-        print(
-            "[data_quality_gate] "
-            f"universe_rows_before={before_u} "
-            f"after={after_u}"
-        )
+        print(f"[data_quality_gate] universe_rows_before={before_u} after={after_u}")
 
         if after_u == 0:
-            raise RuntimeError(
-                "Data-quality gate removed all universe rows. "
-                f"Gate meta: {dq_gate_meta}"
-            )
+            raise RuntimeError(f"Data-quality gate removed all universe rows. Gate meta: {dq_gate_meta}")
     else:
         raise RuntimeError("Universe dataframe missing 'asset_id'; cannot apply data-quality gate.")
 
@@ -2386,21 +2365,26 @@ def run_portfolio_search_asof(
 
     final_holdings = []
     for aid in sorted(allocation_asset_ids):
-        disp = asset_display.get(aid, {
-            "asset_id": aid,
-            "ticker": aid,
-            "yahoo_ticker": aid,
-            "yahoo_ticker_norm": aid,
-            "name": aid,
-            "display_symbol": aid,
-        })
-        final_holdings.append({
-            **disp,
-            "weight": float((final_weights or {}).get(aid, 0.0) or 0.0),
-            "shares": float((alloc_shares or {}).get(aid, 0.0) or 0.0),
-            "exposure_usd": float((final_exposures or {}).get(aid, 0.0) or 0.0),
-            "price_usd": float(prices_asset_id.get(aid, np.nan)),
-        })
+        disp = asset_display.get(
+            aid,
+            {
+                "asset_id": aid,
+                "ticker": aid,
+                "yahoo_ticker": aid,
+                "yahoo_ticker_norm": aid,
+                "name": aid,
+                "display_symbol": aid,
+            },
+        )
+        final_holdings.append(
+            {
+                **disp,
+                "weight": float((final_weights or {}).get(aid, 0.0) or 0.0),
+                "shares": float((alloc_shares or {}).get(aid, 0.0) or 0.0),
+                "exposure_usd": float((final_exposures or {}).get(aid, 0.0) or 0.0),
+                "price_usd": float(prices_asset_id.get(aid, np.nan)),
+            }
+        )
 
     # ---------- Actuarial diagnostics for selected executable ----------
     actuarial_diagnostic_block = None
@@ -2450,10 +2434,7 @@ def run_portfolio_search_asof(
                 recovery_level=1.0,
             ),
             survival=SurvivalConfig(
-                horizons_days=[
-                    h for h in [21, 63, 126, 252, 756]
-                    if h <= int(actuarial_horizon_days)
-                ]
+                horizons_days=[h for h in [21, 63, 126, 252, 756] if h <= int(actuarial_horizon_days)]
                 or [int(actuarial_horizon_days)],
             ),
             capital_adequacy=CapitalAdequacyConfig(
@@ -2500,14 +2481,7 @@ def run_portfolio_search_asof(
             "run_id": str(run_id),
             "selected_candidate_label": str(selected_candidate_label),
         }
-        actuarial_text = (
-            "ACTUARIAL RISK DIAGNOSTICS\n"
-            "--------------------------\n"
-            "Status: FAILED\n"
-            f"Reason: {e}"
-        )
-
-
+        actuarial_text = f"ACTUARIAL RISK DIAGNOSTICS\n--------------------------\nStatus: FAILED\nReason: {e}"
 
     executable_candidate_summaries = [
         _candidate_summary(
@@ -2553,9 +2527,7 @@ def run_portfolio_search_asof(
                     "target_notional": float(notional),
                     "current_positions_notional": float(current_gross_notional),
                     "current_leverage_real": (
-                        float(current_gross_notional / float(equity0))
-                        if float(equity0) > 0
-                        else float("inf")
+                        float(current_gross_notional / float(equity0)) if float(equity0) > 0 else float("inf")
                     ),
                     "goals": list(GOALS),
                     "main_goal": MAIN_GOAL,
@@ -2571,8 +2543,7 @@ def run_portfolio_search_asof(
                         "bucket": bucket,
                         "market_root": market_root,
                         "returns_cache": (
-                            f"{returns_cache_prefix(cfg)}/"
-                            f"returns_wide_min{int(float(cache_min_years))}y.parquet"
+                            f"{returns_cache_prefix(cfg)}/returns_wide_min{int(float(cache_min_years))}y.parquet"
                         ),
                         "latest_prices_snapshot": latest_prices_snapshot_ref(cfg),
                     },
@@ -2679,7 +2650,9 @@ def run_portfolio_search_asof(
 
     print_executable_candidate_summary(executable_candidates)
     if missing_by_candidate:
-        print(f"\n[executable][warn] skipped_or_failed_candidates={len(missing_by_candidate)} sample={missing_by_candidate[:3]}")
+        print(
+            f"\n[executable][warn] skipped_or_failed_candidates={len(missing_by_candidate)} sample={missing_by_candidate[:3]}"
+        )
 
     print("\nSelection chain")
     print("-" * 72)
@@ -2753,7 +2726,9 @@ def run_portfolio_search_asof(
     )
 
     print("\n=== Portfolio Health Score ===")
-    print(f"Health score: {_fmt_float(final_validation.get('health_score'), 1)} / 100 ({final_validation.get('health_grade', 'n/a')})")
+    print(
+        f"Health score: {_fmt_float(final_validation.get('health_score'), 1)} / 100 ({final_validation.get('health_grade', 'n/a')})"
+    )
     print(f"Raw optimizer score: {_fmt_float(final_executable.score, 4)}")
     print("Note: raw optimizer score is used for ranking only; health score is used for validation/reporting.")
 
@@ -2771,9 +2746,9 @@ def run_portfolio_search_asof(
             actuarial_text,
             enabled=True,
         )
-    
+
     print("\n" + "=" * 72)
-    
+
     if final_validation.get("passed"):
         print(f"Official selected portfolio: ACCEPTED FINAL EXECUTABLE ({selected_candidate_label})")
     else:
@@ -2922,9 +2897,24 @@ def parse_args() -> argparse.Namespace:
     )
 
     # Final executable validation knobs
-    ap.add_argument("--min-health-score", type=float, default=60.0, help="Minimum normalized 0-100 health score required for final executable acceptance.")
-    ap.add_argument("--min-executable-score", type=float, default=None, help="Optional raw optimizer-score floor. Disabled by default because optimizer score scale changes with tuned lambdas.")
-    ap.add_argument("--max-score-drop", type=float, default=None, help="Optional raw optimizer-score degradation cap. Disabled by default because optimizer score scale changes with tuned lambdas.")
+    ap.add_argument(
+        "--min-health-score",
+        type=float,
+        default=60.0,
+        help="Minimum normalized 0-100 health score required for final executable acceptance.",
+    )
+    ap.add_argument(
+        "--min-executable-score",
+        type=float,
+        default=None,
+        help="Optional raw optimizer-score floor. Disabled by default because optimizer score scale changes with tuned lambdas.",
+    )
+    ap.add_argument(
+        "--max-score-drop",
+        type=float,
+        default=None,
+        help="Optional raw optimizer-score degradation cap. Disabled by default because optimizer score scale changes with tuned lambdas.",
+    )
     ap.add_argument("--max-ruin-increase", type=float, default=0.03)
     ap.add_argument("--max-p-main-drop", type=float, default=0.15)
     ap.add_argument("--max-cash-weight", type=float, default=0.05)
@@ -3016,6 +3006,7 @@ def main():
         actuarial_max_allowed_leverage=float(args.actuarial_max_allowed_leverage),
     )
 
+
 # ----------------------------
 # Audit/logging entrypoint wrapper
 # ----------------------------
@@ -3043,7 +3034,9 @@ def main_with_audit() -> None:
                 event_type="build_dataset",
                 entity_type="portfolio_search",
                 entity_id=None,
-                as_of=str(getattr(args, "as_of", None) or getattr(args, "dt", None) or getattr(args, "run_dt", None) or ""),
+                as_of=str(
+                    getattr(args, "as_of", None) or getattr(args, "dt", None) or getattr(args, "run_dt", None) or ""
+                ),
                 source_script="run_portfolio_search.py",
                 source_mode="portfolio_search",
                 status=("dry_run" if is_dry_run else "success"),
@@ -3062,7 +3055,9 @@ def main_with_audit() -> None:
                 event_type="build_dataset",
                 entity_type="portfolio_search",
                 entity_id=None,
-                as_of=str(getattr(args, "as_of", None) or getattr(args, "dt", None) or getattr(args, "run_dt", None) or ""),
+                as_of=str(
+                    getattr(args, "as_of", None) or getattr(args, "dt", None) or getattr(args, "run_dt", None) or ""
+                ),
                 source_script="run_portfolio_search.py",
                 source_mode="portfolio_search",
                 status="failed",
@@ -3079,6 +3074,6 @@ def main_with_audit() -> None:
 
 if __name__ == "__main__":
     from multiprocessing import freeze_support
-    
+
     freeze_support()
     main_with_audit()

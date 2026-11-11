@@ -7,6 +7,7 @@ Staging is immutable, SHA-256 verified, with a commit marker written last.
 Promotion is an *explicit*, conditional update to a distinct lake_v2 pointer
 and is refused for any candidate not fully accepted.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -23,9 +24,13 @@ SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,100}$")
 SAFE_FILE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_./-]*$")
 PROTECTED_ROOTS = {"", "market", "prod/market"}
 REQUIRED_FILES = {
-    "silver.parquet", "gold.parquet", "bronze_validated.parquet",
-    "fx_normalized.parquet", "fx_evidence.parquet",
-    "session_issues.parquet", "asset_quality_summary.csv",
+    "silver.parquet",
+    "gold.parquet",
+    "bronze_validated.parquet",
+    "fx_normalized.parquet",
+    "fx_evidence.parquet",
+    "session_issues.parquet",
+    "asset_quality_summary.csv",
 }
 
 
@@ -42,9 +47,7 @@ def _sha(blob: bytes) -> str:
 
 
 def _is_missing(exc: ClientError) -> bool:
-    return exc.response.get("Error", {}).get("Code") in (
-        "404", "NoSuchKey", "NotFound", "NoSuchVersion"
-    )
+    return exc.response.get("Error", {}).get("Code") in ("404", "NoSuchKey", "NotFound", "NoSuchVersion")
 
 
 def _root(value: str) -> str:
@@ -100,11 +103,9 @@ def _verified_artifacts(local: Path, manifest: dict) -> dict[str, tuple[str, Pat
         raise PublicationError("Missing Bronze provenance")
     if manifest.get("source_rows", 0) <= 0:
         raise PublicationError("Empty source history")
-    if (
-        manifest.get("candidate_input_rows", manifest["source_rows"])
-        != manifest.get("silver_rows")
-        or manifest.get("silver_rows") != manifest.get("gold_rows")
-    ):
+    if manifest.get("candidate_input_rows", manifest["source_rows"]) != manifest.get("silver_rows") or manifest.get(
+        "silver_rows"
+    ) != manifest.get("gold_rows"):
         raise PublicationError("Bronze/Silver/Gold row count mismatch")
     assets = {}
     for original, digest in declared.items():
@@ -131,6 +132,7 @@ def _verified_artifacts(local: Path, manifest: dict) -> dict[str, tuple[str, Pat
 def _manifest_paths(local: Path, manifest: dict) -> list[str]:
     return sorted(_verified_artifacts(local, manifest))
 
+
 def validate_local_candidate(local: Path) -> tuple[dict, list[str]]:
     manifest_file = local / "manifest.json"
     if not manifest_file.is_file() or manifest_file.is_symlink():
@@ -151,12 +153,18 @@ def _read(s3: Any, bucket: str, key: str) -> bytes | None:
 def _put_once(s3: Any, bucket: str, key: str, body: bytes, content_type: str) -> None:
     try:
         s3.put_object(
-            Bucket=bucket, Key=key, Body=body, ContentType=content_type,
+            Bucket=bucket,
+            Key=key,
+            Body=body,
+            ContentType=content_type,
             IfNoneMatch="*",
         )
     except ClientError as exc:
         if exc.response.get("Error", {}).get("Code") in (
-            "PreconditionFailed", "412", "ConditionalRequestConflict", "409"
+            "PreconditionFailed",
+            "412",
+            "ConditionalRequestConflict",
+            "409",
         ):
             raise PublicationError(f"Object already exists or concurrent write: {key}") from exc
         raise
@@ -166,10 +174,7 @@ def _candidate_prefix(root: str, run_id: str) -> str:
     return f"{_root(root)}/lake_v2/candidates/{_run_id(run_id)}"
 
 
-def stage_candidate(
-    s3: Any, bucket: str, local: Path, *,
-    run_id: str, root: str = "dev/market"
-) -> dict:
+def stage_candidate(s3: Any, bucket: str, local: Path, *, run_id: str, root: str = "dev/market") -> dict:
     """Upload once. No overwrite, retry needs a *new* run ID after failure."""
     manifest, paths = validate_local_candidate(local)
     artifacts = _verified_artifacts(local, manifest)
@@ -184,7 +189,10 @@ def stage_candidate(
     for name in paths:
         data = artifacts[name][1].read_bytes()
         _put_once(
-            s3, bucket, f"{prefix}/{name}", data,
+            s3,
+            bucket,
+            f"{prefix}/{name}",
+            data,
             "text/csv" if name.endswith(".csv") else "application/octet-stream",
         )
     source_manifest = (local / "manifest.json").read_bytes()
@@ -201,18 +209,19 @@ def stage_candidate(
 
     receipt = {
         "schema": "lake_v2_staged_candidate_v1",
-        "run_id": run_id, "bucket": bucket, "prefix": prefix,
+        "run_id": run_id,
+        "bucket": bucket,
+        "prefix": prefix,
         "candidate_manifest_sha256": _sha(source_manifest),
-        "file_count": len(paths), "publication_state": "staged_unpromoted",
+        "file_count": len(paths),
+        "publication_state": "staged_unpromoted",
         "acceptance": manifest.get("acceptance"),
     }
     _put_once(s3, bucket, commit_key, _json_bytes(receipt), "application/json")
     return receipt
 
 
-def verify_staged_candidate(
-    s3: Any, bucket: str, *, run_id: str, root: str = "dev/market"
-) -> tuple[dict, dict]:
+def verify_staged_candidate(s3: Any, bucket: str, *, run_id: str, root: str = "dev/market") -> tuple[dict, dict]:
     prefix = _candidate_prefix(root, run_id)
     marker_bytes = _read(s3, bucket, f"{prefix}/_committed.json")
     if marker_bytes is None:
@@ -246,7 +255,11 @@ def verify_staged_candidate(
 
 
 def promote_candidate(
-    s3: Any, bucket: str, *, run_id: str, root: str = "dev/market",
+    s3: Any,
+    bucket: str,
+    *,
+    run_id: str,
+    root: str = "dev/market",
     approval: str,
 ) -> dict:
     """Explicitly switch a *dev-only* pointer after full verification.
@@ -263,10 +276,7 @@ def promote_candidate(
         or manifest.get("missing_expected_sessions", 0) != 0
         or manifest.get("unexpected_sessions", 0) != 0
         or manifest.get("fx_rejected_rows", 0) != 0
-        or any(
-            x.get("quarantined_prices", 0) or x.get("review_returns", 0)
-            for x in manifest.get("assets", [])
-        )
+        or any(x.get("quarantined_prices", 0) or x.get("review_returns", 0) for x in manifest.get("assets", []))
     ):
         raise PublicationError("Candidate not eligible for dev pointer promotion")
 
@@ -295,12 +305,18 @@ def promote_candidate(
         params["IfMatch"] = head["ETag"]
     try:
         s3.put_object(
-            Bucket=bucket, Key=pointer_key, Body=body,
-            ContentType="application/json", **params,
+            Bucket=bucket,
+            Key=pointer_key,
+            Body=body,
+            ContentType="application/json",
+            **params,
         )
     except ClientError as exc:
         if exc.response.get("Error", {}).get("Code") in (
-            "PreconditionFailed", "412", "ConditionalRequestConflict", "409"
+            "PreconditionFailed",
+            "412",
+            "ConditionalRequestConflict",
+            "409",
         ):
             raise PublicationError("Concurrent dev pointer update") from exc
         raise
@@ -327,22 +343,19 @@ def main() -> None:
         if not args.bucket or not args.run_id:
             parser.error("--bucket and --run-id required")
         import boto3
+
         s3 = boto3.client("s3", region_name=args.region)
         if args.action == "stage":
             if args.candidate_dir is None:
                 parser.error("--candidate-dir required")
-            output = stage_candidate(s3, args.bucket, args.candidate_dir,
-                                     run_id=args.run_id, root=args.root)
+            output = stage_candidate(s3, args.bucket, args.candidate_dir, run_id=args.run_id, root=args.root)
         elif args.action == "verify-staged":
-            receipt, manifest = verify_staged_candidate(
-                s3, args.bucket, run_id=args.run_id, root=args.root
-            )
+            receipt, manifest = verify_staged_candidate(s3, args.bucket, run_id=args.run_id, root=args.root)
             output = {"receipt": receipt, "acceptance": manifest.get("acceptance")}
         else:
             if not args.approval:
                 parser.error("--approval requires independently reviewed manifest SHA-256")
-            output = promote_candidate(s3, args.bucket, run_id=args.run_id,
-                                       root=args.root, approval=args.approval)
+            output = promote_candidate(s3, args.bucket, run_id=args.run_id, root=args.root, approval=args.approval)
     print(json.dumps(output, indent=2, sort_keys=True))
 
 

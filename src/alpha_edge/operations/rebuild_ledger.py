@@ -46,13 +46,46 @@ POSITION_QTY_EPS = 1e-6
 POSITION_NOTIONAL_EPS = 1e-4
 
 _FX_BASES = {
-    "EUR", "USD", "GBP", "JPY", "CHF", "AUD", "NZD", "CAD",
-    "SEK", "NOK", "DKK", "CNH", "HKD", "SGD", "MXN", "ZAR",
+    "EUR",
+    "USD",
+    "GBP",
+    "JPY",
+    "CHF",
+    "AUD",
+    "NZD",
+    "CAD",
+    "SEK",
+    "NOK",
+    "DKK",
+    "CNH",
+    "HKD",
+    "SGD",
+    "MXN",
+    "ZAR",
 }
 _CRYPTO_BASES = {
-    "BTC", "ETH", "ADA", "XRP", "DOT", "BCH", "LTC", "SOL",
-    "DOGE", "SUI", "HBAR", "DASH", "BNB", "AVAX", "LINK",
-    "MATIC", "ATOM", "NEAR", "UNI", "AAVE", "TRX", "ETC",
+    "BTC",
+    "ETH",
+    "ADA",
+    "XRP",
+    "DOT",
+    "BCH",
+    "LTC",
+    "SOL",
+    "DOGE",
+    "SUI",
+    "HBAR",
+    "DASH",
+    "BNB",
+    "AVAX",
+    "LINK",
+    "MATIC",
+    "ATOM",
+    "NEAR",
+    "UNI",
+    "AAVE",
+    "TRX",
+    "ETC",
     "QTUM",
 }
 _CRYPTO_QUOTES = {"USD", "USDT", "USDC", "EUR"}
@@ -145,6 +178,7 @@ def engine_key(cfg: RuntimeConfig, *parts: str) -> str:
 def dt_key(cfg: RuntimeConfig, table: str, dt_str: str, filename: str) -> str:
     return engine_key(cfg, table, f"dt={dt_str}", filename)
 
+
 def market_key(cfg: RuntimeConfig, *parts: str) -> str:
     return "/".join([cfg.market_root.strip("/")] + [p.strip("/") for p in parts])
 
@@ -155,6 +189,7 @@ def ohlcv_usd_root(cfg: RuntimeConfig) -> str:
 
 def latest_prices_key(cfg: RuntimeConfig) -> str:
     return market_key(cfg, "snapshots", "v1", "latest_prices.parquet")
+
 
 def checkpoint_key(
     cfg: RuntimeConfig,
@@ -286,8 +321,7 @@ def _fx_to_usd(ccy: str, d: dt.date, fx_map: dict[str, pd.Series], max_lookback_
         cur = cur - dt.timedelta(days=1)
 
     raise ValueError(
-        f"No FX value found for currency={ccy} as_of={d.isoformat()} "
-        f"within lookback={max_lookback_days} days"
+        f"No FX value found for currency={ccy} as_of={d.isoformat()} within lookback={max_lookback_days} days"
     )
 
 
@@ -423,9 +457,7 @@ def _load_dividends(
 
 def _load_split_events_from_store(*, cfg: RuntimeConfig) -> list[SplitEvent]:
     store = MarketStore(bucket=cfg.bucket, region=cfg.region)
-    df = store.read_corporate_actions(
-        columns=["asset_id", "ticker", "effective_date", "action_type", "split_factor"]
-    )
+    df = store.read_corporate_actions(columns=["asset_id", "ticker", "effective_date", "action_type", "split_factor"])
 
     if df is None or df.empty:
         return []
@@ -582,13 +614,9 @@ def ledger_state_from_payload(payload: dict) -> LedgerState:
         notional_long_lots=_rows_to_value_lots_dict(payload.get("notional_long_lots", [])),
         notional_short_lots=_rows_to_value_lots_dict(payload.get("notional_short_lots", [])),
         ticker_by_asset={
-            str(k).strip(): str(v).upper().strip()
-            for k, v in (payload.get("ticker_by_asset") or {}).items()
+            str(k).strip(): str(v).upper().strip() for k, v in (payload.get("ticker_by_asset") or {}).items()
         },
-        ccy_by_asset={
-            str(k).strip(): str(v).upper().strip()
-            for k, v in (payload.get("ccy_by_asset") or {}).items()
-        },
+        ccy_by_asset={str(k).strip(): str(v).upper().strip() for k, v in (payload.get("ccy_by_asset") or {}).items()},
         realized_pnl_usd=float(payload.get("realized_pnl_usd", 0.0)),
         net_cashflow_usd=float(payload.get("net_cashflow_usd", 0.0)),
         dividends_pnl_usd=float(payload.get("dividends_pnl_usd", 0.0)),
@@ -634,10 +662,7 @@ def read_ledger_checkpoint(
     if expected_method is not None:
         got_method = str(payload.get("method", "")).strip()
         if got_method != str(expected_method).strip():
-            raise ValueError(
-                f"Checkpoint method mismatch for {key}: "
-                f"expected={expected_method!r}, got={got_method!r}"
-            )
+            raise ValueError(f"Checkpoint method mismatch for {key}: expected={expected_method!r}, got={got_method!r}")
 
     return ledger_state_from_payload(payload)
 
@@ -700,9 +725,29 @@ def _normalize_unit(u: Optional[str]) -> Optional[str]:
     if s in {"ounce", "ounces"}:
         return "ounces"
     if s in {
-        "btc", "eth", "sol", "ada", "xrp", "dot", "ltc", "bnb",
-        "avax", "link", "matic", "atom", "near", "uni", "aave",
-        "trx", "etc", "doge", "hbar", "sui", "dash", "bch", "qtum",
+        "btc",
+        "eth",
+        "sol",
+        "ada",
+        "xrp",
+        "dot",
+        "ltc",
+        "bnb",
+        "avax",
+        "link",
+        "matic",
+        "atom",
+        "near",
+        "uni",
+        "aave",
+        "trx",
+        "etc",
+        "doge",
+        "hbar",
+        "sui",
+        "dash",
+        "bch",
+        "qtum",
     }:
         return "coins"
     if s in {"derivative", "derivatives"}:
@@ -1254,25 +1299,13 @@ def replay_trades_into_state(
             positions_deriv.pop(aid, None)
 
     open_lot_trace = {
-        "spot_long_lots": [
-            asdict(lot)
-            for asset_id in sorted(spot_long_lots)
-            for lot in spot_long_lots[asset_id]
-        ],
-        "spot_short_lots": [
-            asdict(lot)
-            for asset_id in sorted(spot_short_lots)
-            for lot in spot_short_lots[asset_id]
-        ],
+        "spot_long_lots": [asdict(lot) for asset_id in sorted(spot_long_lots) for lot in spot_long_lots[asset_id]],
+        "spot_short_lots": [asdict(lot) for asset_id in sorted(spot_short_lots) for lot in spot_short_lots[asset_id]],
         "notional_long_lots": [
-            asdict(lot)
-            for asset_id in sorted(notional_long_lots)
-            for lot in notional_long_lots[asset_id]
+            asdict(lot) for asset_id in sorted(notional_long_lots) for lot in notional_long_lots[asset_id]
         ],
         "notional_short_lots": [
-            asdict(lot)
-            for asset_id in sorted(notional_short_lots)
-            for lot in notional_short_lots[asset_id]
+            asdict(lot) for asset_id in sorted(notional_short_lots) for lot in notional_short_lots[asset_id]
         ],
     }
 
@@ -1472,13 +1505,7 @@ def accumulate_net_cashflow_usd(
         amt = float(cf.get("amount"))
         kind = str(cf.get("type") or cf.get("direction") or cf.get("cashflow_type") or "").strip().upper()
 
-        sign = (
-            +1.0
-            if kind in {"DEPOSIT", "IN", "CREDIT"}
-            else -1.0
-            if kind in {"WITHDRAWAL", "OUT", "DEBIT"}
-            else None
-        )
+        sign = +1.0 if kind in {"DEPOSIT", "IN", "CREDIT"} else -1.0 if kind in {"WITHDRAWAL", "OUT", "DEBIT"} else None
 
         if sign is None:
             signed_amt = cf.get("amount_signed", None)
@@ -1555,380 +1582,378 @@ def main() -> None:
         input_args=input_args,
         dry_run=bool(args.dry_run),
     ) as run_id:
-            s3 = s3_client(cfg)
-            _ = MarketStore(bucket=cfg.bucket, region=cfg.region)
+        s3 = s3_client(cfg)
+        _ = MarketStore(bucket=cfg.bucket, region=cfg.region)
 
-            method_name = "fifo_with_splits_spot_vs_notional_by_asset_type_action_tag_asset_id_native_v3_open_lot_trace"
-            as_of = args.as_of or pd.Timestamp(dt.date.today()).strftime("%Y-%m-%d")
+        method_name = "fifo_with_splits_spot_vs_notional_by_asset_type_action_tag_asset_id_native_v3_open_lot_trace"
+        as_of = args.as_of or pd.Timestamp(dt.date.today()).strftime("%Y-%m-%d")
 
-            checkpoint_loaded_asof: Optional[str] = None
-            base_state: LedgerState | None = None
+        checkpoint_loaded_asof: Optional[str] = None
+        base_state: LedgerState | None = None
 
-            effective_start = args.start
+        effective_start = args.start
 
-            if args.use_checkpoints:
-                latest_ckpt_asof = discover_latest_checkpoint_asof(
-                    s3,
-                    cfg=cfg,
-                    account_id=str(args.account_id),
-                    end_as_of=str(args.end or as_of),
-                )
-
-                if latest_ckpt_asof is not None:
-                    base_state = read_ledger_checkpoint(
-                        s3,
-                        cfg=cfg,
-                        account_id=str(args.account_id),
-                        as_of=latest_ckpt_asof,
-                        expected_method=method_name,
-                    )
-
-                    if base_state is not None:
-                        checkpoint_loaded_asof = latest_ckpt_asof
-                        effective_start = (pd.Timestamp(latest_ckpt_asof).date() + dt.timedelta(days=1)).isoformat()
-
-            trades = _load_trades(s3, cfg=cfg, start=effective_start, end=args.end)
-            cashflows = _load_cashflows(s3, cfg=cfg, start=effective_start, end=args.end)
-            dividends = _load_dividends(s3, cfg=cfg, start=effective_start, end=args.end)
-
-            if (not trades) and (not cashflows) and (not dividends) and (base_state is None):
-                raise RuntimeError(
-                    f"No activity found under {cfg.engine_root}/{{trades,cashflows,dividends}}/ "
-                    "for the requested window."
-                )
-
-            all_ccys = set()
-
-            for t in trades:
-                all_ccys.add(str(t.get("currency") or "USD").upper().strip())
-            for c in cashflows:
-                all_ccys.add(str(c.get("currency") or "USD").upper().strip())
-            for d in dividends:
-                all_ccys.add(str(d.get("currency") or "USD").upper().strip())
-
-            if base_state is not None:
-                for ccy in base_state.ccy_by_asset.values():
-                    all_ccys.add(str(ccy).upper().strip())
-
-            all_ccys.discard("USD")
-            all_ccys.discard("USDT")
-            all_ccys.discard("USDC")
-
-            def _activity_date_span(objs: list[dict]) -> tuple[pd.Timestamp, pd.Timestamp] | None:
-                if not objs:
-                    return None
-
-                ds = [pd.Timestamp(str(x.get("as_of"))).normalize() for x in objs if x.get("as_of")]
-                ds = [d for d in ds if pd.notna(d)]
-
-                if not ds:
-                    return None
-
-                return min(ds), max(ds)
-
-            spans = []
-
-            for seq in (trades, cashflows, dividends):
-                sp = _activity_date_span(seq)
-                if sp is not None:
-                    spans.append(sp)
-
-            if base_state is not None and checkpoint_loaded_asof is not None:
-                ckpt_day = pd.Timestamp(checkpoint_loaded_asof).normalize()
-                spans.append((ckpt_day, ckpt_day))
-
-            fx_map: dict[str, pd.Series] = {}
-
-            if all_ccys and spans:
-                min_d = min(s[0] for s in spans).date() - dt.timedelta(days=10)
-                max_d = max(s[1] for s in spans).date() + dt.timedelta(days=10)
-
-                for ccy in sorted(all_ccys):
-                    fx_map[ccy] = _download_daily_fx_usd_per_ccy(
-                        ccy,
-                        start=str(min_d),
-                        end=str(max_d),
-                    )
-
-            events = _load_split_events_from_store(cfg=cfg)
-            trades_adj = apply_split_events_to_trades(trades, events) if trades else []
-
-            final_state, positions_spot, positions_deriv, realized, open_lot_trace = replay_trades_into_state(
-                trades_adj,
-                state=base_state,
-                fx_map=fx_map,
-                debug=False,
-                recon_path="./data/recon_trades_fifo_vs_reported.csv",
-            )
-
-            final_state.net_cashflow_usd = accumulate_net_cashflow_usd(
-                cashflows,
-                fx_map=fx_map,
-                initial=(base_state.net_cashflow_usd if base_state is not None else 0.0),
-            )
-            final_state.dividends_pnl_usd = accumulate_dividends_pnl_usd(
-                dividends,
-                fx_map=fx_map,
-                initial=(base_state.dividends_pnl_usd if base_state is not None else 0.0),
-            )
-
-            asof_date = pd.Timestamp(as_of).date()
-
-            px_by_asset_id: dict[str, float] = {}
-            missing_px_spot = 0
-
-            if args.prices_mode == "asof":
-                close_cache: dict[tuple[str, int], pd.Series] = {}
-
-                for asset_id in positions_spot.keys():
-                    px = get_asset_close_usd_asof(
-                        s3,
-                        cfg=cfg,
-                        asset_id=str(asset_id),
-                        asof_date=asof_date,
-                        cache=close_cache,
-                        max_lookback_days=14,
-                    )
-
-                    if px is None:
-                        missing_px_spot += 1
-                    else:
-                        px_by_asset_id[str(asset_id)] = float(px)
-
-                prices_source_ref = f"s3://{cfg.bucket}/{ohlcv_usd_root(cfg)}/asset_id=<.>/year=<.>/"
-
-            else:
-                latest_prices_s3_key = latest_prices_key(cfg)
-                latest_prices_df = s3_get_parquet_df(s3, bucket=cfg.bucket, key=latest_prices_s3_key)
-
-                px_map_ticker = (
-                    latest_prices_df.assign(ticker=lambda d: d["ticker"].astype(str).str.upper().str.strip())
-                    .set_index("ticker")["close_raw_usd"]
-                    .apply(pd.to_numeric, errors="coerce")
-                    .dropna()
-                    .to_dict()
-                )
-
-                for asset_id, p in positions_spot.items():
-                    tkr = str(p.ticker).upper().strip()
-                    px = px_map_ticker.get(tkr)
-
-                    if px is None:
-                        missing_px_spot += 1
-                    else:
-                        px_by_asset_id[str(asset_id)] = float(px)
-
-                prices_source_ref = f"s3://{cfg.bucket}/{latest_prices_s3_key}"
-
-            spot_views = build_position_views(positions=positions_spot, px_by_asset_id=px_by_asset_id)
-
-            unreal_spot = 0.0
-            for v in spot_views:
-                if v.unrealized_pnl is not None:
-                    unreal_spot += float(v.unrealized_pnl)
-
-            total_pnl_usd = float(final_state.realized_pnl_usd + unreal_spot + final_state.dividends_pnl_usd)
-            equity_usd = float(total_pnl_usd + final_state.net_cashflow_usd)
-
-            pnl = PnLSummary(
-                as_of=as_of,
-                trade_count=int(final_state.trade_count),
-                tickers_spot=int(len(spot_views)),
-                tickers_derivatives=int(len(positions_deriv)),
-                realized_pnl=float(final_state.realized_pnl_usd),
-                unrealized_pnl_spot=float(unreal_spot),
-                dividends_pnl_usd=float(final_state.dividends_pnl_usd),
-                net_cashflow_usd=float(final_state.net_cashflow_usd),
-                total_pnl_usd=float(total_pnl_usd),
-                equity_usd=float(equity_usd),
-            )
-
-            positions_payload = {
-                "as_of": as_of,
-                "method": method_name,
-                "spot_positions": [asdict(v) for v in spot_views],
-                "derivatives_positions": [asdict(v) for v in positions_deriv.values()],
-                "stats": {
-                    "n_spot_positions": int(len(spot_views)),
-                    "n_notional_positions": int(len(positions_deriv)),
-                    "missing_price_spot_n": int(missing_px_spot),
-                    "prices_mode": str(args.prices_mode),
-                    "checkpoint_loaded_asof": checkpoint_loaded_asof,
-                    "effective_replay_start": effective_start,
-                    "env": cfg.env,
-                },
-                "sources": {
-                    "trades_prefix": f"s3://{cfg.bucket}/{engine_key(cfg, TRADES_TABLE)}/",
-                    "cashflows_prefix": f"s3://{cfg.bucket}/{engine_key(cfg, CASHFLOWS_TABLE)}/",
-                    "dividends_prefix": f"s3://{cfg.bucket}/{engine_key(cfg, DIVIDENDS_TABLE)}/",
-                    "prices_source": prices_source_ref,
-                },
-            }
-
-            pnl_payload = {
-                "as_of": as_of,
-                "method": method_name,
-                "summary": asdict(pnl),
-                "sources": positions_payload["sources"],
-            }
-
-            open_lot_trace_payload = {
-                "as_of": as_of,
-                "method": method_name,
-                "summary": {
-                    "spot_long_lots_n": len(open_lot_trace["spot_long_lots"]),
-                    "spot_short_lots_n": len(open_lot_trace["spot_short_lots"]),
-                    "notional_long_lots_n": len(open_lot_trace["notional_long_lots"]),
-                    "notional_short_lots_n": len(open_lot_trace["notional_short_lots"]),
-                },
-                "open_lots": open_lot_trace,
-                "sources": positions_payload["sources"],
-            }
-
-            print("\n=== LEDGER REBUILD (FIFO WITH SPLITS) ===")
-            print(f"env:                  {cfg.env}")
-            print(f"bucket:               {cfg.bucket}")
-            print(f"engine_root:          {cfg.engine_root}")
-            print(f"as_of:                {as_of}")
-            print(f"checkpoint_loaded:    {checkpoint_loaded_asof}")
-            print(f"effective_start:      {effective_start}")
-            print(f"trades_loaded:        {len(trades)}")
-            print(f"cashflows_loaded:     {len(cashflows)}")
-            print(f"dividends_loaded:     {len(dividends)}")
-            print(f"trade_count_total:    {final_state.trade_count}")
-            print(f"open positions:       {len(spot_views)} (spot) + {len(positions_deriv)} (notional)")
-            print(f"open lots trace:      {open_lot_trace_payload['summary']}")
-            print(f"realized_pnl:         {final_state.realized_pnl_usd:,.2f}")
-            print(f"unrealized_pnl_spot:  {unreal_spot:,.2f} (missing_px_spot={missing_px_spot})")
-            print(f"dividends_pnl_usd:    {final_state.dividends_pnl_usd:,.2f}")
-            print(f"net_cashflow_usd:     {final_state.net_cashflow_usd:,.2f}")
-            print(f"total_pnl_usd:        {total_pnl_usd:,.2f}")
-            print(f"equity_usd:           {equity_usd:,.2f}")
-            print(f"prices_mode:          {args.prices_mode}")
-            print("")
-
-            positions_key = dt_key(cfg, LEDGER_TABLE, as_of, "positions.json")
-            pnl_key = dt_key(cfg, LEDGER_TABLE, as_of, "pnl.json")
-            open_lot_trace_key = dt_key(cfg, LEDGER_TABLE, as_of, "open_lot_trace.json")
-
-            positions_latest_key = engine_key(cfg, LEDGER_TABLE, "positions", "latest.json")
-            pnl_latest_key = engine_key(cfg, LEDGER_TABLE, "pnl", "latest.json")
-            open_lot_trace_latest_key = engine_key(cfg, LEDGER_TABLE, "open_lot_trace", "latest.json")
-
-            should_write_checkpoint = bool(args.write_checkpoints) and (
-                args.checkpoint_policy == "always"
-                or (args.checkpoint_policy == "month_end" and _is_month_end(as_of))
-            )
-
-            checkpoint_out_key = checkpoint_key(
-                cfg,
-                account_id=str(args.account_id),
-                as_of=as_of,
-                filename="state.json",
-            )
-
-            output_keys = [
-                positions_key,
-                pnl_key,
-                open_lot_trace_key,
-                positions_latest_key,
-                pnl_latest_key,
-                open_lot_trace_latest_key,
-            ]
-            if should_write_checkpoint:
-                output_keys.append(checkpoint_out_key)
-
-            audit = build_audit_event(
+        if args.use_checkpoints:
+            latest_ckpt_asof = discover_latest_checkpoint_asof(
+                s3,
                 cfg=cfg,
-                run_id=run_id,
-                event_type="rebuild",
-                entity_type="ledger",
-                entity_id=str(args.account_id),
-                as_of=as_of,
-                source_script="rebuild_ledger.py",
-                source_mode="rebuild",
-                status=("dry_run" if args.dry_run else "success"),
-                reason="ledger rebuild",
-                input_args=input_args,
-                output_keys=output_keys,
-                metadata={
-                    "method": method_name,
-                    "trades_loaded": len(trades),
-                    "cashflows_loaded": len(cashflows),
-                    "dividends_loaded": len(dividends),
-                    "trade_count_total": int(final_state.trade_count),
-                    "spot_positions_n": int(len(spot_views)),
-                    "notional_positions_n": int(len(positions_deriv)),
-                    "missing_price_spot_n": int(missing_px_spot),
-                    "prices_mode": str(args.prices_mode),
-                    "checkpoint_loaded_asof": checkpoint_loaded_asof,
-                    "effective_replay_start": effective_start,
-                    "should_write_checkpoint": bool(should_write_checkpoint),
-                    "realized_pnl": float(final_state.realized_pnl_usd),
-                    "unrealized_pnl_spot": float(unreal_spot),
-                    "dividends_pnl_usd": float(final_state.dividends_pnl_usd),
-                    "net_cashflow_usd": float(final_state.net_cashflow_usd),
-                    "total_pnl_usd": float(total_pnl_usd),
-                    "equity_usd": float(equity_usd),
-                },
+                account_id=str(args.account_id),
+                end_as_of=str(args.end or as_of),
             )
 
-            if args.dry_run:
-                print("[DRY RUN] Would write:")
-                print(f"  s3://{cfg.bucket}/{positions_key}")
-                print(f"  s3://{cfg.bucket}/{pnl_key}")
-                print(f"  s3://{cfg.bucket}/{open_lot_trace_key}")
-                print(f"  s3://{cfg.bucket}/{positions_latest_key}")
-                print(f"  s3://{cfg.bucket}/{pnl_latest_key}")
-                print(f"  s3://{cfg.bucket}/{open_lot_trace_latest_key}")
-
-                print("\n=== OPEN POSITION DEBUG ===")
-                for asset_id, pos in positions_spot.items():
-                    print(asset_id, pos)
-
-                print("\n=== OPEN LOT TRACE DEBUG ===")
-                print(json.dumps(open_lot_trace, indent=2, default=str)[:20000])
-
-                if should_write_checkpoint:
-                    print(f"  s3://{cfg.bucket}/{checkpoint_out_key}")
-
-                write_audit_event(cfg=cfg, event=audit, dry_run=True)
-                return
-
-            s3_put_json(s3, bucket=cfg.bucket, key=positions_key, payload=positions_payload)
-            s3_put_json(s3, bucket=cfg.bucket, key=pnl_key, payload=pnl_payload)
-            s3_put_json(s3, bucket=cfg.bucket, key=open_lot_trace_key, payload=open_lot_trace_payload)
-
-            s3_put_json(s3, bucket=cfg.bucket, key=positions_latest_key, payload=positions_payload)
-            s3_put_json(s3, bucket=cfg.bucket, key=pnl_latest_key, payload=pnl_payload)
-            s3_put_json(s3, bucket=cfg.bucket, key=open_lot_trace_latest_key, payload=open_lot_trace_payload)
-
-            if should_write_checkpoint:
-                write_ledger_checkpoint(
+            if latest_ckpt_asof is not None:
+                base_state = read_ledger_checkpoint(
                     s3,
                     cfg=cfg,
                     account_id=str(args.account_id),
-                    as_of=as_of,
-                    method=method_name,
-                    state=final_state,
+                    as_of=latest_ckpt_asof,
+                    expected_method=method_name,
                 )
 
-            write_audit_event(cfg=cfg, event=audit, dry_run=False)
+                if base_state is not None:
+                    checkpoint_loaded_asof = latest_ckpt_asof
+                    effective_start = (pd.Timestamp(latest_ckpt_asof).date() + dt.timedelta(days=1)).isoformat()
 
-            print("[OK] Wrote:")
+        trades = _load_trades(s3, cfg=cfg, start=effective_start, end=args.end)
+        cashflows = _load_cashflows(s3, cfg=cfg, start=effective_start, end=args.end)
+        dividends = _load_dividends(s3, cfg=cfg, start=effective_start, end=args.end)
+
+        if (not trades) and (not cashflows) and (not dividends) and (base_state is None):
+            raise RuntimeError(
+                f"No activity found under {cfg.engine_root}/{{trades,cashflows,dividends}}/ for the requested window."
+            )
+
+        all_ccys = set()
+
+        for t in trades:
+            all_ccys.add(str(t.get("currency") or "USD").upper().strip())
+        for c in cashflows:
+            all_ccys.add(str(c.get("currency") or "USD").upper().strip())
+        for d in dividends:
+            all_ccys.add(str(d.get("currency") or "USD").upper().strip())
+
+        if base_state is not None:
+            for ccy in base_state.ccy_by_asset.values():
+                all_ccys.add(str(ccy).upper().strip())
+
+        all_ccys.discard("USD")
+        all_ccys.discard("USDT")
+        all_ccys.discard("USDC")
+
+        def _activity_date_span(objs: list[dict]) -> tuple[pd.Timestamp, pd.Timestamp] | None:
+            if not objs:
+                return None
+
+            ds = [pd.Timestamp(str(x.get("as_of"))).normalize() for x in objs if x.get("as_of")]
+            ds = [d for d in ds if pd.notna(d)]
+
+            if not ds:
+                return None
+
+            return min(ds), max(ds)
+
+        spans = []
+
+        for seq in (trades, cashflows, dividends):
+            sp = _activity_date_span(seq)
+            if sp is not None:
+                spans.append(sp)
+
+        if base_state is not None and checkpoint_loaded_asof is not None:
+            ckpt_day = pd.Timestamp(checkpoint_loaded_asof).normalize()
+            spans.append((ckpt_day, ckpt_day))
+
+        fx_map: dict[str, pd.Series] = {}
+
+        if all_ccys and spans:
+            min_d = min(s[0] for s in spans).date() - dt.timedelta(days=10)
+            max_d = max(s[1] for s in spans).date() + dt.timedelta(days=10)
+
+            for ccy in sorted(all_ccys):
+                fx_map[ccy] = _download_daily_fx_usd_per_ccy(
+                    ccy,
+                    start=str(min_d),
+                    end=str(max_d),
+                )
+
+        events = _load_split_events_from_store(cfg=cfg)
+        trades_adj = apply_split_events_to_trades(trades, events) if trades else []
+
+        final_state, positions_spot, positions_deriv, realized, open_lot_trace = replay_trades_into_state(
+            trades_adj,
+            state=base_state,
+            fx_map=fx_map,
+            debug=False,
+            recon_path="./data/recon_trades_fifo_vs_reported.csv",
+        )
+
+        final_state.net_cashflow_usd = accumulate_net_cashflow_usd(
+            cashflows,
+            fx_map=fx_map,
+            initial=(base_state.net_cashflow_usd if base_state is not None else 0.0),
+        )
+        final_state.dividends_pnl_usd = accumulate_dividends_pnl_usd(
+            dividends,
+            fx_map=fx_map,
+            initial=(base_state.dividends_pnl_usd if base_state is not None else 0.0),
+        )
+
+        asof_date = pd.Timestamp(as_of).date()
+
+        px_by_asset_id: dict[str, float] = {}
+        missing_px_spot = 0
+
+        if args.prices_mode == "asof":
+            close_cache: dict[tuple[str, int], pd.Series] = {}
+
+            for asset_id in positions_spot.keys():
+                px = get_asset_close_usd_asof(
+                    s3,
+                    cfg=cfg,
+                    asset_id=str(asset_id),
+                    asof_date=asof_date,
+                    cache=close_cache,
+                    max_lookback_days=14,
+                )
+
+                if px is None:
+                    missing_px_spot += 1
+                else:
+                    px_by_asset_id[str(asset_id)] = float(px)
+
+            prices_source_ref = f"s3://{cfg.bucket}/{ohlcv_usd_root(cfg)}/asset_id=<.>/year=<.>/"
+
+        else:
+            latest_prices_s3_key = latest_prices_key(cfg)
+            latest_prices_df = s3_get_parquet_df(s3, bucket=cfg.bucket, key=latest_prices_s3_key)
+
+            px_map_ticker = (
+                latest_prices_df.assign(ticker=lambda d: d["ticker"].astype(str).str.upper().str.strip())
+                .set_index("ticker")["close_raw_usd"]
+                .apply(pd.to_numeric, errors="coerce")
+                .dropna()
+                .to_dict()
+            )
+
+            for asset_id, p in positions_spot.items():
+                tkr = str(p.ticker).upper().strip()
+                px = px_map_ticker.get(tkr)
+
+                if px is None:
+                    missing_px_spot += 1
+                else:
+                    px_by_asset_id[str(asset_id)] = float(px)
+
+            prices_source_ref = f"s3://{cfg.bucket}/{latest_prices_s3_key}"
+
+        spot_views = build_position_views(positions=positions_spot, px_by_asset_id=px_by_asset_id)
+
+        unreal_spot = 0.0
+        for v in spot_views:
+            if v.unrealized_pnl is not None:
+                unreal_spot += float(v.unrealized_pnl)
+
+        total_pnl_usd = float(final_state.realized_pnl_usd + unreal_spot + final_state.dividends_pnl_usd)
+        equity_usd = float(total_pnl_usd + final_state.net_cashflow_usd)
+
+        pnl = PnLSummary(
+            as_of=as_of,
+            trade_count=int(final_state.trade_count),
+            tickers_spot=int(len(spot_views)),
+            tickers_derivatives=int(len(positions_deriv)),
+            realized_pnl=float(final_state.realized_pnl_usd),
+            unrealized_pnl_spot=float(unreal_spot),
+            dividends_pnl_usd=float(final_state.dividends_pnl_usd),
+            net_cashflow_usd=float(final_state.net_cashflow_usd),
+            total_pnl_usd=float(total_pnl_usd),
+            equity_usd=float(equity_usd),
+        )
+
+        positions_payload = {
+            "as_of": as_of,
+            "method": method_name,
+            "spot_positions": [asdict(v) for v in spot_views],
+            "derivatives_positions": [asdict(v) for v in positions_deriv.values()],
+            "stats": {
+                "n_spot_positions": int(len(spot_views)),
+                "n_notional_positions": int(len(positions_deriv)),
+                "missing_price_spot_n": int(missing_px_spot),
+                "prices_mode": str(args.prices_mode),
+                "checkpoint_loaded_asof": checkpoint_loaded_asof,
+                "effective_replay_start": effective_start,
+                "env": cfg.env,
+            },
+            "sources": {
+                "trades_prefix": f"s3://{cfg.bucket}/{engine_key(cfg, TRADES_TABLE)}/",
+                "cashflows_prefix": f"s3://{cfg.bucket}/{engine_key(cfg, CASHFLOWS_TABLE)}/",
+                "dividends_prefix": f"s3://{cfg.bucket}/{engine_key(cfg, DIVIDENDS_TABLE)}/",
+                "prices_source": prices_source_ref,
+            },
+        }
+
+        pnl_payload = {
+            "as_of": as_of,
+            "method": method_name,
+            "summary": asdict(pnl),
+            "sources": positions_payload["sources"],
+        }
+
+        open_lot_trace_payload = {
+            "as_of": as_of,
+            "method": method_name,
+            "summary": {
+                "spot_long_lots_n": len(open_lot_trace["spot_long_lots"]),
+                "spot_short_lots_n": len(open_lot_trace["spot_short_lots"]),
+                "notional_long_lots_n": len(open_lot_trace["notional_long_lots"]),
+                "notional_short_lots_n": len(open_lot_trace["notional_short_lots"]),
+            },
+            "open_lots": open_lot_trace,
+            "sources": positions_payload["sources"],
+        }
+
+        print("\n=== LEDGER REBUILD (FIFO WITH SPLITS) ===")
+        print(f"env:                  {cfg.env}")
+        print(f"bucket:               {cfg.bucket}")
+        print(f"engine_root:          {cfg.engine_root}")
+        print(f"as_of:                {as_of}")
+        print(f"checkpoint_loaded:    {checkpoint_loaded_asof}")
+        print(f"effective_start:      {effective_start}")
+        print(f"trades_loaded:        {len(trades)}")
+        print(f"cashflows_loaded:     {len(cashflows)}")
+        print(f"dividends_loaded:     {len(dividends)}")
+        print(f"trade_count_total:    {final_state.trade_count}")
+        print(f"open positions:       {len(spot_views)} (spot) + {len(positions_deriv)} (notional)")
+        print(f"open lots trace:      {open_lot_trace_payload['summary']}")
+        print(f"realized_pnl:         {final_state.realized_pnl_usd:,.2f}")
+        print(f"unrealized_pnl_spot:  {unreal_spot:,.2f} (missing_px_spot={missing_px_spot})")
+        print(f"dividends_pnl_usd:    {final_state.dividends_pnl_usd:,.2f}")
+        print(f"net_cashflow_usd:     {final_state.net_cashflow_usd:,.2f}")
+        print(f"total_pnl_usd:        {total_pnl_usd:,.2f}")
+        print(f"equity_usd:           {equity_usd:,.2f}")
+        print(f"prices_mode:          {args.prices_mode}")
+        print("")
+
+        positions_key = dt_key(cfg, LEDGER_TABLE, as_of, "positions.json")
+        pnl_key = dt_key(cfg, LEDGER_TABLE, as_of, "pnl.json")
+        open_lot_trace_key = dt_key(cfg, LEDGER_TABLE, as_of, "open_lot_trace.json")
+
+        positions_latest_key = engine_key(cfg, LEDGER_TABLE, "positions", "latest.json")
+        pnl_latest_key = engine_key(cfg, LEDGER_TABLE, "pnl", "latest.json")
+        open_lot_trace_latest_key = engine_key(cfg, LEDGER_TABLE, "open_lot_trace", "latest.json")
+
+        should_write_checkpoint = bool(args.write_checkpoints) and (
+            args.checkpoint_policy == "always" or (args.checkpoint_policy == "month_end" and _is_month_end(as_of))
+        )
+
+        checkpoint_out_key = checkpoint_key(
+            cfg,
+            account_id=str(args.account_id),
+            as_of=as_of,
+            filename="state.json",
+        )
+
+        output_keys = [
+            positions_key,
+            pnl_key,
+            open_lot_trace_key,
+            positions_latest_key,
+            pnl_latest_key,
+            open_lot_trace_latest_key,
+        ]
+        if should_write_checkpoint:
+            output_keys.append(checkpoint_out_key)
+
+        audit = build_audit_event(
+            cfg=cfg,
+            run_id=run_id,
+            event_type="rebuild",
+            entity_type="ledger",
+            entity_id=str(args.account_id),
+            as_of=as_of,
+            source_script="rebuild_ledger.py",
+            source_mode="rebuild",
+            status=("dry_run" if args.dry_run else "success"),
+            reason="ledger rebuild",
+            input_args=input_args,
+            output_keys=output_keys,
+            metadata={
+                "method": method_name,
+                "trades_loaded": len(trades),
+                "cashflows_loaded": len(cashflows),
+                "dividends_loaded": len(dividends),
+                "trade_count_total": int(final_state.trade_count),
+                "spot_positions_n": int(len(spot_views)),
+                "notional_positions_n": int(len(positions_deriv)),
+                "missing_price_spot_n": int(missing_px_spot),
+                "prices_mode": str(args.prices_mode),
+                "checkpoint_loaded_asof": checkpoint_loaded_asof,
+                "effective_replay_start": effective_start,
+                "should_write_checkpoint": bool(should_write_checkpoint),
+                "realized_pnl": float(final_state.realized_pnl_usd),
+                "unrealized_pnl_spot": float(unreal_spot),
+                "dividends_pnl_usd": float(final_state.dividends_pnl_usd),
+                "net_cashflow_usd": float(final_state.net_cashflow_usd),
+                "total_pnl_usd": float(total_pnl_usd),
+                "equity_usd": float(equity_usd),
+            },
+        )
+
+        if args.dry_run:
+            print("[DRY RUN] Would write:")
             print(f"  s3://{cfg.bucket}/{positions_key}")
             print(f"  s3://{cfg.bucket}/{pnl_key}")
             print(f"  s3://{cfg.bucket}/{open_lot_trace_key}")
-            print("[OK] Updated latest:")
             print(f"  s3://{cfg.bucket}/{positions_latest_key}")
             print(f"  s3://{cfg.bucket}/{pnl_latest_key}")
             print(f"  s3://{cfg.bucket}/{open_lot_trace_latest_key}")
 
+            print("\n=== OPEN POSITION DEBUG ===")
+            for asset_id, pos in positions_spot.items():
+                print(asset_id, pos)
+
+            print("\n=== OPEN LOT TRACE DEBUG ===")
+            print(json.dumps(open_lot_trace, indent=2, default=str)[:20000])
+
             if should_write_checkpoint:
-                print("[OK] Wrote checkpoint:")
                 print(f"  s3://{cfg.bucket}/{checkpoint_out_key}")
 
-            print("")
+            write_audit_event(cfg=cfg, event=audit, dry_run=True)
+            return
+
+        s3_put_json(s3, bucket=cfg.bucket, key=positions_key, payload=positions_payload)
+        s3_put_json(s3, bucket=cfg.bucket, key=pnl_key, payload=pnl_payload)
+        s3_put_json(s3, bucket=cfg.bucket, key=open_lot_trace_key, payload=open_lot_trace_payload)
+
+        s3_put_json(s3, bucket=cfg.bucket, key=positions_latest_key, payload=positions_payload)
+        s3_put_json(s3, bucket=cfg.bucket, key=pnl_latest_key, payload=pnl_payload)
+        s3_put_json(s3, bucket=cfg.bucket, key=open_lot_trace_latest_key, payload=open_lot_trace_payload)
+
+        if should_write_checkpoint:
+            write_ledger_checkpoint(
+                s3,
+                cfg=cfg,
+                account_id=str(args.account_id),
+                as_of=as_of,
+                method=method_name,
+                state=final_state,
+            )
+
+        write_audit_event(cfg=cfg, event=audit, dry_run=False)
+
+        print("[OK] Wrote:")
+        print(f"  s3://{cfg.bucket}/{positions_key}")
+        print(f"  s3://{cfg.bucket}/{pnl_key}")
+        print(f"  s3://{cfg.bucket}/{open_lot_trace_key}")
+        print("[OK] Updated latest:")
+        print(f"  s3://{cfg.bucket}/{positions_latest_key}")
+        print(f"  s3://{cfg.bucket}/{pnl_latest_key}")
+        print(f"  s3://{cfg.bucket}/{open_lot_trace_latest_key}")
+
+        if should_write_checkpoint:
+            print("[OK] Wrote checkpoint:")
+            print(f"  s3://{cfg.bucket}/{checkpoint_out_key}")
+
+        print("")
 
 
 if __name__ == "__main__":

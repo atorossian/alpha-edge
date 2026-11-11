@@ -63,9 +63,19 @@ def main() -> None:
         payload = json.loads(obj["Body"].read().decode("utf-8"))
         print("GET OK")
         for k in [
-            "trade_id", "as_of", "ts_utc", "ticker", "asset_id", "side",
-            "action_tag", "quantity", "price", "value", "reported_pnl",
-            "quantity_unit", "currency",
+            "trade_id",
+            "as_of",
+            "ts_utc",
+            "ticker",
+            "asset_id",
+            "side",
+            "action_tag",
+            "quantity",
+            "price",
+            "value",
+            "reported_pnl",
+            "quantity_unit",
+            "currency",
         ]:
             print(f"{k}:", payload.get(k))
     except Exception as e:
@@ -84,10 +94,7 @@ def main() -> None:
 
     print("=== LIST ALL TRADE PREFIX QUICK CHECK ===")
     all_keys = s3_list_all(s3, bucket=cfg.bucket, prefix=all_prefix)
-    json_trade_keys = [
-        k for k in all_keys
-        if k.endswith(".json") and "/trade_" in k
-    ]
+    json_trade_keys = [k for k in all_keys if k.endswith(".json") and "/trade_" in k]
     print("all_prefix:", all_prefix)
     print("all_keys_n:", len(all_keys))
     print("json_trade_keys_n:", len(json_trade_keys))
@@ -102,7 +109,8 @@ def main() -> None:
     trades = _load_trades(s3, cfg=cfg, start=None, end=None)
     print("_load_trades_n:", len(trades))
     matches = [
-        t for t in trades
+        t
+        for t in trades
         if str(t.get("trade_id")) == args.trade_id
         or str(t.get("_s3_key")) == target_key
         or str(t.get("ticker")).upper().strip() == "LLY"

@@ -91,9 +91,15 @@ def diagnose_universe_identity(
     print(f"universe_csv:              {path}")
     print(f"active_only:               {active_only}")
     print(f"rows_checked:              {len(scope)}")
-    print(f"duplicate_asset_id_groups: {duplicate_asset['asset_id_norm'].nunique() if not duplicate_asset.empty else 0}")
-    print(f"duplicate_ticker_groups:   {duplicate_ticker['ticker_norm'].nunique() if not duplicate_ticker.empty else 0}")
-    print(f"duplicate_yahoo_groups:    {duplicate_yahoo['yahoo_ticker_norm'].nunique() if not duplicate_yahoo.empty else 0}")
+    print(
+        f"duplicate_asset_id_groups: {duplicate_asset['asset_id_norm'].nunique() if not duplicate_asset.empty else 0}"
+    )
+    print(
+        f"duplicate_ticker_groups:   {duplicate_ticker['ticker_norm'].nunique() if not duplicate_ticker.empty else 0}"
+    )
+    print(
+        f"duplicate_yahoo_groups:    {duplicate_yahoo['yahoo_ticker_norm'].nunique() if not duplicate_yahoo.empty else 0}"
+    )
 
     if not duplicate_ticker.empty:
         print("\nDuplicate active ticker rows:")

@@ -5,6 +5,7 @@ inventory-only. Upload is explicit. Prune requires a separate invocation after
 full remote byte-stream verification; never deletes unverified or new files.
 Does not touch Git-tracked files. Never follows symlinks.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -50,8 +51,7 @@ def inventory(root: Path) -> list[dict]:
             relative = path.relative_to(root).as_posix()
             if any(part in {"", ".", ".."} for part in PurePosixPath(relative).parts):
                 raise ArchiveError("Invalid path")
-            files.append({"path": relative, "size": path.stat().st_size,
-                          "sha256": digest(path)})
+            files.append({"path": relative, "size": path.stat().st_size, "sha256": digest(path)})
     return sorted(files, key=lambda x: x["path"])
 
 
@@ -65,6 +65,7 @@ def archive_prefix(archive_id: str, *, root: str = "dev/market") -> str:
 
 def _read_remote_sha(s3, bucket: str, key: str) -> str | None:
     from botocore.exceptions import ClientError
+
     try:
         response = s3.get_object(Bucket=bucket, Key=key)
     except ClientError as exc:
@@ -84,8 +85,9 @@ def _verify_existing(s3, bucket, key, entry):
         raise ArchiveError(f"Remote bytes missing or mismatched: {key}")
 
 
-def transfer(*, root: Path, bucket: str, archive_id: str,
-             s3, upload: bool = False, prune_verified: bool = False) -> dict:
+def transfer(
+    *, root: Path, bucket: str, archive_id: str, s3, upload: bool = False, prune_verified: bool = False
+) -> dict:
     if upload and prune_verified:
         raise ArchiveError("Upload and prune must be separate invocations")
     if not bucket:
@@ -105,9 +107,15 @@ def transfer(*, root: Path, bucket: str, archive_id: str,
     manifest_bytes = (json.dumps(manifest, sort_keys=True, indent=2) + "\n").encode()
     manifest_key = f"{prefix}/_verified_inventory.json"
     if not upload and not prune_verified:
-        return {"status": "dry_run", "bucket": bucket, "prefix": prefix,
-                "files": len(entries), "bytes": manifest["total_bytes"],
-                "s3_writes": 0, "local_deletions": 0}
+        return {
+            "status": "dry_run",
+            "bucket": bucket,
+            "prefix": prefix,
+            "files": len(entries),
+            "bytes": manifest["total_bytes"],
+            "s3_writes": 0,
+            "local_deletions": 0,
+        }
     if upload:
         if _read_remote_sha(s3, bucket, manifest_key) is not None:
             raise ArchiveError("Archive already finalized; use a new archive ID")
@@ -123,13 +131,19 @@ def transfer(*, root: Path, bucket: str, archive_id: str,
             # Fail if file changed during upload, even when remote had old bytes.
             if digest(path) != entry["sha256"] or path.stat().st_size != entry["size"]:
                 raise ArchiveError(f"Local file modified during archive: {path}")
-        s3.put_object(Bucket=bucket, Key=manifest_key, Body=manifest_bytes,
-                      ContentType="application/json", IfNoneMatch="*")
+        s3.put_object(
+            Bucket=bucket, Key=manifest_key, Body=manifest_bytes, ContentType="application/json", IfNoneMatch="*"
+        )
         if _read_remote_sha(s3, bucket, manifest_key) != hashlib.sha256(manifest_bytes).hexdigest():
             raise ArchiveError("Archive inventory verification failed")
-        return {"status": "verified_in_s3", "bucket": bucket,
-                "prefix": prefix, "files": len(entries), "bytes": manifest["total_bytes"],
-                "local_deletions": 0}
+        return {
+            "status": "verified_in_s3",
+            "bucket": bucket,
+            "prefix": prefix,
+            "files": len(entries),
+            "bytes": manifest["total_bytes"],
+            "local_deletions": 0,
+        }
     # Prune: fetch the exact verified manifest, compare complete inventory
     # then independently re-read every object before deleting *any* file.
     remote_inventory = s3.get_object(Bucket=bucket, Key=manifest_key)["Body"].read()
@@ -152,8 +166,12 @@ def transfer(*, root: Path, bucket: str, archive_id: str,
                 directory.rmdir()
             except OSError:
                 pass
-    return {"status": "local_files_pruned_after_s3_verification",
-            "files_removed": len(entries), "bucket": bucket, "prefix": prefix}
+    return {
+        "status": "local_files_pruned_after_s3_verification",
+        "files_removed": len(entries),
+        "bucket": bucket,
+        "prefix": prefix,
+    }
 
 
 def main():
@@ -173,9 +191,13 @@ def main():
         p.error("Archive root must be a directory named outputs")
     if a.prune_verified:
         import subprocess
+
         repository = subprocess.run(
             ["git", "rev-parse", "--show-toplevel"],
-            capture_output=True, text=True, cwd=Path.cwd(), check=False,
+            capture_output=True,
+            text=True,
+            cwd=Path.cwd(),
+            check=False,
         )
         if repository.returncode != 0:
             p.error("Refusing prune: cannot locate Git repository")
@@ -188,16 +210,29 @@ def main():
             p.error("Refusing prune: only repository-root outputs/ is allowed")
         proc = subprocess.run(
             ["git", "ls-files", "--", relative.as_posix()],
-            capture_output=True, text=True, cwd=git_root, check=False,
+            capture_output=True,
+            text=True,
+            cwd=git_root,
+            check=False,
         )
         if proc.returncode != 0 or proc.stdout.strip():
             p.error("Refusing prune: Git-tracked output files or Git check failed")
     import boto3
+
     client = boto3.client("s3", region_name=a.region)
-    print(json.dumps(transfer(root=root, bucket=a.bucket,
-                              archive_id=a.archive_id, s3=client,
-                              upload=a.upload,
-                              prune_verified=a.prune_verified), indent=2))
+    print(
+        json.dumps(
+            transfer(
+                root=root,
+                bucket=a.bucket,
+                archive_id=a.archive_id,
+                s3=client,
+                upload=a.upload,
+                prune_verified=a.prune_verified,
+            ),
+            indent=2,
+        )
+    )
 
 
 if __name__ == "__main__":

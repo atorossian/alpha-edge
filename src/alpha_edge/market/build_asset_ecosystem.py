@@ -5,7 +5,6 @@ import argparse
 import io
 import json
 from dataclasses import asdict, dataclass
-from datetime import date
 from pathlib import Path
 from typing import Any, Optional
 
@@ -18,7 +17,6 @@ from alpha_edge.core.run_logging import capture_script_run
 from alpha_edge.core.runtime import (
     load_runtime_config,
     require_prod_confirmation,
-    runtime_engine_key,
     runtime_warehouse_key,
 )
 
@@ -63,6 +61,7 @@ def df_to_parquet_bytes(df: pd.DataFrame) -> bytes:
     buf = io.BytesIO()
     df.to_parquet(buf, index=False)
     return buf.getvalue()
+
 
 def write_parquet_table(
     *,
@@ -229,13 +228,45 @@ def build_calendar_definitions(now: str) -> pd.DataFrame:
         ("ITALY_MARKET", "Italy Market", "pandas_market_calendars", "XMIL", "Europe/Rome", "SAT_SUN", "EXCHANGE"),
         ("SPAIN_MARKET", "Spain Market", "pandas_market_calendars", "XMAD", "Europe/Madrid", "SAT_SUN", "EXCHANGE"),
         ("FRANCE_MARKET", "France Market", "pandas_market_calendars", "XPAR", "Europe/Paris", "SAT_SUN", "EXCHANGE"),
-        ("NETHERLANDS_MARKET", "Netherlands Market", "pandas_market_calendars", "XAMS", "Europe/Amsterdam", "SAT_SUN", "EXCHANGE"),
-        ("SWITZERLAND_MARKET", "Switzerland Market", "pandas_market_calendars", "SIX", "Europe/Zurich", "SAT_SUN", "EXCHANGE"),
+        (
+            "NETHERLANDS_MARKET",
+            "Netherlands Market",
+            "pandas_market_calendars",
+            "XAMS",
+            "Europe/Amsterdam",
+            "SAT_SUN",
+            "EXCHANGE",
+        ),
+        (
+            "SWITZERLAND_MARKET",
+            "Switzerland Market",
+            "pandas_market_calendars",
+            "SIX",
+            "Europe/Zurich",
+            "SAT_SUN",
+            "EXCHANGE",
+        ),
         ("JAPAN_MARKET", "Japan Market", "pandas_market_calendars", "JPX", "Asia/Tokyo", "SAT_SUN", "EXCHANGE"),
-        ("HONG_KONG_MARKET", "Hong Kong Market", "pandas_market_calendars", "HKEX", "Asia/Hong_Kong", "SAT_SUN", "EXCHANGE"),
+        (
+            "HONG_KONG_MARKET",
+            "Hong Kong Market",
+            "pandas_market_calendars",
+            "HKEX",
+            "Asia/Hong_Kong",
+            "SAT_SUN",
+            "EXCHANGE",
+        ),
         ("CRYPTO_24_7", "Crypto 24/7", "internal", "CRYPTO_24_7", "UTC", "NONE", "SYNTHETIC"),
         ("FX_WEEKDAYS", "FX Weekdays", "internal", "FX_WEEKDAYS", "UTC", "SAT_SUN", "SYNTHETIC"),
-        ("COMMODITIES_US", "US Commodities", "pandas_market_calendars", "NYSE", "America/New_York", "SAT_SUN", "EXCHANGE"),
+        (
+            "COMMODITIES_US",
+            "US Commodities",
+            "pandas_market_calendars",
+            "NYSE",
+            "America/New_York",
+            "SAT_SUN",
+            "EXCHANGE",
+        ),
         ("UNKNOWN", "Unknown Calendar", "internal", "UNKNOWN", "UTC", "SAT_SUN", "FALLBACK"),
     ]
 
@@ -269,18 +300,98 @@ def build_calendar_definitions(now: str) -> pd.DataFrame:
 def build_markets(now: str) -> pd.DataFrame:
     rows = [
         # market_id, market_name, country_id, region_id, mic, exchange_code, timezone, calendar_id, market_type
-        ("US_NYSE", "New York Stock Exchange", "US", "NORTH_AMERICA", "XNYS", "NYSE", "America/New_York", "US_MARKET", "EXCHANGE"),
+        (
+            "US_NYSE",
+            "New York Stock Exchange",
+            "US",
+            "NORTH_AMERICA",
+            "XNYS",
+            "NYSE",
+            "America/New_York",
+            "US_MARKET",
+            "EXCHANGE",
+        ),
         ("US_NASDAQ", "Nasdaq", "US", "NORTH_AMERICA", "XNAS", "NASDAQ", "America/New_York", "US_MARKET", "EXCHANGE"),
-        ("US_NYSE_ARCA", "NYSE Arca", "US", "NORTH_AMERICA", "ARCX", "NYSE_ARCA", "America/New_York", "US_MARKET", "EXCHANGE"),
-        ("UK_LSE", "London Stock Exchange", "GB", "UNITED_KINGDOM", "XLON", "LSE", "Europe/London", "UK_MARKET", "EXCHANGE"),
+        (
+            "US_NYSE_ARCA",
+            "NYSE Arca",
+            "US",
+            "NORTH_AMERICA",
+            "ARCX",
+            "NYSE_ARCA",
+            "America/New_York",
+            "US_MARKET",
+            "EXCHANGE",
+        ),
+        (
+            "UK_LSE",
+            "London Stock Exchange",
+            "GB",
+            "UNITED_KINGDOM",
+            "XLON",
+            "LSE",
+            "Europe/London",
+            "UK_MARKET",
+            "EXCHANGE",
+        ),
         ("DE_XETRA", "Xetra", "DE", "EUROPE", "XETR", "XETRA", "Europe/Berlin", "GERMANY_MARKET", "EXCHANGE"),
-        ("IT_BORSA_ITALIANA", "Borsa Italiana", "IT", "EUROPE", "XMIL", "BORSA_ITALIANA", "Europe/Rome", "ITALY_MARKET", "EXCHANGE"),
+        (
+            "IT_BORSA_ITALIANA",
+            "Borsa Italiana",
+            "IT",
+            "EUROPE",
+            "XMIL",
+            "BORSA_ITALIANA",
+            "Europe/Rome",
+            "ITALY_MARKET",
+            "EXCHANGE",
+        ),
         ("ES_BME", "BME Spanish Exchanges", "ES", "EUROPE", "XMAD", "BME", "Europe/Madrid", "SPAIN_MARKET", "EXCHANGE"),
-        ("FR_EURONEXT_PARIS", "Euronext Paris", "FR", "EUROPE", "XPAR", "EURONEXT_PARIS", "Europe/Paris", "FRANCE_MARKET", "EXCHANGE"),
-        ("NL_EURONEXT_AMSTERDAM", "Euronext Amsterdam", "NL", "EUROPE", "XAMS", "EURONEXT_AMSTERDAM", "Europe/Amsterdam", "NETHERLANDS_MARKET", "EXCHANGE"),
-        ("CH_SIX", "SIX Swiss Exchange", "CH", "EUROPE", "XSWX", "SIX", "Europe/Zurich", "SWITZERLAND_MARKET", "EXCHANGE"),
+        (
+            "FR_EURONEXT_PARIS",
+            "Euronext Paris",
+            "FR",
+            "EUROPE",
+            "XPAR",
+            "EURONEXT_PARIS",
+            "Europe/Paris",
+            "FRANCE_MARKET",
+            "EXCHANGE",
+        ),
+        (
+            "NL_EURONEXT_AMSTERDAM",
+            "Euronext Amsterdam",
+            "NL",
+            "EUROPE",
+            "XAMS",
+            "EURONEXT_AMSTERDAM",
+            "Europe/Amsterdam",
+            "NETHERLANDS_MARKET",
+            "EXCHANGE",
+        ),
+        (
+            "CH_SIX",
+            "SIX Swiss Exchange",
+            "CH",
+            "EUROPE",
+            "XSWX",
+            "SIX",
+            "Europe/Zurich",
+            "SWITZERLAND_MARKET",
+            "EXCHANGE",
+        ),
         ("JP_TSE", "Tokyo Stock Exchange", "JP", "JAPAN", "XTKS", "TSE", "Asia/Tokyo", "JAPAN_MARKET", "EXCHANGE"),
-        ("HK_HKEX", "Hong Kong Exchange", "HK", "CHINA_HK", "XHKG", "HKEX", "Asia/Hong_Kong", "HONG_KONG_MARKET", "EXCHANGE"),
+        (
+            "HK_HKEX",
+            "Hong Kong Exchange",
+            "HK",
+            "CHINA_HK",
+            "XHKG",
+            "HKEX",
+            "Asia/Hong_Kong",
+            "HONG_KONG_MARKET",
+            "EXCHANGE",
+        ),
         ("CRYPTO_GLOBAL", "Crypto Global", "GLOBAL", "CRYPTO", None, "CRYPTO", "UTC", "CRYPTO_24_7", "SYNTHETIC"),
         ("FX_GLOBAL", "Foreign Exchange Global", "GLOBAL", "FX", None, "FX", "UTC", "FX_WEEKDAYS", "SYNTHETIC"),
         ("UNKNOWN", "Unknown Market", "UNKNOWN", "UNKNOWN", None, "UNKNOWN", "UTC", "UNKNOWN", "FALLBACK"),
@@ -713,8 +824,12 @@ def build_validation_report(
         missing_market_id=int(assets["market_id"].isna().sum()) if "market_id" in assets.columns else len(assets),
         missing_country_id=int(assets["country_id"].isna().sum()) if "country_id" in assets.columns else len(assets),
         missing_region_id=int(assets["region_id"].isna().sum()) if "region_id" in assets.columns else len(assets),
-        unknown_calendar_id=int((~assets["calendar_id"].astype(str).isin(calendar_ids)).sum()) if "calendar_id" in assets.columns else len(assets),
-        unknown_market_id=int((~assets["market_id"].astype(str).isin(market_ids)).sum()) if "market_id" in assets.columns else len(assets),
+        unknown_calendar_id=int((~assets["calendar_id"].astype(str).isin(calendar_ids)).sum())
+        if "calendar_id" in assets.columns
+        else len(assets),
+        unknown_market_id=int((~assets["market_id"].astype(str).isin(market_ids)).sum())
+        if "market_id" in assets.columns
+        else len(assets),
         calendar_start=start,
         calendar_end=end,
     )
@@ -876,7 +991,6 @@ def build_asset_ecosystem(
         dry_run=dry_run,
     )
 
-
     audit_event = build_audit_event(
         cfg=cfg,
         event_type="create_or_update",
@@ -915,9 +1029,7 @@ def build_asset_ecosystem(
 # CLI
 # =============================================================================
 def parse_args() -> argparse.Namespace:
-    ap = argparse.ArgumentParser(
-        description="Build Alpha Edge asset ecosystem reference tables."
-    )
+    ap = argparse.ArgumentParser(description="Build Alpha Edge asset ecosystem reference tables.")
 
     ap.add_argument("--env", default=None, choices=["dev", "staging", "prod"])
     ap.add_argument("--confirm-prod-write", action="store_true")

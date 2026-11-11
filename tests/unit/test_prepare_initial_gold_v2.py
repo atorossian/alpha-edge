@@ -1,10 +1,10 @@
 """Initialization only publishes candidate when all historical cohorts exist."""
+
 import io
-import json
 
 from botocore.exceptions import ClientError
 
-from alpha_edge.market.prepare_initial_gold_v2 import build, InitializationError
+from alpha_edge.market.prepare_initial_gold_v2 import build
 from alpha_edge.market.production_gold_release_v2 import encoded, sha
 
 
@@ -41,14 +41,21 @@ def test_incomplete_historical_cohorts_have_no_production_side_effects():
         path = f"full_universe_preflight_v2/first_review/{name}"
         s3.objects[plan_root + "files/" + path] = payload
         items.append({"path": path, "sha256": sha(payload)})
-    s3.objects[plan_root + "_verified_inventory.json"] = encoded({
-        "schema": "alpha_edge_local_output_archive_v2_1", "files": items,
-    })
+    s3.objects[plan_root + "_verified_inventory.json"] = encoded(
+        {
+            "schema": "alpha_edge_local_output_archive_v2_1",
+            "files": items,
+        }
+    )
     before = set(s3.objects)
     result = build(
-        s3=s3, bucket="test", archive_id="old-outputs-20261110",
+        s3=s3,
+        bucket="test",
+        archive_id="old-outputs-20261110",
         plan_hash_prefix=sha(cohorts["manifest.json"])[:24],
-        end="2026-11-10", run_id="initial_01", execute=True,
+        end="2026-11-10",
+        run_id="initial_01",
+        execute=True,
     )
     assert result["status"] == "blocked_missing_cohorts"
     assert result["missing_cohorts"] == [1]

@@ -57,10 +57,10 @@ def _log_gaussian_diag(X: np.ndarray, means: np.ndarray, vars_diag: np.ndarray) 
 
 @dataclass(frozen=True)
 class HMMParams:
-    pi: np.ndarray        # (K,)
-    A: np.ndarray         # (K,K)
-    means: np.ndarray     # (K,D)
-    vars: np.ndarray      # (K,D) diagonal variances
+    pi: np.ndarray  # (K,)
+    A: np.ndarray  # (K,K)
+    means: np.ndarray  # (K,D)
+    vars: np.ndarray  # (K,D) diagonal variances
 
 
 @dataclass
@@ -189,12 +189,7 @@ class GaussianHMM:
 
         for t in range(T - 1):
             # log_xi[i,j] = log_alpha[t,i] + log_A[i,j] + log_B[t+1,j] + log_beta[t+1,j]
-            log_xi = (
-                log_alpha[t][:, None]
-                + log_A
-                + log_B[t + 1][None, :]
-                + log_beta[t + 1][None, :]
-            )
+            log_xi = log_alpha[t][:, None] + log_A + log_B[t + 1][None, :] + log_beta[t + 1][None, :]
             log_xi -= _logsumexp(log_xi, axis=None, keepdims=True)
             xi = np.exp(log_xi)
             xi_sum += xi
@@ -241,7 +236,7 @@ class GaussianHMM:
 
             # means
             gamma_sum = np.maximum(gamma.sum(axis=0), _EPS)  # (K,)
-            means_new = (gamma.T @ X) / gamma_sum[:, None]   # (K,D)
+            means_new = (gamma.T @ X) / gamma_sum[:, None]  # (K,D)
 
             # vars (diag)
             vars_new = np.empty((self.K, self.D), dtype=np.float64)
@@ -363,24 +358,25 @@ def select_regime(
         return k
     return None
 
+
 # --- NEW: regime labels + mapping helpers ---
 
 
-
 REGIME_LABELS_4 = [
-    "CALM_BULL",    # +drift, low vol
+    "CALM_BULL",  # +drift, low vol
     "CHOPPY_BULL",  # +drift, higher vol
     "CHOPPY_BEAR",  # -/flat drift, higher vol
     "STRESS_BEAR",  # -/flat drift, highest vol
 ]
 
+
 @dataclass(frozen=True)
 class StateDiagnostics:
     # per hidden-state stats computed from data + posteriors
-    drift: float          # mean return in state
-    vol: float            # std of return in state
-    neg_rate: float       # fraction of negative return days in state
-    weight: float         # average posterior mass for this state (how often it appears)
+    drift: float  # mean return in state
+    vol: float  # std of return in state
+    neg_rate: float  # fraction of negative return days in state
+    weight: float  # average posterior mass for this state (how often it appears)
 
 
 def _safe_weighted_mean(x: np.ndarray, w: np.ndarray) -> float:

@@ -6,9 +6,9 @@ plan in S3. NEVER switches active manifests, caches or snapshots.
 The separate activation workflow must require verified maintenance isolation,
 schema compatibility, and a working end-to-end downstream refresh/rollback.
 """
+
 from __future__ import annotations
 import argparse
-import hashlib
 import io
 import json
 import uuid
@@ -18,29 +18,52 @@ from functools import lru_cache
 import boto3
 import pandas as pd
 import numpy as np
-from botocore.exceptions import ClientError
 
 from alpha_edge import paths
 from alpha_edge.core.market_store import MarketStore
 from alpha_edge.market.aea87_publication_transaction import fetch, checksum, put_once
 from alpha_edge.market.aea87_publication_validation import (
-    validate_candidate, validate_old_only_against_calendar,
-    calendar_for_provider, verify_candidate_against_calendar,
+    validate_candidate,
+    validate_old_only_against_calendar,
+    calendar_for_provider,
+    verify_candidate_against_calendar,
 )
 
 ROOT = "market/repairs/aea87/rebuilds/v1/runs"
 PREPARED = "market/repairs/aea87/rebuild_publications/v1"
-TABLES = {"ohlcv_usd": "candidate_ohlcv_usd.parquet",
-          "returns_usd": "candidate_returns_usd.parquet"}
+TABLES = {"ohlcv_usd": "candidate_ohlcv_usd.parquet", "returns_usd": "candidate_returns_usd.parquet"}
 # These fields have downstream consumers. Other columns may also be required;
 # enforce existing data schema compatibility below.
 REQUIRED = {
-    "ohlcv_usd": {"asset_id", "date", "ticker", "yahoo_ticker", "currency",
-                  "open_raw_usd", "high_raw_usd", "low_raw_usd",
-                  "close_raw_usd", "close_adjusted_usd", "close_usd", "adj_close_usd",
-                  "open", "high", "low", "close", "adj_close", "volume", "fx_to_usd"},
-    "returns_usd": {"asset_id", "date", "ticker", "ret_adj_close_usd",
-                    "ret_close_adjusted_usd", "ret_log_close_adjusted_usd"},
+    "ohlcv_usd": {
+        "asset_id",
+        "date",
+        "ticker",
+        "yahoo_ticker",
+        "currency",
+        "open_raw_usd",
+        "high_raw_usd",
+        "low_raw_usd",
+        "close_raw_usd",
+        "close_adjusted_usd",
+        "close_usd",
+        "adj_close_usd",
+        "open",
+        "high",
+        "low",
+        "close",
+        "adj_close",
+        "volume",
+        "fx_to_usd",
+    },
+    "returns_usd": {
+        "asset_id",
+        "date",
+        "ticker",
+        "ret_adj_close_usd",
+        "ret_close_adjusted_usd",
+        "ret_log_close_adjusted_usd",
+    },
 }
 
 
@@ -140,12 +163,12 @@ def identity_conflict_diagnostic(asset_id, active, provider, broker_ticker, erro
         observations[table] = {}
         for field in fields:
             if field in frame:
-                observations[table][field] = sorted({
-                    str(v).strip() for v in frame[field].dropna().unique()
-                    if str(v).strip()
-                })[:20]
+                observations[table][field] = sorted(
+                    {str(v).strip() for v in frame[field].dropna().unique() if str(v).strip()}
+                )[:20]
     return {
-        "asset_id": asset_id, "status": "BLOCKED_IDENTITY",
+        "asset_id": asset_id,
+        "status": "BLOCKED_IDENTITY",
         "blockers": [str(error)],
         "identity_evidence": {
             "provider_yahoo_ticker": provider.get("symbol"),
@@ -192,25 +215,27 @@ def prepare(s3, store, bucket, source_run, asset_id, end, publication_id):
     broker_ticker = _broker_ticker_map().get(asset_id)
     try:
         for table in TABLES:
-            frames[table] = align_verified_metadata(frames[table], active[table], table,
+            frames[table] = align_verified_metadata(
+                frames[table],
+                active[table],
+                table,
                 provider_symbol=source["yahoo_ticker"],
                 provider_currency=provider.get("currency"),
-                broker_ticker=broker_ticker)
+                broker_ticker=broker_ticker,
+            )
     except ValueError as exc:
-        if not any(token in str(exc) for token in
-                   ("identity", "ticker", "currency", "broker ticker")):
+        if not any(token in str(exc) for token in ("identity", "ticker", "currency", "broker ticker")):
             raise
         return identity_conflict_diagnostic(
-            asset_id, active,
-            {**provider, "symbol": source.get("yahoo_ticker")}, broker_ticker, exc)
+            asset_id, active, {**provider, "symbol": source.get("yahoo_ticker")}, broker_ticker, exc
+        )
     # One candidate quality gate, internal to the rebuild. The old preflight
     # command is deliberately NOT part of deployment.
     inception = "2024-11-29" if asset_id == "CRYPTO:HYPE-USD" else None
     problems = validate_candidate(frames["ohlcv_usd"], frames["returns_usd"], inception)
     problems.extend(equity_session_date_issues(frames["ohlcv_usd"], asset_id, provider))
     if problems:
-        return {"asset_id": asset_id, "status": "BLOCKED_CANDIDATE",
-                "blockers": problems, "operations": []}
+        return {"asset_id": asset_id, "status": "BLOCKED_CANDIDATE", "blockers": problems, "operations": []}
     # Only retire old-only dates when source identity/date provenance is
     # established: NYSE verified independently; crypto pre-inception verified.
     old_prices = active["ohlcv_usd"]
@@ -220,71 +245,86 @@ def prepare(s3, store, bucket, source_run, asset_id, end, publication_id):
         extras = previous[~previous.isin(fresh)]
         if len(extras) and asset_id == "CRYPTO:HYPE-USD":
             if (extras >= pd.Timestamp("2024-11-29", tz="UTC")).any():
-                return {"asset_id": asset_id, "status": "BLOCKED_COVERAGE",
-                        "blockers": ["UNEXPLAINED_POST_INCEPTION_OLD_DATES"], "operations": []}
+                return {
+                    "asset_id": asset_id,
+                    "status": "BLOCKED_COVERAGE",
+                    "blockers": ["UNEXPLAINED_POST_INCEPTION_OLD_DATES"],
+                    "operations": [],
+                }
         elif len(extras):
-            calendar_name = calendar_for_provider(
-                provider.get("exchange"), provider.get("quote_type"), asset_id)
+            calendar_name = calendar_for_provider(provider.get("exchange"), provider.get("quote_type"), asset_id)
             if calendar_name is None:
-                return {"asset_id": asset_id, "status": "BLOCKED_COVERAGE",
-                        "blockers": ["UNKNOWN_EXCHANGE_CALENDAR_OR_ASSET_CLASS"],
-                        "operations": []}
+                return {
+                    "asset_id": asset_id,
+                    "status": "BLOCKED_COVERAGE",
+                    "blockers": ["UNKNOWN_EXCHANGE_CALENDAR_OR_ASSET_CLASS"],
+                    "operations": [],
+                }
             # The old and candidate histories may disagree about inception,
             # holidays, or identity. Only exchange non-sessions can be retired.
             try:
                 audit = validate_old_only_against_calendar(previous, fresh, calendar_name)
             except (ValueError, KeyError) as exc:
-                return {"asset_id": asset_id, "status": "BLOCKED_COVERAGE",
-                        "blockers": ["EXCHANGE_CALENDAR_UNAVAILABLE:" + str(exc)],
-                        "operations": []}
+                return {
+                    "asset_id": asset_id,
+                    "status": "BLOCKED_COVERAGE",
+                    "blockers": ["EXCHANGE_CALENDAR_UNAVAILABLE:" + str(exc)],
+                    "operations": [],
+                }
             if audit["status"] != "PASSED":
-                return {"asset_id": asset_id, "status": "BLOCKED_COVERAGE",
-                        "blockers": ["MISSING_LEGITIMATE_EXCHANGE_SESSIONS"],
-                        "calendar": calendar_name,
-                        "missing_sessions_sample": audit["sessions"][:15],
-                        "missing_session_count": len(audit["sessions"]),
-                        "operations": []}
+                return {
+                    "asset_id": asset_id,
+                    "status": "BLOCKED_COVERAGE",
+                    "blockers": ["MISSING_LEGITIMATE_EXCHANGE_SESSIONS"],
+                    "calendar": calendar_name,
+                    "missing_sessions_sample": audit["sessions"][:15],
+                    "missing_session_count": len(audit["sessions"]),
+                    "operations": [],
+                }
     # A recognized exchange calendar is required for any candidate equity
     # history, including new assets that had no legacy rows to compare.
-    calendar_name = calendar_for_provider(
-        provider.get("exchange"), provider.get("quote_type"), asset_id)
+    calendar_name = calendar_for_provider(provider.get("exchange"), provider.get("quote_type"), asset_id)
     if calendar_name is not None:
-        calendar_audit = verify_candidate_against_calendar(
-            frames["ohlcv_usd"]["date"], calendar_name)
+        calendar_audit = verify_candidate_against_calendar(frames["ohlcv_usd"]["date"], calendar_name)
         if calendar_audit["status"] != "PASSED":
-            return {"asset_id": asset_id, "status": "BLOCKED_COVERAGE",
-                    "blockers": [calendar_audit["reason"]],
-                    "calendar": calendar_name,
-                    "invalid_candidate_session_sample": calendar_audit["dates"][:15],
-                    "invalid_candidate_session_count": len(calendar_audit["dates"]),
-                    "operations": []}
+            return {
+                "asset_id": asset_id,
+                "status": "BLOCKED_COVERAGE",
+                "blockers": [calendar_audit["reason"]],
+                "calendar": calendar_name,
+                "invalid_candidate_session_sample": calendar_audit["dates"][:15],
+                "invalid_candidate_session_count": len(calendar_audit["dates"]),
+                "operations": [],
+            }
     elif not asset_id.startswith("CRYPTO:"):
-        return {"asset_id": asset_id, "status": "BLOCKED_COVERAGE",
-                "blockers": ["UNKNOWN_EXCHANGE_CALENDAR_OR_ASSET_CLASS"],
-                "operations": []}
+        return {
+            "asset_id": asset_id,
+            "status": "BLOCKED_COVERAGE",
+            "blockers": ["UNKNOWN_EXCHANGE_CALENDAR_OR_ASSET_CLASS"],
+            "operations": [],
+        }
     # Production may have advanced after the staged Yahoo run. A full-history
     # replacement must never discard later live market sessions.
     current_day = datetime.now(timezone.utc).date().isoformat()
     stale = []
     for table in TABLES:
-        later = (store.read_ohlcv_usd([asset_id], start=end, end=current_day)
-                 if table == "ohlcv_usd" else
-                 store.read_returns_usd([asset_id], start=end, end=current_day))
+        later = (
+            store.read_ohlcv_usd([asset_id], start=end, end=current_day)
+            if table == "ohlcv_usd"
+            else store.read_returns_usd([asset_id], start=end, end=current_day)
+        )
         if not later.empty:
             live_latest = pd.to_datetime(later["date"], utc=True).max()
             candidate_latest = pd.to_datetime(frames[table]["date"], utc=True).max()
             if live_latest > candidate_latest:
                 stale.append(f"{table}:ACTIVE_DATA_NEWER_THAN_CANDIDATE:{live_latest.date()}")
     if stale:
-        return {"asset_id": asset_id, "status": "BLOCKED_STALE_SOURCE",
-                "blockers": stale, "operations": []}
+        return {"asset_id": asset_id, "status": "BLOCKED_STALE_SOURCE", "blockers": stale, "operations": []}
     problems = []
     for table in TABLES:
-        problems += [table + ":" + x for x in publication_schema_issues(
-            frames[table], active[table], table)]
+        problems += [table + ":" + x for x in publication_schema_issues(frames[table], active[table], table)]
     if problems:
-        return {"asset_id": asset_id, "status": "BLOCKED_SCHEMA",
-                "blockers": sorted(set(problems)), "operations": []}
+        return {"asset_id": asset_id, "status": "BLOCKED_SCHEMA", "blockers": sorted(set(problems)), "operations": []}
     root = f"{PREPARED}/{publication_id}"
     proposed = []
     for table, frame in frames.items():
@@ -304,25 +344,45 @@ def prepare(s3, store, bucket, source_run, asset_id, end, publication_id):
                 selected = frame[dates.dt.year == year].copy()
                 payload = _parquet(selected)
                 part_key = f"{root}/parts/{table}/asset_id={asset_id}/year={year}/data.parquet"
-                new_manifest = {"asset_id": asset_id, "year": int(year),
-                                "parts": [part_key], "dates": sorted(selected["date"].dt.strftime("%Y-%m-%d").tolist()),
-                                "reconstruction_run_id": source_run,
-                                "publication_id": publication_id}
+                new_manifest = {
+                    "asset_id": asset_id,
+                    "year": int(year),
+                    "parts": [part_key],
+                    "dates": sorted(selected["date"].dt.strftime("%Y-%m-%d").tolist()),
+                    "reconstruction_run_id": source_run,
+                    "publication_id": publication_id,
+                }
             else:
                 payload = None
                 part_key = None
-                new_manifest = {"asset_id": asset_id, "year": int(year),
-                                "parts": [], "dates": [], "status": "RETIRED",
-                                "publication_id": publication_id}
+                new_manifest = {
+                    "asset_id": asset_id,
+                    "year": int(year),
+                    "parts": [],
+                    "dates": [],
+                    "status": "RETIRED",
+                    "publication_id": publication_id,
+                }
             after = json.dumps(new_manifest, sort_keys=True).encode()
-            proposed.append({"table": table, "year": int(year), "asset_id": asset_id,
-                             "manifest_key": manifest_key, "before_sha": prior_sha,
-                             "before_missing": before is None,
-                             "legacy_part_prefix": f"{store.ohlcv_prefix if table == 'ohlcv_usd' else store.returns_prefix}/asset_id={asset_id}/year={year}/" if before is None else None,
-                             "backup_key": f"{root}/backups/{table}/year={year}/manifest.json" if before is not None else None,
-                             "part_key": part_key, "part_sha": checksum(payload),
-                             "part_payload": payload, "after_sha": checksum(after),
-                             "after": after.decode()})
+            proposed.append(
+                {
+                    "table": table,
+                    "year": int(year),
+                    "asset_id": asset_id,
+                    "manifest_key": manifest_key,
+                    "before_sha": prior_sha,
+                    "before_missing": before is None,
+                    "legacy_part_prefix": f"{store.ohlcv_prefix if table == 'ohlcv_usd' else store.returns_prefix}/asset_id={asset_id}/year={year}/"
+                    if before is None
+                    else None,
+                    "backup_key": f"{root}/backups/{table}/year={year}/manifest.json" if before is not None else None,
+                    "part_key": part_key,
+                    "part_sha": checksum(payload),
+                    "part_payload": payload,
+                    "after_sha": checksum(after),
+                    "after": after.decode(),
+                }
+            )
     # For years without an active manifest, preserve the exact legacy key
     # inventory. A tombstone hides those immutable files, not deletes them;
     # rollback removes the new manifest and restores original reader behavior.
@@ -333,13 +393,16 @@ def prepare(s3, store, bucket, source_run, asset_id, end, publication_id):
         legacy = []
         paginator = s3.get_paginator("list_objects_v2")
         for page in paginator.paginate(Bucket=bucket, Prefix=op["legacy_part_prefix"]):
-            legacy.extend({"key": obj["Key"], "size": obj.get("Size"),
-                           "etag": obj.get("ETag")} for obj in page.get("Contents", [])
-                          if obj["Key"].endswith(".parquet"))
-        legacy_inventories.append({"manifest_key":op["manifest_key"], "objects":legacy})
+            legacy.extend(
+                {"key": obj["Key"], "size": obj.get("Size"), "etag": obj.get("ETag")}
+                for obj in page.get("Contents", [])
+                if obj["Key"].endswith(".parquet")
+            )
+        legacy_inventories.append({"manifest_key": op["manifest_key"], "objects": legacy})
     if legacy_inventories:
-        _put_verified(s3, bucket, f"{root}/legacy_inventories.json",
-                      json.dumps(legacy_inventories, sort_keys=True).encode())
+        _put_verified(
+            s3, bucket, f"{root}/legacy_inventories.json", json.dumps(legacy_inventories, sort_keys=True).encode()
+        )
     # Require no concurrent changes, and immutable source material before writing.
     for op in proposed:
         if checksum(fetch(s3, bucket, op["manifest_key"])) != op["before_sha"]:
@@ -353,14 +416,19 @@ def prepare(s3, store, bucket, source_run, asset_id, end, publication_id):
         if op["part_key"]:
             _put_verified(s3, bucket, op["part_key"], op["part_payload"])
     clean = [{k: v for k, v in op.items() if k != "part_payload"} for op in proposed]
-    result = {"asset_id": asset_id, "status": "PREPARED_NOT_PUBLISHED",
-              "source_run": source_run, "operations": clean,
-              "active_histories_modified": False,
-              "required_before_activation": [
-                  "EXCLUSIVE_INGESTION_AND_READER_MAINTENANCE",
-                  "DOWNSTREAM_CACHE_SNAPSHOT_REFRESH_VALIDATED",
-                  "ATOMIC_VISIBILITY_OR_MAINTENANCE_ENFORCEMENT",
-                  "TESTED_ROLLBACK_AND_DRIFT_RECHECK"]}
+    result = {
+        "asset_id": asset_id,
+        "status": "PREPARED_NOT_PUBLISHED",
+        "source_run": source_run,
+        "operations": clean,
+        "active_histories_modified": False,
+        "required_before_activation": [
+            "EXCLUSIVE_INGESTION_AND_READER_MAINTENANCE",
+            "DOWNSTREAM_CACHE_SNAPSHOT_REFRESH_VALIDATED",
+            "ATOMIC_VISIBILITY_OR_MAINTENANCE_ENFORCEMENT",
+            "TESTED_ROLLBACK_AND_DRIFT_RECHECK",
+        ],
+    }
     plan_key = f"{root}/plan.json"
     _put_verified(s3, bucket, plan_key, json.dumps(result, indent=2).encode())
     result["plan_uri"] = f"s3://{bucket}/{plan_key}"
@@ -376,7 +444,9 @@ def main():
     p.add_argument("--end", default="2026-11-01")
     p.add_argument("--publication-id")
     a = p.parse_args()
-    pub_id = a.publication_id or ("rebuild_" + datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "_" + uuid.uuid4().hex[:8])
+    pub_id = a.publication_id or (
+        "rebuild_" + datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "_" + uuid.uuid4().hex[:8]
+    )
     if not all(c.isalnum() or c in "-_" for c in pub_id):
         p.error("Unsafe publication ID")
     s3 = boto3.client("s3", region_name=a.region)
@@ -386,8 +456,12 @@ def main():
         report_key = f"{PREPARED}/{pub_id}/blocked_report.json"
         _put_verified(s3, a.bucket, report_key, json.dumps(outcome, indent=2).encode())
         outcome["s3_report"] = f"s3://{a.bucket}/{report_key}"
-    print(json.dumps({k: v for k, v in outcome.items() if k != "operations"} |
-                     {"operation_count": len(outcome["operations"])}, indent=2))
+    print(
+        json.dumps(
+            {k: v for k, v in outcome.items() if k != "operations"} | {"operation_count": len(outcome["operations"])},
+            indent=2,
+        )
+    )
     if outcome["status"].startswith("BLOCKED"):
         raise SystemExit(2)
 

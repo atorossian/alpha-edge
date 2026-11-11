@@ -20,7 +20,6 @@ from alpha_edge.core.runtime import (
 from alpha_edge.core.schemas import Cashflow, RuntimeConfig
 from alpha_edge.operations.operation_lifecycle import (
     delete_record_with_audit,
-    load_index,
     resolve_record_key,
     set_index_record,
     s3_get_json_optional,
@@ -460,7 +459,9 @@ def parse_args() -> argparse.Namespace:
     ap.add_argument("--ts-utc", default=None)
     ap.add_argument("--cashflow-id", default=None)
     ap.add_argument("--note", default=None)
-    ap.add_argument("--old-as-of", default=None, help="Existing record date. Used for edit/delete if index is unavailable/stale.")
+    ap.add_argument(
+        "--old-as-of", default=None, help="Existing record date. Used for edit/delete if index is unavailable/stale."
+    )
     ap.add_argument("--new-as-of", default=None, help="Move cashflow to a new dt partition in edit mode.")
     ap.add_argument("--reason", default=None, help="Business reason. Required for real delete operations.")
     ap.add_argument("--dry-run", action="store_true")
@@ -527,7 +528,7 @@ def main() -> None:
             if args.account_id is not None:
                 patch["account_id"] = str(args.account_id).strip() or "main"
             if args.note is not None:
-                patch["note"] = (str(args.note) if args.note else None)
+                patch["note"] = str(args.note) if args.note else None
 
             if not patch and not args.new_as_of:
                 raise ValueError("Nothing to edit: provide at least one patch field or --new-as-of.")

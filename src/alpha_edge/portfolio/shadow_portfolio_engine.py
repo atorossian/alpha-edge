@@ -12,13 +12,7 @@ def weight_turnover(
     target: dict[str, float],
 ) -> float:
     keys = set(current.keys()) | set(target.keys())
-    return float(
-        0.5
-        * sum(
-            abs(float(target.get(k, 0.0)) - float(current.get(k, 0.0)))
-            for k in keys
-        )
-    )
+    return float(0.5 * sum(abs(float(target.get(k, 0.0)) - float(current.get(k, 0.0))) for k in keys))
 
 
 def delta_weights(
@@ -46,29 +40,18 @@ def assess_shadow_portfolio(
 
     reasons: list[str] = []
 
-    health_ok = (
-        health_advantage is not None
-        and float(health_advantage) >= float(cfg.min_health_advantage)
+    health_ok = health_advantage is not None and float(health_advantage) >= float(cfg.min_health_advantage)
+
+    score_ok = score_advantage is not None and float(score_advantage) >= float(cfg.min_score_advantage)
+
+    turnover_ok = turnover is not None and float(turnover) <= float(cfg.max_turnover_to_accept)
+
+    immediate_health = health_advantage is not None and float(health_advantage) >= float(
+        cfg.immediate_accept_health_advantage
     )
 
-    score_ok = (
-        score_advantage is not None
-        and float(score_advantage) >= float(cfg.min_score_advantage)
-    )
-
-    turnover_ok = (
-        turnover is not None
-        and float(turnover) <= float(cfg.max_turnover_to_accept)
-    )
-
-    immediate_health = (
-        health_advantage is not None
-        and float(health_advantage) >= float(cfg.immediate_accept_health_advantage)
-    )
-
-    immediate_score = (
-        score_advantage is not None
-        and float(score_advantage) >= float(cfg.immediate_accept_score_advantage)
+    immediate_score = score_advantage is not None and float(score_advantage) >= float(
+        cfg.immediate_accept_score_advantage
     )
 
     dominates_today = bool((health_ok or score_ok) and turnover_ok)
@@ -95,9 +78,7 @@ def assess_shadow_portfolio(
         )
 
     if not health_ok and not score_ok:
-        reasons.append(
-            "shadow portfolio does not clear minimum health or score advantage"
-        )
+        reasons.append("shadow portfolio does not clear minimum health or score advantage")
 
     updated_state = ShadowPortfolioState(
         shadow_id=state.shadow_id,
@@ -126,10 +107,7 @@ def assess_shadow_portfolio(
         return ShadowPortfolioAssessment(
             as_of=state.as_of,
             recommendation="SHADOW_ACCEPTED",
-            reason=(
-                "Shadow portfolio accepted immediately because advantage is large "
-                "and turnover is within limit."
-            ),
+            reason=("Shadow portfolio accepted immediately because advantage is large and turnover is within limit."),
             state=updated_state,
             config=cfg,
             diagnostics=diagnostics,
@@ -141,10 +119,7 @@ def assess_shadow_portfolio(
         return ShadowPortfolioAssessment(
             as_of=state.as_of,
             recommendation="SHADOW_ACCEPTED",
-            reason=(
-                f"Shadow portfolio accepted after {days_dominating} "
-                "dominating confirmation days."
-            ),
+            reason=(f"Shadow portfolio accepted after {days_dominating} dominating confirmation days."),
             state=updated_state,
             config=cfg,
             diagnostics=diagnostics,

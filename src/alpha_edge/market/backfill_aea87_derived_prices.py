@@ -4,11 +4,11 @@ Reads existing staged Parquet; NEVER downloads Yahoo or modifies active manifest
 Writes corrected assets into a NEW staged campaign. Assets without repairable
 missing values are not copied and stay in the original campaign.
 """
+
 from __future__ import annotations
 
 import argparse
 import hashlib
-import io
 import json
 import uuid
 from datetime import datetime, timezone
@@ -22,8 +22,7 @@ from alpha_edge.market.ingest_market_data import _make_market_store
 from alpha_edge.market.aea87_return_gaps import expected_return_break_dates
 
 
-def repair_derived_prices(store, source_run_id: str, new_run_id: str, *,
-                          asset_ids: set[str] | None = None):
+def repair_derived_prices(store, source_run_id: str, new_run_id: str, *, asset_ids: set[str] | None = None):
     prefix = f"{store.base_prefix}/repairs/aea87/staging/"
     source = json.loads(store._get_bytes(prefix + source_run_id + "/prepared_campaign.json"))
     if source.get("run_id") != source_run_id:
@@ -68,20 +67,21 @@ def repair_derived_prices(store, source_run_id: str, new_run_id: str, *,
             quarantine_dates = prices.loc[unresolved, "date"].dt.strftime("%Y-%m-%d").tolist()
             quarantine_rows = []
             for _, row in prices.loc[unresolved].iterrows():
-                quarantine_rows.append({
-                    "asset_id": aid, "date": row["date"].strftime("%Y-%m-%d"),
-                    "reason": "UNRECONSTRUCTABLE_DERIVED_USD_PRICE",
-                    "adj_close": None if pd.isna(row["adj_close"]) else float(row["adj_close"]),
-                    "close": None if pd.isna(row["close"]) else float(row["close"]),
-                    "fx_to_usd": None if pd.isna(row["fx_to_usd"]) else float(row["fx_to_usd"]),
-                })
+                quarantine_rows.append(
+                    {
+                        "asset_id": aid,
+                        "date": row["date"].strftime("%Y-%m-%d"),
+                        "reason": "UNRECONSTRUCTABLE_DERIVED_USD_PRICE",
+                        "adj_close": None if pd.isna(row["adj_close"]) else float(row["adj_close"]),
+                        "close": None if pd.isna(row["close"]) else float(row["close"]),
+                        "fx_to_usd": None if pd.isna(row["fx_to_usd"]) else float(row["fx_to_usd"]),
+                    }
+                )
             # A new price following an excluded observation must not have a
             # return calculated across that missing observation.
             # A contiguous quarantine block needs one break at the first *retained*
             # observation following it. Breaks on excluded dates do nothing.
-            return_break_dates = expected_return_break_dates(
-                prices["date"], prices.loc[unresolved, "date"]
-            )
+            return_break_dates = expected_return_break_dates(prices["date"], prices.loc[unresolved, "date"])
             fix_adj = adj_bad & ~unresolved
             fix_raw = raw_bad & ~unresolved
             prices.loc[fix_adj, "close_adjusted_usd"] = (local * fx).loc[fix_adj].to_numpy()
@@ -113,23 +113,43 @@ def repair_derived_prices(store, source_run_id: str, new_run_id: str, *,
                         raise ValueError(f"Active manifest changed since original preparation: {key}")
                     original[rec["table"]][key] = blob
             records = _prepare(store, aid, prices, returns, original, Path(new_run_id))
-            prepared.append({"asset_id": aid, "records": records, "flagged_retained": item.get("flagged_retained", 0),
-                             "derived_backfill": True, "source_campaign": source_run_id,
-                             "quarantine_rows": quarantine_rows,
-                             "return_break_dates": return_break_dates})
-            report.append({"asset_id": aid, "status": "PREPARED_WITH_QUARANTINE" if quarantine_rows else "PREPARED",
-                           "invalid_derived_rows": int(to_fix.sum()),
-                           "adjusted_fixed": int(fix_adj.sum()), "raw_fixed": int(fix_raw.sum()),
-                           "quarantine_rows": len(quarantine_rows),
-                           "quarantine_dates": quarantine_dates, "return_break_dates": return_break_dates,
-                           "flagged_retained": item.get("flagged_retained", 0), "partitions": len(records)})
+            prepared.append(
+                {
+                    "asset_id": aid,
+                    "records": records,
+                    "flagged_retained": item.get("flagged_retained", 0),
+                    "derived_backfill": True,
+                    "source_campaign": source_run_id,
+                    "quarantine_rows": quarantine_rows,
+                    "return_break_dates": return_break_dates,
+                }
+            )
+            report.append(
+                {
+                    "asset_id": aid,
+                    "status": "PREPARED_WITH_QUARANTINE" if quarantine_rows else "PREPARED",
+                    "invalid_derived_rows": int(to_fix.sum()),
+                    "adjusted_fixed": int(fix_adj.sum()),
+                    "raw_fixed": int(fix_raw.sum()),
+                    "quarantine_rows": len(quarantine_rows),
+                    "quarantine_dates": quarantine_dates,
+                    "return_break_dates": return_break_dates,
+                    "flagged_retained": item.get("flagged_retained", 0),
+                    "partitions": len(records),
+                }
+            )
         except Exception as exc:
             report.append({"asset_id": aid, "status": "FAILED", "error": f"{type(exc).__name__}: {exc}"})
         print(f"[backfill] {aid}: {report[-1]['status']}", flush=True)
     if not prepared:
         raise RuntimeError("No corrected assets prepared; source campaign unchanged")
-    campaign = {"run_id": new_run_id, "source_campaign": source_run_id, "kind": "DERIVED_USD_BACKFILL",
-                "report": report, "prepared": prepared}
+    campaign = {
+        "run_id": new_run_id,
+        "source_campaign": source_run_id,
+        "kind": "DERIVED_USD_BACKFILL",
+        "report": report,
+        "prepared": prepared,
+    }
     store._put_bytes(prefix + new_run_id + "/campaign_report.json", _dump_json(report), "application/json")
     store._put_bytes(destination_key, _dump_json(campaign), "application/json")
     if json.loads(store._get_bytes(destination_key)) != campaign:

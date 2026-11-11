@@ -6,7 +6,7 @@ from typing import Dict, Any
 
 import numpy as np
 import pandas as pd
-from sklearn.covariance import LedoitWolf   # <- NEW
+from sklearn.covariance import LedoitWolf  # <- NEW
 
 
 @dataclass
@@ -65,6 +65,7 @@ def compute_corr_matrix(returns: pd.DataFrame) -> pd.DataFrame:
 
 
 # ---------- NEW: Ledoit–Wolf covariance ----------
+
 
 def compute_lw_cov_df(returns: pd.DataFrame) -> pd.DataFrame:
     """

@@ -4,6 +4,7 @@ Requires a fully prepared plan, existing manifests with immutable backups,
 and operator attestations of exclusive reader/writer maintenance.
 This code cannot itself stop remote readers or scheduled jobs.
 """
+
 from __future__ import annotations
 import argparse
 import json
@@ -11,7 +12,13 @@ import json
 import boto3
 
 from alpha_edge.market.aea87_publication_transaction import (
-    checksum, fetch, put_once, switch_manifests, rollback, write_event, entries,
+    checksum,
+    fetch,
+    put_once,
+    switch_manifests,
+    rollback,
+    write_event,
+    entries,
 )
 from alpha_edge.market.aea87_release_finalize import finalize
 
@@ -51,13 +58,20 @@ def require_ready_plan(s3, bucket, plan):
 
 
 def convert_to_transaction_ops(operations):
-    return [{
-        "asset_id": op["asset_id"], "manifest_key": op["manifest_key"],
-        "before_sha": op["before_sha"], "after": op["after"],
-        "after_sha": op["after_sha"], "backup_key": op["backup_key"],
-        "part_key": op["part_key"], "staged_key": op["part_key"],
-        "staged_sha": op["part_sha"],
-    } for op in operations]
+    return [
+        {
+            "asset_id": op["asset_id"],
+            "manifest_key": op["manifest_key"],
+            "before_sha": op["before_sha"],
+            "after": op["after"],
+            "after_sha": op["after_sha"],
+            "backup_key": op["backup_key"],
+            "part_key": op["part_key"],
+            "staged_key": op["part_key"],
+            "staged_sha": op["part_sha"],
+        }
+        for op in operations
+    ]
 
 
 def backup_downstream(s3, bucket, root):
@@ -73,10 +87,8 @@ def backup_downstream(s3, bucket, root):
                 previous = fetch(s3, bucket, backup_key)
             if checksum(previous) != checksum(before):
                 raise RuntimeError("Changed downstream backup: " + key)
-        records.append({"key": key, "backup_key": backup_key,
-                        "before_sha": checksum(before)})
-    put_once(s3, bucket, root + "/downstream_backup_index.json",
-             json.dumps(records, sort_keys=True).encode())
+        records.append({"key": key, "backup_key": backup_key, "before_sha": checksum(before)})
+    put_once(s3, bucket, root + "/downstream_backup_index.json", json.dumps(records, sort_keys=True).encode())
     return records
 
 
@@ -102,8 +114,7 @@ def activate(s3, bucket, plan, publication_id):
     if entries(s3, bucket, root):
         raise RuntimeError("Publication already has journal events; use controlled recovery")
     downstream = backup_downstream(s3, bucket, root)
-    put_once(s3, bucket, root + "/operations.json",
-             json.dumps(ops, sort_keys=True).encode())
+    put_once(s3, bucket, root + "/operations.json", json.dumps(ops, sort_keys=True).encode())
     write_event(s3, bucket, root, 0, "READY")
     try:
         switch_manifests(s3, bucket, root, ops, workers=1, batch_size=1)

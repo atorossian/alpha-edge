@@ -3,6 +3,7 @@
 Run this ONE TIME from the usual Alpha Edge Poetry environment.
 The source files may be local temporarily; persistent authoritative copies are S3.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -24,9 +25,7 @@ def main() -> None:
     ap.add_argument("--run-id", default="aea87_inputs_20261028")
     args = ap.parse_args()
 
-    if not args.run_id.startswith("aea87_inputs_") or not all(
-        ch.isalnum() or ch in "_-" for ch in args.run_id
-    ):
+    if not args.run_id.startswith("aea87_inputs_") or not all(ch.isalnum() or ch in "_-" for ch in args.run_id):
         raise ValueError("Invalid immutable run ID")
     s3 = boto3.client("s3", region_name=args.region)
     prefix = f"market/quality/aea87/inputs/{args.run_id}"
@@ -35,8 +34,10 @@ def main() -> None:
         ("universe.csv", args.universe, ("asset_id",)),
     )
     manifest = {
-        "run_id": args.run_id, "created_utc": datetime.now(timezone.utc).isoformat(),
-        "bucket": args.bucket, "files": {},
+        "run_id": args.run_id,
+        "created_utc": datetime.now(timezone.utc).isoformat(),
+        "bucket": args.bucket,
+        "files": {},
     }
     prepared = []
     for name, file, required in specs:
@@ -81,8 +82,12 @@ def main() -> None:
         if comparable != {k: v for k, v in manifest.items() if k != "created_utc"}:
             raise FileExistsError("Existing input manifest disagrees with source files")
     except s3.exceptions.NoSuchKey:
-        s3.put_object(Bucket=args.bucket, Key=manifest_key,
-                      Body=json.dumps(manifest, indent=2).encode(), ContentType="application/json")
+        s3.put_object(
+            Bucket=args.bucket,
+            Key=manifest_key,
+            Body=json.dumps(manifest, indent=2).encode(),
+            ContentType="application/json",
+        )
     print(f"INPUT_MANIFEST s3://{args.bucket}/{manifest_key}")
 
 

@@ -42,7 +42,6 @@ class MarketStore:
             self._tls.s3 = c
         return c
 
-
     def write_fx_snapshot_staging(self, frame: pd.DataFrame, report: dict, *, run_id: str, upload: bool = False) -> str:
         """AEA-87: publish validated FX observations to immutable staging, never live OHLCV."""
         import hashlib
@@ -62,6 +61,7 @@ class MarketStore:
         if data["date"].isna().any() or data.duplicated(["currency", "date"]).any():
             raise ValueError("Invalid FX dates or duplicate currency/date")
         import numpy as np
+
         statuses = data["validation_status"].astype(str)
         allowed = {"VALID", "VALID_AFTER_GAP"}
         if not statuses.isin(allowed).all():
@@ -80,9 +80,16 @@ class MarketStore:
             direct = pd.to_numeric(data.loc[gap_rows, "direct_quote"], errors="coerce")
             inverse = pd.to_numeric(data.loc[gap_rows, "inverse_quote"], errors="coerce")
             diff = (direct - inverse).abs() / ((direct + inverse) / 2)
-            if direct.isna().any() or inverse.isna().any() or (direct <= 0).any() or (inverse <= 0).any() or (diff > 0.02).any():
+            if (
+                direct.isna().any()
+                or inverse.isna().any()
+                or (direct <= 0).any()
+                or (inverse <= 0).any()
+                or (diff > 0.02).any()
+            ):
                 raise ValueError("Gap-start reciprocal FX quotes must be positive and agree within 2%")
         import io as _io
+
         buf = _io.BytesIO()
         data.to_parquet(buf, index=False)
         payload = buf.getvalue()
@@ -108,8 +115,15 @@ class MarketStore:
         return f"s3://{self.bucket}/{prefix}/"
 
     def promote_ohlcv_year_repair(
-        self, *, asset_id: str, year: int, local_path: str, expected_sha256: str,
-        expected_patched_dates: int, run_id: str, execute: bool = False,
+        self,
+        *,
+        asset_id: str,
+        year: int,
+        local_path: str,
+        expected_sha256: str,
+        expected_patched_dates: int,
+        run_id: str,
+        execute: bool = False,
     ) -> dict:
         """AEA-87: validate replacement and switch one asset/year manifest.
 
@@ -121,7 +135,7 @@ class MarketStore:
         import re
         from pathlib import Path
         import io as _io
-        import uuid as _uuid
+
         if not re.fullmatch(r"[A-Za-z0-9_-]{6,80}", run_id):
             raise ValueError("Invalid repair run_id")
         if not asset_id.startswith("CRYPTO:"):
@@ -161,13 +175,13 @@ class MarketStore:
         # pandas NaN != NaN; missing prices preserved on both sides are unchanged.
         changed = original_close.ne(repaired_close) & ~(original_close.isna() & repaired_close.isna())
         if int(changed.sum()) != int(expected_patched_dates):
-            differences = pd.DataFrame({
-                "original_close": before.loc[changed, "close"].astype(float),
-                "replacement_close": after.loc[changed, "close"].astype(float),
-            })
-            differences["relative_change"] = (
-                differences["replacement_close"] / differences["original_close"] - 1
+            differences = pd.DataFrame(
+                {
+                    "original_close": before.loc[changed, "close"].astype(float),
+                    "replacement_close": after.loc[changed, "close"].astype(float),
+                }
             )
+            differences["relative_change"] = differences["replacement_close"] / differences["original_close"] - 1
             differences.index = differences.index.strftime("%Y-%m-%d")
             raise ValueError(
                 f"{asset_id} {year}: expected {expected_patched_dates} changed closes, "
@@ -178,9 +192,14 @@ class MarketStore:
             if col in before and col in after:
                 if not before[col].astype(str).equals(after[col].astype(str)):
                     raise ValueError(f"Asset identity changed in replacement: {col}")
-        result = dict(asset_id=asset_id, year=year, rows=len(replacement),
-                      changed_closes=int(changed.sum()), sha256=digest,
-                      status="VALIDATED_NOT_PUBLISHED")
+        result = dict(
+            asset_id=asset_id,
+            year=year,
+            rows=len(replacement),
+            changed_closes=int(changed.sum()),
+            sha256=digest,
+            status="VALIDATED_NOT_PUBLISHED",
+        )
         if not execute:
             return result
         staging_prefix = f"{self.base_prefix}/repairs/aea87/{run_id}/asset_id={asset_id}/year={year}"
@@ -226,12 +245,11 @@ class MarketStore:
         keys: list[str] = []
         paginator = self._client().get_paginator("list_objects_v2")
         for page in paginator.paginate(Bucket=self.bucket, Prefix=prefix):
-            for it in (page.get("Contents") or []):
+            for it in page.get("Contents") or []:
                 k = it.get("Key")
                 if k:
                     keys.append(k)
         return keys
-
 
     def _read_parquet_tolerant(
         self,
@@ -268,7 +286,6 @@ class MarketStore:
                     out[col] = pd.NA
 
             return out[columns].copy()
-        
 
     # -------------------------
     # Prefixes (S3 KEYS, not s3://)
@@ -545,8 +562,6 @@ class MarketStore:
         except Exception:
             return {}
 
-
-
     # -------------------------
     # MARKET REGIME HMM OUTPUTS
     # -------------------------
@@ -730,9 +745,7 @@ class MarketStore:
                     "p_CHOPPY_BULL": float(p_label.get("CHOPPY_BULL", 0.0) or 0.0),
                     "p_CHOPPY_BEAR": float(p_label.get("CHOPPY_BEAR", 0.0) or 0.0),
                     "p_STRESS_BEAR": float(p_label.get("STRESS_BEAR", 0.0) or 0.0),
-                    "target_leverage": (
-                        None if lev.get("leverage") is None else float(lev.get("leverage"))
-                    ),
+                    "target_leverage": (None if lev.get("leverage") is None else float(lev.get("leverage"))),
                     "source_key": key,
                     "point_in_time": point_in_time,
                     "lookahead_safe": lookahead_safe,
@@ -815,6 +828,7 @@ class MarketStore:
                 mapping_validation.to_csv(index=False).encode("utf-8"),
                 content_type="text/csv",
             )
+
     # -------------------------
     # CORPORATE ACTIONS
     # -------------------------
@@ -823,11 +837,9 @@ class MarketStore:
         # market/reference/v1/corporate_actions
         return f"{self.base_prefix}/reference/{self.version}/corporate_actions"
 
-
     def _corporate_actions_part_key(self, asset_id: str) -> str:
         asset_id = str(asset_id).strip()
         return f"{self.corporate_actions_prefix}/asset_id={asset_id}/part-00000.parquet"
-
 
     def write_corporate_actions_partitioned(self, df: pd.DataFrame) -> list[str]:
         """
@@ -859,7 +871,6 @@ class MarketStore:
             written.append(key)
 
         return written
-
 
     # -------------------------
     # READ (boto3 + BytesIO)
@@ -944,11 +955,7 @@ class MarketStore:
                 df["asset_id"] = df["asset_id"].astype(str).str.strip()
 
             if "date" in df.columns:
-                df["date"] = (
-                    pd.to_datetime(df["date"], errors="coerce", utc=True)
-                    .dt.tz_convert(None)
-                    .dt.normalize()
-                )
+                df["date"] = pd.to_datetime(df["date"], errors="coerce", utc=True).dt.tz_convert(None).dt.normalize()
 
             return df
 

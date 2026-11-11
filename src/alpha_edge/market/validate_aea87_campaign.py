@@ -3,6 +3,7 @@
 This tool never modifies production market data or manifests. It verifies the
 content-addressed staged Parquet files and reports outstanding quarantine.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -19,8 +20,9 @@ import pandas as pd
 from alpha_edge.market.aea87_return_gaps import expected_return_break_dates
 
 
-def validate_campaign(s3, bucket: str, run_id: str, *, prefix: str = "market",
-                      asset_ids: set[str] | None = None) -> dict:
+def validate_campaign(
+    s3, bucket: str, run_id: str, *, prefix: str = "market", asset_ids: set[str] | None = None
+) -> dict:
     key = f"{prefix}/repairs/aea87/staging/{run_id}/prepared_campaign.json"
     campaign = json.loads(s3.get_object(Bucket=bucket, Key=key)["Body"].read())
     if campaign.get("run_id") != run_id:
@@ -144,28 +146,40 @@ def validate_campaign(s3, bucket: str, run_id: str, *, prefix: str = "market",
                     errors.append("Staged returns inconsistent with staged adjusted USD prices")
         if aid == "CRYPTO:HYPE-USD" and item.get("identity_reset") is True:
             source_report = report_by_id.get(aid, {})
-            if (source_report.get("identity_reset") is not True
-                    or int(source_report.get("retained_rows", -1)) != 0
-                    or not source_report.get("superseded_manifest_keys")):
+            if (
+                source_report.get("identity_reset") is not True
+                or int(source_report.get("retained_rows", -1)) != 0
+                or not source_report.get("superseded_manifest_keys")
+            ):
                 errors.append("HYPE identity reset has missing fresh-only/retirement evidence")
             if "ohlcv_usd" in combined:
                 px_identity = combined["ohlcv_usd"]
-                if ("yahoo_ticker" not in px_identity
-                        or not px_identity["yahoo_ticker"].astype(str).eq("HYPE32196-USD").all()):
+                if (
+                    "yahoo_ticker" not in px_identity
+                    or not px_identity["yahoo_ticker"].astype(str).eq("HYPE32196-USD").all()
+                ):
                     errors.append("HYPE reset has unexpected Yahoo source identity")
         flagged = int(report_by_id.get(aid, {}).get("flagged_retained", item.get("flagged_retained", 0)))
         if flagged != int(item.get("flagged_retained", 0)):
             errors.append("Quarantine count differs from campaign manifest")
         needs_reset = aid == "CRYPTO:HYPE-USD" and int(report_by_id.get(aid, {}).get("retained_rows", 0)) > 0
-        results.append({
-            "asset_id": aid,
-            "status": "INVALID" if errors else ("RESET_REQUIRED" if needs_reset else ("VALID_WITH_QUARANTINE" if (flagged or item.get("quarantine_rows")) else "VALID")),
-            "flagged_retained": flagged,
-            "quarantine_rows": len(item.get("quarantine_rows", [])),
-            "identity_reset_required": needs_reset,
-            "records_checked": len(seen),
-            "errors": errors,
-        })
+        results.append(
+            {
+                "asset_id": aid,
+                "status": "INVALID"
+                if errors
+                else (
+                    "RESET_REQUIRED"
+                    if needs_reset
+                    else ("VALID_WITH_QUARANTINE" if (flagged or item.get("quarantine_rows")) else "VALID")
+                ),
+                "flagged_retained": flagged,
+                "quarantine_rows": len(item.get("quarantine_rows", [])),
+                "identity_reset_required": needs_reset,
+                "records_checked": len(seen),
+                "errors": errors,
+            }
+        )
     failures = [r for r in report if r.get("status") != "PREPARED"]
     return {
         "run_id": run_id,
@@ -190,15 +204,17 @@ def main():
     p.add_argument("--market-prefix", default="market")
     p.add_argument("--repair-run-id", required=True)
     p.add_argument("--asset-ids", help="Comma-separated canonical asset IDs; omit to validate full campaign")
-    p.add_argument("--no-publish-report", action="store_true",
-                   help="Opt out of automatic immutable S3 validation report publication")
+    p.add_argument(
+        "--no-publish-report",
+        action="store_true",
+        help="Opt out of automatic immutable S3 validation report publication",
+    )
     args = p.parse_args()
     ids = None if not args.asset_ids else set(x.strip() for x in args.asset_ids.split(","))
     if ids is not None and (not ids or "" in ids):
         p.error("--asset-ids must contain nonempty asset IDs")
     s3 = boto3.client("s3", region_name=args.region)
-    result = validate_campaign(s3, args.bucket, args.repair_run_id,
-                               prefix=args.market_prefix.strip("/"), asset_ids=ids)
+    result = validate_campaign(s3, args.bucket, args.repair_run_id, prefix=args.market_prefix.strip("/"), asset_ids=ids)
     summary = {k: v for k, v in result.items() if k != "assets"}
     print(json.dumps(summary, indent=2))
     for row in result["assets"]:
@@ -207,15 +223,15 @@ def main():
     if not args.no_publish_report:
         # Every execution gets a distinct immutable evidence artifact.
         validation_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ") + "_" + uuid.uuid4().hex[:8]
-        key = (f"{args.market_prefix.strip('/')}/repairs/aea87/staging/"
-               f"{args.repair_run_id}/validations/{validation_id}/report.json")
+        key = (
+            f"{args.market_prefix.strip('/')}/repairs/aea87/staging/"
+            f"{args.repair_run_id}/validations/{validation_id}/report.json"
+        )
         result["validation_id"] = validation_id
         result["validation_report_key"] = key
         data = json.dumps(result, indent=2, sort_keys=True).encode("utf-8")
         # Never overwrite another run's evidence, even if a custom ID collides.
-        s3.put_object(Bucket=args.bucket, Key=key, Body=data,
-                      ContentType="application/json",
-                      IfNoneMatch="*")
+        s3.put_object(Bucket=args.bucket, Key=key, Body=data, ContentType="application/json", IfNoneMatch="*")
         print(f"VALIDATION_REPORT s3://{args.bucket}/{key}")
     if result["assets_invalid"] or result["assets_reset_required"]:
         raise SystemExit(2)

@@ -25,11 +25,9 @@ def main() -> None:
         if token:
             kwargs["ContinuationToken"] = token
         resp = s3.list_objects_v2(**kwargs)
-        keys.extend([
-            x["Key"]
-            for x in resp.get("Contents", [])
-            if x["Key"].endswith(".json") and "/cashflow_" in x["Key"]
-        ])
+        keys.extend(
+            [x["Key"] for x in resp.get("Contents", []) if x["Key"].endswith(".json") and "/cashflow_" in x["Key"]]
+        )
         if not resp.get("IsTruncated"):
             break
         token = resp.get("NextContinuationToken")
@@ -88,7 +86,17 @@ def main() -> None:
     print("by year:")
     for y in sorted(by_year):
         v = by_year[y]
-        print(y, "n=", int(v["n"]), "deposits=", round(v["deposits"], 2), "withdrawals=", round(v["withdrawals"], 2), "net=", round(v["net"], 2))
+        print(
+            y,
+            "n=",
+            int(v["n"]),
+            "deposits=",
+            round(v["deposits"], 2),
+            "withdrawals=",
+            round(v["withdrawals"], 2),
+            "net=",
+            round(v["net"], 2),
+        )
 
     if dupe_fps:
         print("")

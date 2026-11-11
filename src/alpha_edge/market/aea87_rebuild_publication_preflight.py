@@ -2,6 +2,7 @@
 
 Never writes active market objects. Returns blockers in a versioned S3 report.
 """
+
 from __future__ import annotations
 import argparse
 import io
@@ -20,9 +21,13 @@ ROOT = "market/repairs/aea87/rebuilds/v1/runs"
 def check_asset(s3, bucket, store, run_id, aid, date_end):
     folder = "".join(c if c.isalnum() else "_" for c in aid)
     base = f"{ROOT}/{run_id}/assets/{folder}"
-    prices = pd.read_parquet(io.BytesIO(s3.get_object(Bucket=bucket, Key=base+"/candidate_ohlcv_usd.parquet")["Body"].read()))
-    returns = pd.read_parquet(io.BytesIO(s3.get_object(Bucket=bucket, Key=base+"/candidate_returns_usd.parquet")["Body"].read()))
-    review = json.loads(s3.get_object(Bucket=bucket, Key=base+"/coverage_review.json")["Body"].read())
+    prices = pd.read_parquet(
+        io.BytesIO(s3.get_object(Bucket=bucket, Key=base + "/candidate_ohlcv_usd.parquet")["Body"].read())
+    )
+    returns = pd.read_parquet(
+        io.BytesIO(s3.get_object(Bucket=bucket, Key=base + "/candidate_returns_usd.parquet")["Body"].read())
+    )
+    review = json.loads(s3.get_object(Bucket=bucket, Key=base + "/coverage_review.json")["Body"].read())
     issues = [x for x in review.get("reasons", []) if x != "OLD_ONLY_DATES_REQUIRE_EXCHANGE_CALENDAR_VALIDATION"]
     inception = "2024-11-29" if aid == "CRYPTO:HYPE-USD" else None
     issues.extend(validate_candidate(prices, returns, inception))
@@ -61,36 +66,58 @@ def check_asset(s3, bucket, store, run_id, aid, date_end):
                 present = False
             if not present:
                 issues.append("MISSING_ACTIVE_MANIFEST_REQUIRES_LEGACY_BACKUP")
-            operations.append({"year":int(year), "table":table, "key":key,
-                               "active_manifest_exists":present, "active_etag":etag,
-                               "candidate_rows":int((pd.to_datetime(prices["date"] if table=="ohlcv_usd" else returns["date"]).dt.year==year).sum()),
-                               "retire":bool(year not in years)})
-    return {"asset_id":aid,"candidate_rows":len(prices),"return_rows":len(returns),
-            "calendar_validation":calendar_report,
-            "blockers":sorted(set(issues)),"operations":operations,
-            "status":"NOT_APPROVED" if issues else "PREFLIGHT_REQUIRES_MANUAL_APPROVAL"}
+            operations.append(
+                {
+                    "year": int(year),
+                    "table": table,
+                    "key": key,
+                    "active_manifest_exists": present,
+                    "active_etag": etag,
+                    "candidate_rows": int(
+                        (
+                            pd.to_datetime(prices["date"] if table == "ohlcv_usd" else returns["date"]).dt.year == year
+                        ).sum()
+                    ),
+                    "retire": bool(year not in years),
+                }
+            )
+    return {
+        "asset_id": aid,
+        "candidate_rows": len(prices),
+        "return_rows": len(returns),
+        "calendar_validation": calendar_report,
+        "blockers": sorted(set(issues)),
+        "operations": operations,
+        "status": "NOT_APPROVED" if issues else "PREFLIGHT_REQUIRES_MANUAL_APPROVAL",
+    }
 
 
 def main():
-    p=argparse.ArgumentParser(description="Read-only AEA87 rebuild publication preflight")
-    p.add_argument("--run-id",required=True)
-    p.add_argument("--asset-ids",default=",".join(ASSETS))
-    p.add_argument("--bucket",default="alpha-edge-algo")
-    p.add_argument("--region",default="eu-west-1")
-    p.add_argument("--end",default="2026-11-01")
-    a=p.parse_args()
-    s3=boto3.client("s3",region_name=a.region)
-    store=MarketStore(bucket=a.bucket,region=a.region)
-    results={}
+    p = argparse.ArgumentParser(description="Read-only AEA87 rebuild publication preflight")
+    p.add_argument("--run-id", required=True)
+    p.add_argument("--asset-ids", default=",".join(ASSETS))
+    p.add_argument("--bucket", default="alpha-edge-algo")
+    p.add_argument("--region", default="eu-west-1")
+    p.add_argument("--end", default="2026-11-01")
+    a = p.parse_args()
+    s3 = boto3.client("s3", region_name=a.region)
+    store = MarketStore(bucket=a.bucket, region=a.region)
+    results = {}
     for aid in a.asset_ids.split(","):
-        results[aid]=check_asset(s3,a.bucket,store,a.run_id,aid,a.end)
-        print(f"[preflight] {aid}: {results[aid]['status']}",flush=True)
-    run=datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")+"_"+uuid.uuid4().hex[:8]
-    key=f"market/repairs/aea87/publication_preflight/v1/runs/{run}/report.json"
-    payload={"source_run_id":a.run_id,"status":"READ_ONLY_REVIEW","assets":results}
-    s3.put_object(Bucket=a.bucket,Key=key,Body=json.dumps(payload,indent=2).encode(),ContentType="application/json",IfNoneMatch="*")
-    print("Report: s3://"+a.bucket+"/"+key)
+        results[aid] = check_asset(s3, a.bucket, store, a.run_id, aid, a.end)
+        print(f"[preflight] {aid}: {results[aid]['status']}", flush=True)
+    run = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "_" + uuid.uuid4().hex[:8]
+    key = f"market/repairs/aea87/publication_preflight/v1/runs/{run}/report.json"
+    payload = {"source_run_id": a.run_id, "status": "READ_ONLY_REVIEW", "assets": results}
+    s3.put_object(
+        Bucket=a.bucket,
+        Key=key,
+        Body=json.dumps(payload, indent=2).encode(),
+        ContentType="application/json",
+        IfNoneMatch="*",
+    )
+    print("Report: s3://" + a.bucket + "/" + key)
 
 
-if __name__=="__main__":
+if __name__ == "__main__":
     main()

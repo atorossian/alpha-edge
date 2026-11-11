@@ -4,6 +4,7 @@ S3 permissions needed: s3:GetObject only. Refuses missing manifests, missing
 parts, duplicate sessions, and unexpected schemas. Never scans orphan
 partitions or writes any object to S3.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -41,8 +42,7 @@ def _session_dates(values: pd.Series) -> pd.Series:
     return pd.to_datetime(values.astype(str).str[:10], format="%Y-%m-%d", errors="coerce")
 
 
-def _approved_active_part(key: str, *, root: str, version: str,
-                          table: str, asset_id: str, year: int) -> bool:
+def _approved_active_part(key: str, *, root: str, version: str, table: str, asset_id: str, year: int) -> bool:
     """Allow legacy partitions or exact AEA-87 versioned repair parts only.
 
     Never allow arbitrary paths from a manifest, even though that manifest
@@ -59,7 +59,7 @@ def _approved_active_part(key: str, *, root: str, version: str,
     repair_prefix = f"{root}/repairs/aea87/rebuild_publications/{version}/"
     if not key.startswith(repair_prefix):
         return False
-    remainder = key[len(repair_prefix):]
+    remainder = key[len(repair_prefix) :]
     match = re.fullmatch(
         r"([A-Za-z0-9_.-]{8,160})/parts/"
         + re.escape(table)
@@ -74,19 +74,23 @@ def _approved_active_part(key: str, *, root: str, version: str,
 
 
 def fetch_table(
-    s3, *, bucket: str, root: str, version: str,
-    table: str, asset_ids: list[str], years: list[int],
-    start: str, end_exclusive: str,
+    s3,
+    *,
+    bucket: str,
+    root: str,
+    version: str,
+    table: str,
+    asset_ids: list[str],
+    years: list[int],
+    start: str,
+    end_exclusive: str,
 ) -> tuple[pd.DataFrame, list[dict]]:
     value_column = TABLES[table][0]
     data = []
     provenance = []
     for asset_id in asset_ids:
         for year in years:
-            manifest_key = (
-                f"{root}/manifests/{version}/{table}/"
-                f"asset_id={asset_id}/year={year}/manifest.json"
-            )
+            manifest_key = f"{root}/manifests/{version}/{table}/asset_id={asset_id}/year={year}/manifest.json"
             original_manifest = _object(s3, bucket, manifest_key)
             try:
                 manifest = json.loads(original_manifest)
@@ -97,17 +101,28 @@ def fetch_table(
             parts = manifest.get("parts")
             if not isinstance(parts, list):
                 raise ReconciliationError(f"Manifest lacks explicit parts: {manifest_key}")
-            if not parts and manifest.get("status") not in ("RETIRED", "EMPTY", "TOMBSTONED") and not manifest.get("retired"):
+            if (
+                not parts
+                and manifest.get("status") not in ("RETIRED", "EMPTY", "TOMBSTONED")
+                and not manifest.get("retired")
+            ):
                 raise ReconciliationError(f"Empty active manifest needs investigation: {manifest_key}")
             record = {
-                "asset_id": asset_id, "table": table, "year": year,
-                "manifest_key": manifest_key, "manifest_sha256": sha256(original_manifest),
+                "asset_id": asset_id,
+                "table": table,
+                "year": year,
+                "manifest_key": manifest_key,
+                "manifest_sha256": sha256(original_manifest),
                 "parts": [],
             }
             for part_key in parts:
                 if not _approved_active_part(
-                    part_key, root=root, version=version, table=table,
-                    asset_id=asset_id, year=year,
+                    part_key,
+                    root=root,
+                    version=version,
+                    table=table,
+                    asset_id=asset_id,
+                    year=year,
                 ):
                     raise ReconciliationError(f"Unsafe or unexpected active part: {part_key}")
                 raw = _object(s3, bucket, part_key)
@@ -133,22 +148,29 @@ def fetch_table(
     if not data:
         raise ReconciliationError(f"No active {table} rows in selected years")
     result = pd.concat(data, ignore_index=True)
-    result = result.loc[
-        result["date"].ge(pd.Timestamp(start)) &
-        result["date"].lt(pd.Timestamp(end_exclusive))
-    ].copy()
+    result = result.loc[result["date"].ge(pd.Timestamp(start)) & result["date"].lt(pd.Timestamp(end_exclusive))].copy()
     if result.empty:
         raise ReconciliationError(f"No {table} rows within requested dates")
     if result.duplicated(["asset_id", "date"]).any():
-        samples = result.loc[result.duplicated(["asset_id", "date"], keep=False),
-                             ["asset_id", "date"]].head(5).to_dict("records")
+        samples = (
+            result.loc[result.duplicated(["asset_id", "date"], keep=False), ["asset_id", "date"]]
+            .head(5)
+            .to_dict("records")
+        )
         raise ReconciliationError(f"Duplicate active {table} asset/session rows: {samples}")
     return result.sort_values(["asset_id", "date"]).reset_index(drop=True), provenance
 
 
 def export(
-    *, s3, bucket: str, universe_csv: Path, start: str, end_exclusive: str,
-    output: Path, root: str = "market", version: str = "v1",
+    *,
+    s3,
+    bucket: str,
+    universe_csv: Path,
+    start: str,
+    end_exclusive: str,
+    output: Path,
+    root: str = "market",
+    version: str = "v1",
 ) -> dict:
     if root != "market" or version != "v1":
         raise ReconciliationError("This exporter is restricted to read-only AEA-87 market/v1")
@@ -167,8 +189,15 @@ def export(
     tables, journals = {}, {}
     for name, (_, filename) in TABLES.items():
         tables[filename], journals[name] = fetch_table(
-            s3, bucket=bucket, root=root, version=version, table=name,
-            asset_ids=ids, years=years, start=start, end_exclusive=end_exclusive,
+            s3,
+            bucket=bucket,
+            root=root,
+            version=version,
+            table=name,
+            asset_ids=ids,
+            years=years,
+            start=start,
+            end_exclusive=end_exclusive,
         )
         if set(tables[filename]["asset_id"].unique()) != set(ids):
             raise ReconciliationError(f"Missing assets from active {name} partitions")
@@ -180,16 +209,18 @@ def export(
         file_hashes[filename] = sha256(target.read_bytes())
     metadata = {
         "schema": "aea87_active_manifest_readonly_export_v1",
-        "bucket": bucket, "root": root, "version": version,
-        "start_inclusive": start, "end_exclusive": end_exclusive,
+        "bucket": bucket,
+        "root": root,
+        "version": version,
+        "start_inclusive": start,
+        "end_exclusive": end_exclusive,
         "assets": ids,
         "return_semantics": "unknown_requires_manual_provenance_check",
-        "files": {key: {"rows": len(df), "sha256": file_hashes[key]}
-                  for key, df in tables.items()},
+        "files": {key: {"rows": len(df), "sha256": file_hashes[key]} for key, df in tables.items()},
         "active_source_manifests": journals,
         "s3_writes": 0,
         "note": "Snapshot of manifests and parts read sequentially; not a transactional S3 snapshot. "
-                "Review manifest stability during long-running historical extracts.",
+        "Review manifest stability during long-running historical extracts.",
     }
     (output / "export_manifest.json").write_text(json.dumps(metadata, indent=2) + "\n")
     return metadata
@@ -205,10 +236,19 @@ def main() -> None:
     ap.add_argument("--output", required=True, type=Path)
     args = ap.parse_args()
     s3 = boto3.client("s3", region_name=args.region)
-    print(json.dumps(export(
-        s3=s3, bucket=args.bucket, universe_csv=args.universe_csv,
-        start=args.start, end_exclusive=args.end, output=args.output,
-    ), indent=2))
+    print(
+        json.dumps(
+            export(
+                s3=s3,
+                bucket=args.bucket,
+                universe_csv=args.universe_csv,
+                start=args.start,
+                end_exclusive=args.end,
+                output=args.output,
+            ),
+            indent=2,
+        )
+    )
 
 
 if __name__ == "__main__":

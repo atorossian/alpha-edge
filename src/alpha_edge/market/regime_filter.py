@@ -72,7 +72,7 @@ def update_regime_filter(
     min_prob_to_switch: float = 0.55,
     min_margin_to_switch: float = 0.10,
 ) -> RegimeFilterState:
-    same_day = (state.last_date == as_of)
+    same_day = state.last_date == as_of
 
     probs_sm = ema_probs(state.probs_smoothed, probs_raw, alpha=alpha)
 

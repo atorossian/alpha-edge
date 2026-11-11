@@ -10,10 +10,11 @@ import json
 
 from alpha_edge.core.schemas import Position, PortfolioSnapshot, PortfolioReport
 from alpha_edge.portfolio.optimizer_engine import evaluate_portfolio  # canonical evaluator
-from alpha_edge.market.stats_engine import compute_daily_returns   # to build asset returns
+from alpha_edge.market.stats_engine import compute_daily_returns  # to build asset returns
 from alpha_edge.portfolio.alpha_report import format_alpha_report
 
 # ---------- Core helpers ----------
+
 
 def extract_p_hit_map(metrics, goals: list[float]) -> dict[float, float]:
     g1, g2, g3 = [float(g) for g in goals]
@@ -27,6 +28,7 @@ def extract_p_hit_map(metrics, goals: list[float]) -> dict[float, float]:
 def extract_p_hit_main_goal(metrics, goals: list[float], main_goal: float) -> float:
     p_hit = extract_p_hit_map(metrics, goals)
     return float(p_hit.get(float(main_goal), 0.0))
+
 
 def health_from_raw(score_raw: float, *, k: float = 1.0) -> float:
     if score_raw is None or (not np.isfinite(float(score_raw))):
@@ -66,8 +68,7 @@ def compute_unlevered_stats(port_series: pd.Series) -> Dict[str, float]:
     sharpe = ann_return / ann_vol if ann_vol > 0 else np.nan
 
     downside_std = downside.std()
-    sortino = (ann_return / (downside_std * np.sqrt(252))
-               if downside_std > 0 else np.nan)
+    sortino = ann_return / (downside_std * np.sqrt(252)) if downside_std > 0 else np.nan
 
     cum = (1 + rets).cumprod()
     peak = cum.cummax()
@@ -173,15 +174,19 @@ def build_portfolio_report(
                 ticker=ticker,
                 quantity=float(pos.quantity),
                 price=float(px),
-                value=float(exp),          # signed
-                weight=float(w_signed),    # signed
-                weight_abs=float(w_abs),   # gross contribution
+                value=float(exp),  # signed
+                weight=float(w_signed),  # signed
+                weight_abs=float(w_abs),  # gross contribution
                 currency=pos.currency,
             )
         )
         weights[ticker] = float(w_signed)
 
-    report_as_of = pd.Timestamp(asset_returns.index[-1]) if asset_returns is not None and not asset_returns.empty else pd.Timestamp(closes.index[-1])
+    report_as_of = (
+        pd.Timestamp(asset_returns.index[-1])
+        if asset_returns is not None and not asset_returns.empty
+        else pd.Timestamp(closes.index[-1])
+    )
 
     snapshot = PortfolioSnapshot(
         as_of=report_as_of,
@@ -208,9 +213,9 @@ def build_portfolio_report(
     # --- canonical evaluation ---
     eval_metrics = evaluate_portfolio(
         returns=asset_returns_eval,
-        weights=weights,                    # SIGNED weights (gross-scaled)
+        weights=weights,  # SIGNED weights (gross-scaled)
         equity0=float(equity),
-        notional=float(gross_notional),     # GROSS notional
+        notional=float(gross_notional),  # GROSS notional
         goals=goals,
         main_goal=float(main_goal),
         lw_cov=lw_cov,
@@ -221,7 +226,7 @@ def build_portfolio_report(
         path_source=path_source,
         pca_k=pca_k,
         block_size=block_size,
-        weight_mode="gross_signed",         # NEW: tells evaluator how to interpret weights
+        weight_mode="gross_signed",  # NEW: tells evaluator how to interpret weights
     )
 
     return PortfolioReport(snapshot=snapshot, eval=eval_metrics)
@@ -253,18 +258,18 @@ Risk Metrics:
 - 1-day CVaR(95): {m.cvar_95:.2%}
 
 Path Stability (leveraged MC):
-- Stability Energy: {getattr(m, 'stability_energy', None) if getattr(m, 'stability_energy', None) is not None else 'N/A'}
-- Avg Path MDD: {getattr(m, 'path_mdd_mean', 0.0) if getattr(m, 'path_mdd_mean', None) is not None else 0.0:.2%}
-- CDaR@95: {getattr(m, 'cdar_95', 0.0) if getattr(m, 'cdar_95', None) is not None else 0.0:.2%}
-- P(MDD breach): {getattr(m, 'p_dd_breach', 0.0) if getattr(m, 'p_dd_breach', None) is not None else 0.0:.2%}
-- Underwater Time: {getattr(m, 'underwater_mean', 0.0) if getattr(m, 'underwater_mean', None) is not None else 0.0:.2%}
-- Avg TTR: {getattr(m, 'ttr_mean_days', None) if getattr(m, 'ttr_mean_days', None) is not None else 'N/A'} days
+- Stability Energy: {getattr(m, "stability_energy", None) if getattr(m, "stability_energy", None) is not None else "N/A"}
+- Avg Path MDD: {getattr(m, "path_mdd_mean", 0.0) if getattr(m, "path_mdd_mean", None) is not None else 0.0:.2%}
+- CDaR@95: {getattr(m, "cdar_95", 0.0) if getattr(m, "cdar_95", None) is not None else 0.0:.2%}
+- P(MDD breach): {getattr(m, "p_dd_breach", 0.0) if getattr(m, "p_dd_breach", None) is not None else 0.0:.2%}
+- Underwater Time: {getattr(m, "underwater_mean", 0.0) if getattr(m, "underwater_mean", None) is not None else 0.0:.2%}
+- Avg TTR: {getattr(m, "ttr_mean_days", None) if getattr(m, "ttr_mean_days", None) is not None else "N/A"} days
 
 Leveraged Monte Carlo (1 year):
 - Ruin Probability: {m.ruin_prob_1y:.2%}
-- P(>= {g1:.0f}): {m.p_hit_goal_1_1y:.2%} | Median time: {m.med_t_goal_1_days or 'N/A'} days
-- P(>= {g2:.0f}): {m.p_hit_goal_2_1y:.2%} | Median time: {m.med_t_goal_2_days or 'N/A'} days
-- P(>= {g3:.0f}): {m.p_hit_goal_3_1y:.2%} | Median time: {m.med_t_goal_3_days or 'N/A'} days
+- P(>= {g1:.0f}): {m.p_hit_goal_1_1y:.2%} | Median time: {m.med_t_goal_1_days or "N/A"} days
+- P(>= {g2:.0f}): {m.p_hit_goal_2_1y:.2%} | Median time: {m.med_t_goal_2_days or "N/A"} days
+- P(>= {g3:.0f}): {m.p_hit_goal_3_1y:.2%} | Median time: {m.med_t_goal_3_days or "N/A"} days
 
 Ending Equity Percentiles:
 - P5: {m.ending_equity_p5:,.2f} USD
@@ -276,8 +281,8 @@ Ending Equity Percentiles:
 Raw Optimizer Score: {m.score:.4f}
 """
 
-def print_hmm_summary(hmm_res: dict, lev_rec: dict | None = None) -> None:
 
+def print_hmm_summary(hmm_res: dict, lev_rec: dict | None = None) -> None:
     if hmm_res is None:
         print("\n[HMM] No regime data available.")
         return
@@ -287,7 +292,7 @@ def print_hmm_summary(hmm_res: dict, lev_rec: dict | None = None) -> None:
         "STRESS_BEAR": (1.0, 3.0),
         "CHOPPY_BEAR": (3.0, 5.0),
         "CHOPPY_BULL": (5.0, 7.0),
-        "CALM_BULL":   (7.0, 12.0),
+        "CALM_BULL": (7.0, 12.0),
     }
 
     def _clamp(x: float, lo: float, hi: float) -> float:
@@ -297,8 +302,8 @@ def print_hmm_summary(hmm_res: dict, lev_rec: dict | None = None) -> None:
         hmm_payload: dict,
         *,
         default: float = 1.0,
-        risk_appetite: float = 0.8,         # 0..1
-        low_conf_floor: float = 0.20,       # below this -> near min
+        risk_appetite: float = 0.8,  # 0..1
+        low_conf_floor: float = 0.20,  # below this -> near min
         hard_cap: float | None = 12.0,
     ) -> dict:
         p_label = hmm_payload.get("p_label_today") or {}
@@ -358,7 +363,7 @@ def print_hmm_summary(hmm_res: dict, lev_rec: dict | None = None) -> None:
     print(f"As of: {hmm_res['meta']['last_date_used']}\n")
 
     if commit:
-        print(f"▶ Active regime:  {commit}  (confidence: {p[commit]*100:.2f}%)")
+        print(f"▶ Active regime:  {commit}  (confidence: {p[commit] * 100:.2f}%)")
     else:
         print("▶ Active regime:  MIXED / NEUTRAL")
 
@@ -370,13 +375,13 @@ def print_hmm_summary(hmm_res: dict, lev_rec: dict | None = None) -> None:
     print(
         f"▶ Recommended leverage: {float(lev_rec['leverage']):.2f}x"
         f"{f'  (band: {band_str})' if band_str else ''}"
-        f"  [{lev_rec.get('mode','none')}, conf={float(lev_rec.get('conf',0.0))*100:.2f}%]\n"
+        f"  [{lev_rec.get('mode', 'none')}, conf={float(lev_rec.get('conf', 0.0)) * 100:.2f}%]\n"
     )
 
     print("Regime probabilities:")
     for lab, prob in sorted(p.items(), key=lambda x: -x[1]):
         bar = "█" * int(prob * 24)
-        print(f"  {lab:12s} {bar:<24s} {prob*100:6.2f}%")
+        print(f"  {lab:12s} {bar:<24s} {prob * 100:6.2f}%")
 
     print("\nState diagnostics:")
     print("┌──────────────┬──────────┬──────────┬────────────┬──────────┐")
@@ -387,10 +392,10 @@ def print_hmm_summary(hmm_res: dict, lev_rec: dict | None = None) -> None:
         d = diags[k]
         print(
             f"│ {lab:12s} │ "
-            f"{d['drift']*100:+6.3f}% │ "
-            f"{d['vol']*100:6.2f}% │ "
-            f"{d['neg_rate']*100:8.2f}% │ "
-            f"{d['weight']*100:6.2f}% │"
+            f"{d['drift'] * 100:+6.3f}% │ "
+            f"{d['vol'] * 100:6.2f}% │ "
+            f"{d['neg_rate'] * 100:8.2f}% │ "
+            f"{d['weight'] * 100:6.2f}% │"
         )
 
     print("└──────────────┴──────────┴──────────┴────────────┴──────────┘")
@@ -402,7 +407,7 @@ def print_decision_addendum(
     health,
     bench_ann_ret: float | None,
     reopt: bool,
-    plan=None,                 # RescalePlan | None
+    plan=None,  # RescalePlan | None
     top_n: int = 8,
     show_full_alpha_blob: bool = False,
     take_profit: dict | None = None,
@@ -453,7 +458,7 @@ def print_decision_addendum(
     reasons = getattr(decision, "reasons", None)
     if reasons:
         print(f"  reasons: {', '.join(reasons)}")
-        
+
     # --- TAKE PROFIT ---
     if take_profit is not None:
         print("\nTake Profit")
@@ -465,12 +470,7 @@ def print_decision_addendum(
         cooldown = take_profit.get("cooldown_days", None)
 
         print(f"▶ do_harvest: {do_tp}")
-        print(
-            f"  m_star={num(m_star, 3)}  "
-            f"r_anchor={pct(r_anchor)}  "
-            f"dd={pct(dd)}  "
-            f"sharpe={num(sharpe_tp, 2)}"
-        )
+        print(f"  m_star={num(m_star, 3)}  r_anchor={pct(r_anchor)}  dd={pct(dd)}  sharpe={num(sharpe_tp, 2)}")
         if cooldown is not None:
             print(f"  cooldown_days={cooldown}")
 
@@ -481,10 +481,7 @@ def print_decision_addendum(
     # --- HEALTH ---
     print("\nHealth")
     print(f"▶ should_reoptimize: {bool(reopt)}")
-    print(
-        f"  score={num(getattr(health, 'score', None), 4)}  "
-        f"sharpe={num(getattr(health, 'sharpe', None), 2)}"
-    )
+    print(f"  score={num(getattr(health, 'score', None), 4)}  sharpe={num(getattr(health, 'sharpe', None), 2)}")
     print(
         f"  ann_return={pct(getattr(health, 'ann_return', None))}  "
         f"ruin_prob_1y={pct(getattr(health, 'ruin_prob', None))}"
@@ -569,7 +566,15 @@ def print_decision_addendum(
                 df_view = d[view_cols].copy()
 
                 # coerce numeric safely
-                for c in ["price", "qty_current", "qty_target", "delta_qty", "exp_current", "exp_target_rounded", "delta_exp"]:
+                for c in [
+                    "price",
+                    "qty_current",
+                    "qty_target",
+                    "delta_qty",
+                    "exp_current",
+                    "exp_target_rounded",
+                    "delta_exp",
+                ]:
                     if c in df_view.columns:
                         df_view[c] = pd.to_numeric(df_view[c], errors="coerce")
 
@@ -580,10 +585,14 @@ def print_decision_addendum(
                     if c in df_view.columns:
                         df_view[c] = df_view[c].map(lambda x: "n/a" if not np.isfinite(x) else f"{x:,.2f}")
                 if "delta_exp" in df_view.columns:
-                    df_view["delta_exp"] = df_view["delta_exp"].map(lambda x: "n/a" if not np.isfinite(x) else f"{x:+,.2f}")
+                    df_view["delta_exp"] = df_view["delta_exp"].map(
+                        lambda x: "n/a" if not np.isfinite(x) else f"{x:+,.2f}"
+                    )
                 if "delta_qty" in df_view.columns:
                     # if you want crypto decimals preserved, change +.0f -> +.8f when is_crypto
-                    df_view["delta_qty"] = df_view["delta_qty"].map(lambda x: "n/a" if not np.isfinite(x) else f"{x:+.0f}")
+                    df_view["delta_qty"] = df_view["delta_qty"].map(
+                        lambda x: "n/a" if not np.isfinite(x) else f"{x:+.0f}"
+                    )
 
                 print("\nPosition adjustments:")
                 print(df_view.to_string(index=False))

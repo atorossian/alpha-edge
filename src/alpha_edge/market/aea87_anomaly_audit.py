@@ -3,6 +3,7 @@
 Run from src: poetry run python -m alpha_edge.market.aea87_anomaly_audit
 This command never calls any S3 write method.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -17,8 +18,13 @@ from alpha_edge.core.market_store import MarketStore
 from alpha_edge import paths
 
 
-def inspect_asset(prices: pd.DataFrame, returns: pd.DataFrame, asset_id: str,
-                  jump_threshold: float = 0.5, mismatch_tolerance: float = 1e-5):
+def inspect_asset(
+    prices: pd.DataFrame,
+    returns: pd.DataFrame,
+    asset_id: str,
+    jump_threshold: float = 0.5,
+    mismatch_tolerance: float = 1e-5,
+):
     if prices.empty:
         return pd.DataFrame(), pd.DataFrame()
     p = prices.copy()
@@ -47,36 +53,43 @@ def inspect_asset(prices: pd.DataFrame, returns: pd.DataFrame, asset_id: str,
     jump = p["recomputed_return"].abs().gt(jump_threshold)
     mismatch = p["discrepancy"].gt(mismatch_tolerance)
     flags = nonpositive | jump | mismatch | p["date"].isin(duplicate_dates)
-    d = p.loc[flags, ["date", "close_adjusted_usd", "previous_price",
-                       "recomputed_return", "stored_return", "discrepancy"]].copy()
+    d = p.loc[
+        flags, ["date", "close_adjusted_usd", "previous_price", "recomputed_return", "stored_return", "discrepancy"]
+    ].copy()
     d.insert(0, "asset_id", asset_id)
     d["flag"] = [
-        "|".join(x for x, yes in (
-            ("invalid_price", bool(nonpositive.loc[idx])),
-            ("large_return_review", bool(jump.loc[idx])),
-            ("return_mismatch", bool(mismatch.loc[idx])),
-            ("duplicate_price_date", bool(p.loc[idx, "date"] in duplicate_dates)),
-        ) if yes)
+        "|".join(
+            x
+            for x, yes in (
+                ("invalid_price", bool(nonpositive.loc[idx])),
+                ("large_return_review", bool(jump.loc[idx])),
+                ("return_mismatch", bool(mismatch.loc[idx])),
+                ("duplicate_price_date", bool(p.loc[idx, "date"] in duplicate_dates)),
+            )
+            if yes
+        )
         for idx in d.index
     ]
     # A threshold breach is a review candidate, NOT confirmed corruption.
     d["classification"] = "REVIEW_REQUIRED"
-    d["severity"] = np.maximum(d["recomputed_return"].abs().fillna(0),
-                                 d["discrepancy"].fillna(0))
+    d["severity"] = np.maximum(d["recomputed_return"].abs().fillna(0), d["discrepancy"].fillna(0))
     return d, p
 
 
 def plot_asset(frame: pd.DataFrame, anomalies: pd.DataFrame, dest: Path, window=30):
     import matplotlib
+
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
+
     frame = frame.sort_values("date")
     if frame.empty or anomalies.empty:
         return
     worst = anomalies.sort_values("severity", ascending=False).iloc[0]
     focal = worst["date"]
-    local = frame[(frame["date"] >= focal - pd.Timedelta(days=window)) &
-                  (frame["date"] <= focal + pd.Timedelta(days=window))]
+    local = frame[
+        (frame["date"] >= focal - pd.Timedelta(days=window)) & (frame["date"] <= focal + pd.Timedelta(days=window))
+    ]
     fig, axs = plt.subplots(3, 1, figsize=(12, 10))
     axs[0].plot(frame["date"], frame["close_adjusted_usd"], lw=0.8)
     axs[0].set_title("Full adjusted USD price history")
@@ -90,7 +103,7 @@ def plot_asset(frame: pd.DataFrame, anomalies: pd.DataFrame, dest: Path, window=
     axs[2].set_title("Simple daily returns (decimal)")
     fig.suptitle(str(worst["asset_id"]) + " | " + str(focal.date()))
     for ax in axs:
-        ax.grid(alpha=.2)
+        ax.grid(alpha=0.2)
     fig.tight_layout()
     fig.savefig(dest, dpi=140)
     plt.close(fig)
@@ -109,7 +122,7 @@ def run(args):
     if args.asset_ids:
         ids = [x.strip() for x in args.asset_ids.split(",") if x.strip()]
     if args.max_assets:
-        ids = ids[:args.max_assets]
+        ids = ids[: args.max_assets]
     print(f"[audit] {len(ids):,} assets; active S3 histories; READ ONLY", flush=True)
 
     def one(aid):
@@ -132,25 +145,40 @@ def run(args):
             except Exception as e:
                 errors.append({"asset_id": aid, "error": str(e)})
             if n % 50 == 0 or n == len(ids):
-                print(f"[audit] {n:,}/{len(ids):,} assets, flagged={len(chart_choices)}, errors={len(errors)}", flush=True)
-    columns = ["asset_id", "date", "previous_price", "close_adjusted_usd",
-               "recomputed_return", "stored_return", "discrepancy", "flag",
-               "classification", "severity"]
-    anomalies = (pd.concat(findings, ignore_index=True) if findings
-                 else pd.DataFrame(columns=columns))
+                print(
+                    f"[audit] {n:,}/{len(ids):,} assets, flagged={len(chart_choices)}, errors={len(errors)}", flush=True
+                )
+    columns = [
+        "asset_id",
+        "date",
+        "previous_price",
+        "close_adjusted_usd",
+        "recomputed_return",
+        "stored_return",
+        "discrepancy",
+        "flag",
+        "classification",
+        "severity",
+    ]
+    anomalies = pd.concat(findings, ignore_index=True) if findings else pd.DataFrame(columns=columns)
     anomalies = anomalies.sort_values("severity", ascending=False)
     anomalies.to_csv(output / "anomalies.csv", index=False)
     pd.DataFrame(errors, columns=["asset_id", "error"]).to_csv(output / "read_errors.csv", index=False)
     chart_dir = output / "plots"
     chart_dir.mkdir(exist_ok=True)
-    selected = sorted(chart_choices, key=lambda x: x[0], reverse=True)[:args.plots]
+    selected = sorted(chart_choices, key=lambda x: x[0], reverse=True)[: args.plots]
     for i, (_, aid, frame, flagged) in enumerate(selected, 1):
         filename = f"{i:02d}_{''.join(c if c.isalnum() else '_' for c in aid)}.png"
         plot_asset(frame, flagged, chart_dir / filename, args.window)
-    summary = {"assets_attempted": len(ids), "assets_flagged": len(chart_choices),
-               "flagged_observations": len(anomalies), "read_errors": len(errors),
-               "plots": len(selected), "output_dir": str(output),
-               "classification_note": "Review candidates only; no automatic repairs or confirmed-corruption assertions"}
+    summary = {
+        "assets_attempted": len(ids),
+        "assets_flagged": len(chart_choices),
+        "flagged_observations": len(anomalies),
+        "read_errors": len(errors),
+        "plots": len(selected),
+        "output_dir": str(output),
+        "classification_note": "Review candidates only; no automatic repairs or confirmed-corruption assertions",
+    }
     (output / "summary.json").write_text(json.dumps(summary, indent=2))
     print(json.dumps(summary, indent=2), flush=True)
     if errors:

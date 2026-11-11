@@ -158,9 +158,7 @@ def normalize_regime_history(regime_history: pd.DataFrame) -> pd.DataFrame:
         elif "label_commit" in df.columns:
             df["regime"] = df["label_commit"]
         else:
-            raise RuntimeError(
-                "regime_history must contain one of: regime, label_or_mixed, label, label_commit."
-            )
+            raise RuntimeError("regime_history must contain one of: regime, label_or_mixed, label, label_commit.")
 
     out = df[["date", "regime"]].copy()
     out["date"] = pd.to_datetime(out["date"], errors="coerce")
@@ -168,11 +166,7 @@ def normalize_regime_history(regime_history: pd.DataFrame) -> pd.DataFrame:
     out["date"] = out["date"].dt.tz_localize(None).dt.normalize()
     out["regime"] = out["regime"].map(_clean_regime_label)
 
-    out = (
-        out.sort_values("date")
-        .drop_duplicates(subset=["date"], keep="last")
-        .reset_index(drop=True)
-    )
+    out = out.sort_values("date").drop_duplicates(subset=["date"], keep="last").reset_index(drop=True)
 
     return out
 
@@ -322,9 +316,7 @@ def compute_asset_regime_preferences(
         max_score = float(valid["raw_score"].max())
 
         if np.isfinite(max_score - min_score) and (max_score - min_score) > 1e-12:
-            valid["preference_score"] = (
-                (valid["raw_score"] - min_score) / (max_score - min_score)
-            )
+            valid["preference_score"] = (valid["raw_score"] - min_score) / (max_score - min_score)
         else:
             valid["preference_score"] = 0.5
 
@@ -369,9 +361,7 @@ def compute_asset_regime_preferences(
             downside_vol=None if pd.isna(val("downside_vol")) else float(val("downside_vol")),
             max_drawdown=None if pd.isna(val("max_drawdown")) else float(val("max_drawdown")),
             sharpe_like=None if pd.isna(val("sharpe_like")) else float(val("sharpe_like")),
-            preference_score=(
-                None if pd.isna(val("preference_score")) else float(val("preference_score"))
-            ),
+            preference_score=(None if pd.isna(val("preference_score")) else float(val("preference_score"))),
             rank=None if pd.isna(val("rank")) else int(val("rank")),
             bucket="UNKNOWN" if pd.isna(val("bucket")) else str(val("bucket")),
             diagnostics={
@@ -491,9 +481,7 @@ def assess_portfolio_regime_fit(
             }
         )
 
-    weighted_preference_score = (
-        None if weighted_score_den <= 1e-12 else float(weighted_score_num / weighted_score_den)
-    )
+    weighted_preference_score = None if weighted_score_den <= 1e-12 else float(weighted_score_num / weighted_score_den)
 
     covered_asset_count = int(
         sum(
@@ -521,9 +509,7 @@ def assess_portfolio_regime_fit(
         diagnostics={
             "assets": asset_rows,
             "gross_weight": gross,
-            "coverage_ratio": (
-                float(covered_asset_count / len(cleaned_weights)) if cleaned_weights else 0.0
-            ),
+            "coverage_ratio": (float(covered_asset_count / len(cleaned_weights)) if cleaned_weights else 0.0),
         },
     )
 
@@ -545,15 +531,9 @@ def regime_fit_advantage(
         "current": asdict(current_fit),
         "candidate": asdict(candidate_fit),
         "preference_score_advantage": score_advantage,
-        "strong_asset_weight_advantage": float(
-            candidate_fit.strong_asset_weight - current_fit.strong_asset_weight
-        ),
-        "weak_asset_weight_reduction": float(
-            current_fit.weak_asset_weight - candidate_fit.weak_asset_weight
-        ),
-        "unknown_asset_weight_change": float(
-            candidate_fit.unknown_asset_weight - current_fit.unknown_asset_weight
-        ),
+        "strong_asset_weight_advantage": float(candidate_fit.strong_asset_weight - current_fit.strong_asset_weight),
+        "weak_asset_weight_reduction": float(current_fit.weak_asset_weight - candidate_fit.weak_asset_weight),
+        "unknown_asset_weight_change": float(candidate_fit.unknown_asset_weight - current_fit.unknown_asset_weight),
     }
 
 
@@ -627,10 +607,14 @@ def build_portfolio_regime_fit_comparison(
         "comparison": comparison,
         "top_preferred_assets": top_preferences[
             ["asset_id", "preference_score", "rank", "bucket", "ann_return", "ann_vol", "obs"]
-        ].to_dict(orient="records") if not top_preferences.empty else [],
+        ].to_dict(orient="records")
+        if not top_preferences.empty
+        else [],
         "bottom_preferred_assets": bottom_preferences[
             ["asset_id", "preference_score", "rank", "bucket", "ann_return", "ann_vol", "obs"]
-        ].to_dict(orient="records") if not bottom_preferences.empty else [],
+        ].to_dict(orient="records")
+        if not bottom_preferences.empty
+        else [],
         "config": asdict(cfg),
     }
 
@@ -639,7 +623,11 @@ def preferences_to_frame(preferences: dict[str, RegimeAssetPreference]) -> pd.Da
     if not preferences:
         return pd.DataFrame()
 
-    return pd.DataFrame([asdict(v) for v in preferences.values()]).sort_values(
-        ["rank", "asset_id"],
-        na_position="last",
-    ).reset_index(drop=True)
+    return (
+        pd.DataFrame([asdict(v) for v in preferences.values()])
+        .sort_values(
+            ["rank", "asset_id"],
+            na_position="last",
+        )
+        .reset_index(drop=True)
+    )

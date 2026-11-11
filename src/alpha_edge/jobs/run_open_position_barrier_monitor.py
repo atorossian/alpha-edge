@@ -98,8 +98,7 @@ def _load_positions_snapshot(
             return payload, latest_key
 
     raise RuntimeError(
-        "Missing positions snapshot. Run rebuild_ledger.py first. "
-        f"Expected s3://{cfg.bucket}/{dated_key}"
+        f"Missing positions snapshot. Run rebuild_ledger.py first. Expected s3://{cfg.bucket}/{dated_key}"
     )
 
 
@@ -188,10 +187,7 @@ def _load_open_lot_trace(
         if payload:
             return payload, latest_key
 
-    raise RuntimeError(
-        "Missing open lot trace. Run rebuild_ledger.py first. "
-        f"Expected s3://{cfg.bucket}/{dated_key}"
-    )
+    raise RuntimeError(f"Missing open lot trace. Run rebuild_ledger.py first. Expected s3://{cfg.bucket}/{dated_key}")
 
 
 def _load_trade_contracts_for_lots(
@@ -324,7 +320,9 @@ def _dated_barrier_state_key(cfg: RuntimeConfig, as_of: str) -> str:
     return runtime_dt_key(cfg, BARRIER_TABLE, as_of, "state.json")
 
 
-def _load_previous_barrier_state(*, s3, cfg: RuntimeConfig, disable_state: bool) -> tuple[dict[str, Any], Optional[str]]:
+def _load_previous_barrier_state(
+    *, s3, cfg: RuntimeConfig, disable_state: bool
+) -> tuple[dict[str, Any], Optional[str]]:
     if disable_state:
         return {}, None
     key = _latest_barrier_state_key(cfg)
@@ -382,11 +380,31 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--as-of", default=None, help="Market date YYYY-MM-DD. Default: today UTC.")
     p.add_argument("--write", action="store_true", help="Persist barrier monitor outputs to S3.")
     p.add_argument("--confirm-prod-write", action="store_true")
-    p.add_argument("--dry-run", action="store_true", help="Do not persist outputs. Equivalent to omitting --write, but still writes dry-run audit/log markers.")
-    p.add_argument("--no-latest-ledger-fallback", action="store_true", help="Require dated open_lot_trace and positions snapshot for --as-of.")
-    p.add_argument("--disable-position-snapshot-filter", action="store_true", help="Do not filter open_lot_trace lots against ledger positions/latest.json. Intended only for debugging stale lot traces.")
-    p.add_argument("--disable-indicators", action="store_true", help="Skip latest_indicators snapshot; Chandelier may degrade without ATR.")
-    p.add_argument("--disable-state", action="store_true", help="Do not read previous barrier state; useful for deterministic first-run validation.")
+    p.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Do not persist outputs. Equivalent to omitting --write, but still writes dry-run audit/log markers.",
+    )
+    p.add_argument(
+        "--no-latest-ledger-fallback",
+        action="store_true",
+        help="Require dated open_lot_trace and positions snapshot for --as-of.",
+    )
+    p.add_argument(
+        "--disable-position-snapshot-filter",
+        action="store_true",
+        help="Do not filter open_lot_trace lots against ledger positions/latest.json. Intended only for debugging stale lot traces.",
+    )
+    p.add_argument(
+        "--disable-indicators",
+        action="store_true",
+        help="Skip latest_indicators snapshot; Chandelier may degrade without ATR.",
+    )
+    p.add_argument(
+        "--disable-state",
+        action="store_true",
+        help="Do not read previous barrier state; useful for deterministic first-run validation.",
+    )
 
     p.add_argument("--default-stop-loss-pct", type=float, default=0.08)
     p.add_argument("--default-target-profit-pct", type=float, default=0.15)
@@ -407,15 +425,25 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--confirmed-break-breach-count", type=int, default=2)
     p.add_argument("--emergency-gap-atr-multiplier", type=float, default=1.0)
     p.add_argument("--emergency-gap-pct", type=float, default=0.03)
-    p.add_argument("--asset-class-overrides-json", default=None, help="JSON object of asset bucket overrides, e.g. {\"crypto\":{\"stop_buffer_pct\":0.01}}")
+    p.add_argument(
+        "--asset-class-overrides-json",
+        default=None,
+        help='JSON object of asset bucket overrides, e.g. {"crypto":{"stop_buffer_pct":0.01}}',
+    )
 
-    p.add_argument("--disable-conservative-advisory-mode", action="store_true", help="Allow v2-style aggressive EXIT actions. Default v1 behavior is conservative.")
+    p.add_argument(
+        "--disable-conservative-advisory-mode",
+        action="store_true",
+        help="Allow v2-style aggressive EXIT actions. Default v1 behavior is conservative.",
+    )
     p.add_argument("--time-exit-action", default="WATCH", choices=["HOLD", "WATCH", "REDUCE", "EXIT", "DATA_ISSUE"])
     p.add_argument("--time-exit-exit-fraction", type=float, default=0.0)
     p.add_argument("--severe-breach-pct", type=float, default=0.05)
     p.add_argument("--severe-breach-atr-multiplier", type=float, default=2.0)
     p.add_argument("--confirmed-break-exit-fraction", type=float, default=0.50)
-    p.add_argument("--confirmed-break-small-action", default="REDUCE", choices=["HOLD", "WATCH", "REDUCE", "EXIT", "DATA_ISSUE"])
+    p.add_argument(
+        "--confirmed-break-small-action", default="REDUCE", choices=["HOLD", "WATCH", "REDUCE", "EXIT", "DATA_ISSUE"]
+    )
     p.add_argument("--confirmed-break-small-exit-fraction", type=float, default=0.25)
     p.add_argument("--gap-through-stop-exit-fraction", type=float, default=1.0)
 
@@ -435,7 +463,11 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
     cfg = load_runtime_config(args.env)
-    as_of = pd.Timestamp(args.as_of).date().strftime("%Y-%m-%d") if args.as_of else pd.Timestamp.utcnow().date().strftime("%Y-%m-%d")
+    as_of = (
+        pd.Timestamp(args.as_of).date().strftime("%Y-%m-%d")
+        if args.as_of
+        else pd.Timestamp.utcnow().date().strftime("%Y-%m-%d")
+    )
     should_write = bool(args.write) and not bool(args.dry_run)
 
     if should_write:
@@ -532,7 +564,11 @@ def main() -> None:
 
         lots_df = pd.DataFrame(payload["lot_results"])
         positions_df = pd.DataFrame(payload["position_results"])
-        actions_df = positions_df[positions_df["recommended_action"].isin(["EXIT", "REDUCE", "WATCH", "DATA_ISSUE"])].copy() if not positions_df.empty else pd.DataFrame()
+        actions_df = (
+            positions_df[positions_df["recommended_action"].isin(["EXIT", "REDUCE", "WATCH", "DATA_ISSUE"])].copy()
+            if not positions_df.empty
+            else pd.DataFrame()
+        )
 
         print("\n=== OPEN POSITION BARRIER MONITOR ===")
         print(f"open_lots:       {result.summary['open_lots']}")

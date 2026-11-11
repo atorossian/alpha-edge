@@ -13,7 +13,7 @@ def compute_stability_report(
 ) -> StabilityReport:
     E = np.asarray(equity_paths, dtype=np.float64)
     if E.ndim != 2 or E.shape[1] != (n_days + 1):
-        raise ValueError(f"equity_paths must have shape (n_paths, {n_days+1})")
+        raise ValueError(f"equity_paths must have shape (n_paths, {n_days + 1})")
 
     # running peaks
     peaks = np.maximum.accumulate(E, axis=1)

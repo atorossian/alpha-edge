@@ -1,4 +1,5 @@
 """AEA-87 return-break and derived-price regression tests."""
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -12,14 +13,12 @@ def test_gap_in_middle_breaks_first_retained_observation():
 
 
 def test_contiguous_gap_breaks_only_first_retained_observation():
-    source = ["2026-08-24", "2026-08-25", "2026-08-26",
-              "2026-08-27", "2026-08-28", "2026-08-31"]
+    source = ["2026-08-24", "2026-08-25", "2026-08-26", "2026-08-27", "2026-08-28", "2026-08-31"]
     assert expected_return_break_dates(source, source[1:5]) == ["2026-08-31"]
 
 
 def test_trailing_quarantine_needs_no_return_break():
-    source = ["2026-08-24", "2026-08-25", "2026-08-26",
-              "2026-08-27", "2026-08-28"]
+    source = ["2026-08-24", "2026-08-25", "2026-08-26", "2026-08-27", "2026-08-28"]
     assert expected_return_break_dates(source, source[1:]) == []
 
 

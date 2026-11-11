@@ -6,12 +6,12 @@ import numpy as np
 import pandas as pd
 
 from alpha_edge.core.schemas import (
-    EvalMetrics, 
-    Goals3, 
-    PortfolioEvaluationResult, 
-    ScoreConfig, 
-    StabilityEnergyConfig, 
-    StabilityReport
+    EvalMetrics,
+    Goals3,
+    PortfolioEvaluationResult,
+    ScoreConfig,
+    StabilityEnergyConfig,
+    StabilityReport,
 )
 from alpha_edge.portfolio.stability_energy import compute_stability_report
 from alpha_edge.market.mc_engine import simulate_leveraged_paths_vectorized
@@ -50,7 +50,7 @@ def _fft_band_powers_from_returns(
     X = np.fft.rfft(x)
     freqs = np.fft.rfftfreq(n, d=1.0)
 
-    P = (X.real * X.real + X.imag * X.imag)
+    P = X.real * X.real + X.imag * X.imag
 
     freqs = freqs[1:]
     P = P[1:]
@@ -106,6 +106,7 @@ def _spectral_profiles_df(
             df[c] = 0.0
     return df
 
+
 def score_breakdown(p_hit_main: float, ruin: float, penalties: dict, cfg: ScoreConfig | None = None) -> dict:
     if cfg is None:
         cfg = ScoreConfig()
@@ -121,7 +122,8 @@ def score_breakdown(p_hit_main: float, ruin: float, penalties: dict, cfg: ScoreC
         "hf_ratio": -cfg.lambda_hf_ratio * float(penalties.get("hf_ratio", 0.0)),
         "freq_overlap": -cfg.lambda_freq_overlap * float(penalties.get("freq_overlap", 0.0)),
         "spec_entropy": -cfg.lambda_spec_entropy * float(penalties.get("spec_entropy", 0.0)),
-        "stability_energy": -getattr(cfg, "lambda_stability_energy", 0.0) * float(penalties.get("stability_energy", 0.0)),
+        "stability_energy": -getattr(cfg, "lambda_stability_energy", 0.0)
+        * float(penalties.get("stability_energy", 0.0)),
         "path_mdd_mean": -getattr(cfg, "lambda_path_mdd_mean", 0.0) * float(penalties.get("path_mdd_mean", 0.0)),
         "cdar_95": -getattr(cfg, "lambda_cdar_95", 0.0) * float(penalties.get("cdar_95", 0.0)),
         "p_dd_breach": -getattr(cfg, "lambda_p_dd_breach", 0.0) * float(penalties.get("p_dd_breach", 0.0)),
@@ -130,6 +132,7 @@ def score_breakdown(p_hit_main: float, ruin: float, penalties: dict, cfg: ScoreC
     }
     terms["score"] = float(sum(terms.values()))
     return terms
+
 
 def _frequency_overlap_penalty(w: np.ndarray, V: np.ndarray) -> float:
     if V.shape[0] < 2:
@@ -334,6 +337,7 @@ def _normalize_weights_gross(weights: Dict[str, float], tickers: Sequence[str]) 
 # NEW: array-based evaluator used by GA workers to avoid duplicating returns_wide
 # ---------------------------------------------------------------------------
 
+
 def evaluate_portfolio_from_arrays(
     *,
     rets_assets: np.ndarray,
@@ -349,9 +353,8 @@ def evaluate_portfolio_from_arrays(
     days: int = 252,
     n_paths: int = 5000,
     block_size: int | tuple[int, int] | None = (8, 12),
-    weight_mode: str = "long_only"
+    weight_mode: str = "long_only",
 ) -> EvalMetrics:
-
     k = len(tickers)
     if k == 0:
         raise ValueError("Empty tickers for candidate")
@@ -485,17 +488,14 @@ def evaluate_portfolio_from_arrays(
         weights=dict(weights),
         goals=(g1, g2, g3),
         main_goal=float(main_goal),
-
         ann_return=float(ann_return),
         ann_vol=float(ann_vol),
         ann_vol_lw=float(ann_vol_lw),
         sharpe=float(sharpe),
         sortino=float(sortino),
         max_drawdown=float(max_dd),
-
         var_95=float(var_95),
         cvar_95=float(cvar_95),
-
         ruin_prob_1y=float(ruin),
         p_hit_goal_1_1y=float(mc["p_hit"].get(g1, 0.0)),
         p_hit_goal_2_1y=float(mc["p_hit"].get(g2, 0.0)),
@@ -503,15 +503,12 @@ def evaluate_portfolio_from_arrays(
         med_t_goal_1_days=mc["goal_stats"][g1]["median_time_days"],
         med_t_goal_2_days=mc["goal_stats"][g2]["median_time_days"],
         med_t_goal_3_days=mc["goal_stats"][g3]["median_time_days"],
-
         ending_equity_p5=float(mc["end_p5"]),
         ending_equity_p25=float(mc["end_p25"]),
         ending_equity_p50=float(mc["end_p50"]),
         ending_equity_p75=float(mc["end_p75"]),
         ending_equity_p95=float(mc["end_p95"]),
-
         score=float(score),
-
         stability_energy=stability_metrics["stability_energy"],
         path_mdd_mean=stability_metrics["path_mdd_mean"],
         cdar_95=stability_metrics["cdar_95"],
@@ -524,6 +521,7 @@ def evaluate_portfolio_from_arrays(
 # ---------------------------------------------------------------------------
 # Existing API
 # ---------------------------------------------------------------------------
+
 
 def compute_stability_for_candidate(
     *,
@@ -660,9 +658,8 @@ def evaluate_portfolio(
     path_source: str = "bootstrap",
     pca_k: int = 5,
     spec_df_full: pd.DataFrame | None = None,
-    weight_mode: str = "long_only",   # <<<<<< DEFAULT CHANGED
+    weight_mode: str = "long_only",  # <<<<<< DEFAULT CHANGED
 ) -> EvalMetrics:
-
     goals = tuple(float(g) for g in goals)
     if len(goals) != 3:
         raise ValueError("For now, exactly 3 goals are required.")
@@ -808,18 +805,14 @@ def evaluate_portfolio(
         weights=dict(weights),
         goals=goals,
         main_goal=main_goal,
-
         ann_return=ann_return,
         ann_vol=ann_vol,
         sharpe=sharpe,
         sortino=sortino,
         max_drawdown=max_dd,
-
         ann_vol_lw=ann_vol_lw,
-
         var_95=var_95,
         cvar_95=cvar_95,
-
         ruin_prob_1y=ruin,
         p_hit_goal_1_1y=float(mc["p_hit"].get(g1, 0.0)),
         p_hit_goal_2_1y=float(mc["p_hit"].get(g2, 0.0)),
@@ -827,15 +820,12 @@ def evaluate_portfolio(
         med_t_goal_1_days=mc["goal_stats"][g1]["median_time_days"],
         med_t_goal_2_days=mc["goal_stats"][g2]["median_time_days"],
         med_t_goal_3_days=mc["goal_stats"][g3]["median_time_days"],
-
         ending_equity_p5=float(mc["end_p5"]),
         ending_equity_p25=float(mc["end_p25"]),
         ending_equity_p50=float(mc["end_p50"]),
         ending_equity_p75=float(mc["end_p75"]),
         ending_equity_p95=float(mc["end_p95"]),
-
         score=float(score),
-
         stability_energy=stability_metrics["stability_energy"],
         path_mdd_mean=stability_metrics["path_mdd_mean"],
         cdar_95=stability_metrics["cdar_95"],
@@ -845,6 +835,7 @@ def evaluate_portfolio(
     )
 
     return metrics
+
 
 def evaluate_portfolio_with_paths(
     returns: pd.DataFrame,

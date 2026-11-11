@@ -22,12 +22,7 @@ def weight_turnover(
     target: dict[str, float],
 ) -> float:
     keys = set(current.keys()) | set(target.keys())
-    return float(
-        0.5 * sum(
-            abs(float(target.get(k, 0.0)) - float(current.get(k, 0.0)))
-            for k in keys
-        )
-    )
+    return float(0.5 * sum(abs(float(target.get(k, 0.0)) - float(current.get(k, 0.0))) for k in keys))
 
 
 def delta_weights(
@@ -127,8 +122,7 @@ def run_local_transition_optimizer(
             as_of=str(as_of),
             recommendation="HOLD",
             reason=(
-                f"Best local candidate turnover {turnover:.2%} exceeds "
-                f"max_turnover {float(cfg.max_turnover):.2%}."
+                f"Best local candidate turnover {turnover:.2%} exceeds max_turnover {float(cfg.max_turnover):.2%}."
             ),
             current_weights={k: float(v) for k, v in current_metrics.weights.items()},
             current_score=float(current_metrics.score),
@@ -161,10 +155,7 @@ def run_local_transition_optimizer(
     return LocalTransitionOptimizerResult(
         as_of=str(as_of),
         recommendation="LOCAL_REBALANCE_RECOMMENDED",
-        reason=(
-            f"Existing annealing improved score by {score_improvement:.4f} "
-            f"with turnover {turnover:.2%}."
-        ),
+        reason=(f"Existing annealing improved score by {score_improvement:.4f} with turnover {turnover:.2%}."),
         current_weights={k: float(v) for k, v in current_metrics.weights.items()},
         current_score=float(current_metrics.score),
         current_health_score=None,

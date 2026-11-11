@@ -3,9 +3,9 @@
 Refresh affected assets in the four price snapshots and latest returns, then
 rebuild the historical returns-wide cache. All prior snapshot bytes are backed up.
 """
+
 import io
 import json
-import hashlib
 import numpy as np
 
 import pandas as pd
@@ -27,15 +27,15 @@ def _frame(data):
 
 
 def _last_for_asset(s3, bucket, ops, asset_id, table):
-    matches = [x for x in ops if x["asset_id"] == asset_id
-               and x["staged_key"] and ("/" + table + "/") in x["manifest_key"]]
+    matches = [
+        x for x in ops if x["asset_id"] == asset_id and x["staged_key"] and ("/" + table + "/") in x["manifest_key"]
+    ]
     if not matches:
         return None
     # Each asset/year has a verified staged replacement. Only the newest
     # partition can contain its latest observation, so avoid rereading 30+
     # years of history for each snapshot.
-    latest = max(matches, key=lambda op: int(
-        op["manifest_key"].split("/year=")[-1].split("/")[0]))
+    latest = max(matches, key=lambda op: int(op["manifest_key"].split("/year=")[-1].split("/")[0]))
     part = fetch(s3, bucket, latest["part_key"])
     if checksum(part) != latest["staged_sha"]:
         raise ValueError("Published partition content mismatch: " + latest["part_key"])
@@ -78,15 +78,16 @@ def refresh_repaired_returns_cache(s3, bucket, root, ops, asset_ids):
     original_cols = set(wide.columns.astype(str))
     refreshed, excluded = {}, []
     for aid in asset_ids:
-        relevant = [op for op in ops if op["asset_id"] == aid and
-                    "/returns_usd/" in op["manifest_key"] and op.get("part_key")]
+        relevant = [
+            op for op in ops if op["asset_id"] == aid and "/returns_usd/" in op["manifest_key"] and op.get("part_key")
+        ]
         if not relevant:
-            raise RuntimeError("Missing freshly published return partitions: "+aid)
+            raise RuntimeError("Missing freshly published return partitions: " + aid)
         rows = []
         for op in relevant:
             raw = fetch(s3, bucket, op["part_key"])
             if checksum(raw) != op["staged_sha"]:
-                raise RuntimeError("Repaired return partition changed: "+op["part_key"])
+                raise RuntimeError("Repaired return partition changed: " + op["part_key"])
             rows.append(_frame(raw))
         frame = pd.concat(rows, ignore_index=True)
         if frame["asset_id"].astype(str).ne(aid).any():
@@ -101,11 +102,12 @@ def refresh_repaired_returns_cache(s3, bucket, root, ops, asset_ids):
             simple = pd.to_numeric(frame["ret_close_adjusted_usd"], errors="coerce")
             values = pd.Series(simple.to_numpy(), index=dates.dt.tz_convert(None).dt.normalize())
         if (values.dropna() < -1).any() or not np.isfinite(values.dropna()).all():
-            raise ValueError("Invalid repaired simple returns: "+aid)
+            raise ValueError("Invalid repaired simple returns: " + aid)
         values = values.dropna().sort_index()
         # Respect the existing cache's five-year/1260-obs eligibility policy.
-        eligible = (len(values) >= 1260 and not values.empty and
-                    (values.index.max() - values.index.min()).days >= 5*365)
+        eligible = (
+            len(values) >= 1260 and not values.empty and (values.index.max() - values.index.min()).days >= 5 * 365
+        )
         if eligible:
             refreshed[aid] = values
         else:
@@ -123,21 +125,30 @@ def refresh_repaired_returns_cache(s3, bucket, root, ops, asset_ids):
         raise RuntimeError("Refresh would leave canonical cache empty")
     old_meta = fetch(s3, bucket, meta_key)
     meta = json.loads(old_meta) if old_meta else {}
-    meta.update({"n_days": int(len(wide)), "n_assets": int(len(wide.columns)),
-                 "first_date": str(wide.index.min().date()),
-                 "last_date": str(wide.index.max().date()),
-                 "as_of_utc": pd.Timestamp.utcnow().isoformat(),
-                 "aea87_incremental_repaired_full_history": {
-                     "run_root": root, "repaired_assets": sorted(refreshed),
-                     "excluded_below_5y": sorted(excluded),
-                     "unchanged_assets_not_revalidated": True}})
+    meta.update(
+        {
+            "n_days": int(len(wide)),
+            "n_assets": int(len(wide.columns)),
+            "first_date": str(wide.index.min().date()),
+            "last_date": str(wide.index.max().date()),
+            "as_of_utc": pd.Timestamp.utcnow().isoformat(),
+            "aea87_incremental_repaired_full_history": {
+                "run_root": root,
+                "repaired_assets": sorted(refreshed),
+                "excluded_below_5y": sorted(excluded),
+                "unchanged_assets_not_revalidated": True,
+            },
+        }
+    )
     out = io.BytesIO()
     wide.sort_index().to_parquet(out, index=True)
-    s3.put_object(Bucket=bucket, Key=cache_key, Body=out.getvalue(),
-                  ContentType="application/octet-stream")
-    s3.put_object(Bucket=bucket, Key=meta_key,
-                  Body=json.dumps(meta, indent=2, default=str).encode(),
-                  ContentType="application/json")
+    s3.put_object(Bucket=bucket, Key=cache_key, Body=out.getvalue(), ContentType="application/octet-stream")
+    s3.put_object(
+        Bucket=bucket,
+        Key=meta_key,
+        Body=json.dumps(meta, indent=2, default=str).encode(),
+        ContentType="application/json",
+    )
     # Prove that repaired values (including NaNs) actually landed.
     observed = _frame(fetch(s3, bucket, cache_key))
     if "date" in observed.columns:
@@ -145,16 +156,20 @@ def refresh_repaired_returns_cache(s3, bucket, root, ops, asset_ids):
     observed.index = pd.to_datetime(observed.index, utc=True).tz_convert(None).normalize()
     for aid, source in refreshed.items():
         if aid not in observed:
-            raise RuntimeError("Repaired asset missing from published cache: "+aid)
+            raise RuntimeError("Repaired asset missing from published cache: " + aid)
         actual = observed[aid].reindex(source.index)
-        if not np.allclose(actual.to_numpy(dtype=float), source.to_numpy(dtype=float),
-                           rtol=1e-6, atol=1e-7, equal_nan=True):
-            raise RuntimeError("Repaired returns-wide values differ from source: "+aid)
+        if not np.allclose(
+            actual.to_numpy(dtype=float), source.to_numpy(dtype=float), rtol=1e-6, atol=1e-7, equal_nan=True
+        ):
+            raise RuntimeError("Repaired returns-wide values differ from source: " + aid)
     for aid in excluded:
         if aid in observed:
-            raise RuntimeError("Stale short-history asset remained in returns-wide cache: "+aid)
-    return {"refreshed":len(refreshed), "excluded_below_5y":excluded,
-            "unchanged_columns":len(original_cols-set(asset_ids))}
+            raise RuntimeError("Stale short-history asset remained in returns-wide cache: " + aid)
+    return {
+        "refreshed": len(refreshed),
+        "excluded_below_5y": excluded,
+        "unchanged_columns": len(original_cols - set(asset_ids)),
+    }
 
 
 def finalize(s3, bucket, root, publication):
@@ -178,8 +193,13 @@ def finalize(s3, bucket, root, publication):
         original = _frame(old)
         if not original.empty and "asset_id" not in original:
             raise ValueError("Snapshot has no asset_id: " + name)
-        retained = original.loc[~original["asset_id"].astype(str).isin(candidates)].copy() if not original.empty else original.copy()
+        retained = (
+            original.loc[~original["asset_id"].astype(str).isin(candidates)].copy()
+            if not original.empty
+            else original.copy()
+        )
         from concurrent.futures import ThreadPoolExecutor
+
         with ThreadPoolExecutor(max_workers=16) as pool:
             rows = pool.map(lambda aid: _last_for_asset(s3, bucket, ops, aid, table), publication["candidates"])
             updated = [row for row in rows if row is not None]
@@ -239,11 +259,9 @@ def finalize(s3, bucket, root, publication):
         blob = fetch(s3, bucket, root + "/prepared_snapshots/" + name + ".parquet")
         if blob is None:
             raise RuntimeError("Prepared snapshot missing: " + name)
-        s3.put_object(Bucket=bucket, Key=key, Body=blob,
-                      ContentType="application/octet-stream")
+        s3.put_object(Bucket=bucket, Key=key, Body=blob, ContentType="application/octet-stream")
         if checksum(fetch(s3, bucket, key)) != checksum(blob):
             raise RuntimeError("Snapshot publication failed: " + key)
     history = entries(s3, bucket, root)
     write_event(s3, bucket, root, history[-1]["step"] + 1, "FINALIZED")
-    return {"status": "FINALIZED", "snapshots": len(SNAPSHOTS),
-            "assets": len(candidates), "cache_rebuilt": True}
+    return {"status": "FINALIZED", "snapshots": len(SNAPSHOTS), "assets": len(candidates), "cache_rebuilt": True}

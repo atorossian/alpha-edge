@@ -282,9 +282,9 @@ def compute_market_indicators_for_asset(
         out["bb_upper_20"] = bb_mid + 2.0 * bb_std
         out["bb_lower_20"] = bb_mid - 2.0 * bb_std
         out["bb_width_20"] = (out["bb_upper_20"] - out["bb_lower_20"]) / bb_mid.replace(0.0, np.nan)
-        out["bb_pct_b_20"] = (close - out["bb_lower_20"]) / (
-            out["bb_upper_20"] - out["bb_lower_20"]
-        ).replace(0.0, np.nan)
+        out["bb_pct_b_20"] = (close - out["bb_lower_20"]) / (out["bb_upper_20"] - out["bb_lower_20"]).replace(
+            0.0, np.nan
+        )
 
         # MACD.
         ema_12 = _ema(close, 12)

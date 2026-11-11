@@ -4,6 +4,7 @@ Archive source is read-only; writes are limited to a separate evidence prefix.
 Each run has a manifest of SHA-256 hashes and relative paths. Existing mismatched
 objects fail closed instead of being overwritten.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -45,18 +46,24 @@ def archive(directory, bucket, region, archive_id, workers=8, dry_run=False):
     if not records:
         raise ValueError("No files to archive")
     prefix = f"{PREFIX}/{archive_id}"
-    payload = {"kind": "AEA87_EVIDENCE_ARCHIVE_V1", "archive_id": archive_id,
-               "source_directory_name": root.name,
-               "created_at_utc": datetime.now(timezone.utc).isoformat(),
-               "files": records}
+    payload = {
+        "kind": "AEA87_EVIDENCE_ARCHIVE_V1",
+        "archive_id": archive_id,
+        "source_directory_name": root.name,
+        "created_at_utc": datetime.now(timezone.utc).isoformat(),
+        "files": records,
+    }
     # Manifest bytes are deterministic within this invocation.
     manifest = json.dumps(payload, indent=2, sort_keys=True).encode()
-    print(f"[archive] files={len(records)} size={sum(r['bytes'] for r in records):,} bytes "
-          f"destination=s3://{bucket}/{prefix}/ dry_run={dry_run}", flush=True)
+    print(
+        f"[archive] files={len(records)} size={sum(r['bytes'] for r in records):,} bytes "
+        f"destination=s3://{bucket}/{prefix}/ dry_run={dry_run}",
+        flush=True,
+    )
     if dry_run:
         return payload
-    s3 = boto3.client("s3", region_name=region,
-                      config=Config(max_pool_connections=max(16, workers * 2)))
+    s3 = boto3.client("s3", region_name=region, config=Config(max_pool_connections=max(16, workers * 2)))
+
     def upload(item):
         key = prefix + "/files/" + item["path"]
         try:
@@ -72,9 +79,14 @@ def archive(directory, bucket, region, archive_id, workers=8, dry_run=False):
         data = (root / item["path"]).read_bytes()
         if hashlib.sha256(data).hexdigest() != item["sha256"]:
             raise RuntimeError("Local file changed during upload: " + item["path"])
-        kwargs = {"Bucket": bucket, "Key": key, "Body": data,
-                  "IfNoneMatch": "*", "Metadata": {"sha256": item["sha256"]},
-                  "ContentType": mimetypes.guess_type(item["path"])[0] or "application/octet-stream"}
+        kwargs = {
+            "Bucket": bucket,
+            "Key": key,
+            "Body": data,
+            "IfNoneMatch": "*",
+            "Metadata": {"sha256": item["sha256"]},
+            "ContentType": mimetypes.guess_type(item["path"])[0] or "application/octet-stream",
+        }
         try:
             s3.put_object(**kwargs)
         except ClientError as exc:
@@ -84,6 +96,7 @@ def archive(directory, bucket, region, archive_id, workers=8, dry_run=False):
             if obj.get("Metadata", {}).get("sha256") != item["sha256"] or obj["ContentLength"] != item["bytes"]:
                 raise
         return "uploaded"
+
     uploaded = reused = 0
     with ThreadPoolExecutor(max_workers=workers) as pool:
         futures = {pool.submit(upload, record): record for record in records}
@@ -102,8 +115,7 @@ def archive(directory, bucket, region, archive_id, workers=8, dry_run=False):
             raise
     # Manifest created_at differs across retries; validate file inventory instead.
     if existing is None:
-        s3.put_object(Bucket=bucket, Key=manifest_key, Body=manifest,
-                      IfNoneMatch="*", ContentType="application/json")
+        s3.put_object(Bucket=bucket, Key=manifest_key, Body=manifest, IfNoneMatch="*", ContentType="application/json")
     elif json.loads(existing)["files"] != records:
         raise RuntimeError("Archive ID already used for different evidence: " + archive_id)
     print("[archive] completed: s3://" + bucket + "/" + manifest_key, flush=True)

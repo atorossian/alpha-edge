@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+
 def project_root() -> Path:
     """
     Best-effort project root resolver.

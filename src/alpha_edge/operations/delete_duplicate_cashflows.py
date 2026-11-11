@@ -2,9 +2,7 @@ from __future__ import annotations
 
 import argparse
 import csv
-import datetime as dt
 import json
-from pathlib import Path
 
 import boto3
 
@@ -67,10 +65,7 @@ def main() -> None:
             skipped += 1
             continue
 
-        backup_key = (
-            args.backup_prefix.strip("/") +
-            f"/dt={row.get('as_of', 'unknown')}/cashflow_{expected_id}.json"
-        )
+        backup_key = args.backup_prefix.strip("/") + f"/dt={row.get('as_of', 'unknown')}/cashflow_{expected_id}.json"
 
         print(f"[DELETE] duplicate={expected_id} keep={keep_id}")
         print(f"         key=s3://{cfg.bucket}/{key}")

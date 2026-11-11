@@ -5,7 +5,6 @@ import io
 import json
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from pathlib import Path
 from typing import Any, Dict, Optional
 
 import pandas as pd
@@ -69,27 +68,19 @@ def _read_universe_asset_ids(
     if "ticker" in universe.columns:
         universe["ticker"] = universe["ticker"].astype(str).str.upper().str.strip()
     elif "broker_ticker" in universe.columns:
-        universe["ticker"] = (
-            universe["broker_ticker"].astype(str).str.upper().str.strip()
-        )
+        universe["ticker"] = universe["broker_ticker"].astype(str).str.upper().str.strip()
     else:
         universe["ticker"] = universe["asset_id"]
 
     if filter_to_active_universe and "include" in universe.columns:
-        universe = universe[
-            universe["include"].fillna(1).astype(int) == 1
-        ].copy()
+        universe = universe[universe["include"].fillna(1).astype(int) == 1].copy()
 
     if excluded_csv:
         try:
             excluded = pd.read_csv(excluded_csv)
             if "asset_id" in excluded.columns:
-                excluded_ids = set(
-                    excluded["asset_id"].astype(str).str.strip().tolist()
-                )
-                universe = universe[
-                    ~universe["asset_id"].isin(excluded_ids)
-                ].copy()
+                excluded_ids = set(excluded["asset_id"].astype(str).str.strip().tolist())
+                universe = universe[~universe["asset_id"].isin(excluded_ids)].copy()
         except FileNotFoundError:
             pass
 
@@ -147,10 +138,7 @@ def _read_existing_snapshot(
     try:
         return _normalize_dates(_read_parquet_bytes(store._get_bytes(key)))
     except Exception as exc:
-        raise RuntimeError(
-            f"Could not read existing indicator snapshot "
-            f"s3://{store.bucket}/{key}: {exc}"
-        ) from exc
+        raise RuntimeError(f"Could not read existing indicator snapshot s3://{store.bucket}/{key}: {exc}") from exc
 
 
 def _write_snapshot(
@@ -171,10 +159,7 @@ def _write_snapshot(
         )
 
     if dry_run:
-        print(
-            f"[DRY RUN] Would write snapshot: "
-            f"s3://{store.bucket}/{key} rows={len(out)}"
-        )
+        print(f"[DRY RUN] Would write snapshot: s3://{store.bucket}/{key} rows={len(out)}")
         return key
 
     store._put_bytes(
@@ -197,11 +182,7 @@ def _manifest_parts(
         year=year,
     )
 
-    return [
-        str(key)
-        for key in (manifest.get("parts") or [])
-        if isinstance(key, str) and key.endswith(".parquet")
-    ]
+    return [str(key) for key in (manifest.get("parts") or []) if isinstance(key, str) and key.endswith(".parquet")]
 
 
 def _read_existing_indicator_year(
@@ -218,14 +199,8 @@ def _read_existing_indicator_year(
     )
 
     if not parts:
-        prefix = (
-            f"{indicators_prefix}/asset_id={asset_id}/year={int(year)}/"
-        )
-        parts = [
-            key
-            for key in store._list_keys(prefix)
-            if key.endswith(".parquet")
-        ]
+        prefix = f"{indicators_prefix}/asset_id={asset_id}/year={int(year)}/"
+        parts = [key for key in store._list_keys(prefix) if key.endswith(".parquet")]
 
     frames: list[pd.DataFrame] = []
     readable_parts: list[str] = []
@@ -263,28 +238,17 @@ def _write_compacted_indicator_year(
     out = _normalize_dates(df)
 
     if out.empty:
-        raise ValueError(
-            f"Refusing to write empty indicator partition for "
-            f"asset_id={asset_id}, year={year}."
-        )
+        raise ValueError(f"Refusing to write empty indicator partition for asset_id={asset_id}, year={year}.")
 
     out = (
-        out.drop_duplicates(["asset_id", "date"], keep="last")
-        .sort_values("date", kind="stable")
-        .reset_index(drop=True)
+        out.drop_duplicates(["asset_id", "date"], keep="last").sort_values("date", kind="stable").reset_index(drop=True)
     )
 
     part = uuid.uuid4().hex[:12]
-    key = (
-        f"{indicators_prefix}/asset_id={asset_id}/"
-        f"year={int(year)}/part-{part}.parquet"
-    )
+    key = f"{indicators_prefix}/asset_id={asset_id}/year={int(year)}/part-{part}.parquet"
 
     if dry_run:
-        print(
-            f"[DRY RUN] Would write indicators partition: "
-            f"s3://{store.bucket}/{key} rows={len(out)}"
-        )
+        print(f"[DRY RUN] Would write indicators partition: s3://{store.bucket}/{key} rows={len(out)}")
         return key
 
     store._put_bytes(
@@ -297,10 +261,7 @@ def _write_compacted_indicator_year(
         table="indicators",
         asset_id=asset_id,
         year=int(year),
-        dates=[
-            pd.Timestamp(value).date().isoformat()
-            for value in out["date"].tolist()
-        ],
+        dates=[pd.Timestamp(value).date().isoformat() for value in out["date"].tolist()],
         parts=[key],
     )
 
@@ -425,15 +386,9 @@ def _latest_date_map(snapshot: pd.DataFrame) -> dict[str, pd.Timestamp]:
     if "asset_id" not in work.columns:
         return {}
 
-    latest = (
-        work.sort_values(["asset_id", "date"], kind="stable")
-        .drop_duplicates(["asset_id"], keep="last")
-    )
+    latest = work.sort_values(["asset_id", "date"], kind="stable").drop_duplicates(["asset_id"], keep="last")
 
-    return {
-        str(row.asset_id).strip(): pd.Timestamp(row.date).normalize()
-        for row in latest.itertuples(index=False)
-    }
+    return {str(row.asset_id).strip(): pd.Timestamp(row.date).normalize() for row in latest.itertuples(index=False)}
 
 
 def _effective_windows(
@@ -470,11 +425,7 @@ def build_market_indicators(
     )
 
     full_start = _to_day_naive(cfg.start)
-    end_ts = (
-        _to_day_naive(cfg.end)
-        if cfg.end
-        else _to_day_naive(pd.Timestamp.utcnow())
-    )
+    end_ts = _to_day_naive(cfg.end) if cfg.end else _to_day_naive(pd.Timestamp.utcnow())
 
     universe = _read_universe_asset_ids(
         universe_csv=cfg.universe_csv,
@@ -501,10 +452,7 @@ def build_market_indicators(
     print(f"ohlcv_prefix:        {store.ohlcv_prefix}")
     print(f"returns_prefix:      {store.returns_prefix}")
     print(f"indicators_prefix:   {cfg.indicators_prefix}")
-    print(
-        f"latest_snapshot:     "
-        f"{store.snapshots_prefix}/{cfg.latest_snapshot_name}.parquet"
-    )
+    print(f"latest_snapshot:     {store.snapshots_prefix}/{cfg.latest_snapshot_name}.parquet")
     print(f"universe_csv:        {cfg.universe_csv}")
     print(f"excluded_csv:        {cfg.excluded_csv}")
     print(f"assets:              {len(asset_ids)}")
@@ -585,10 +533,7 @@ def build_market_indicators(
                 return {
                     "status": "fail",
                     "asset_id": asset_id,
-                    "error": (
-                        "No returns_usd rows found. Indicator layer "
-                        "requires canonical returns."
-                    ),
+                    "error": ("No returns_usd rows found. Indicator layer requires canonical returns."),
                 }
 
             returns = _normalize_dates(returns)
@@ -604,11 +549,7 @@ def build_market_indicators(
 
             indicators = _normalize_dates(indicators)
 
-            n_obs = (
-                int(indicators["close"].notna().sum())
-                if "close" in indicators.columns
-                else int(len(indicators))
-            )
+            n_obs = int(indicators["close"].notna().sum()) if "close" in indicators.columns else int(len(indicators))
 
             if n_obs < int(cfg.min_obs):
                 return {
@@ -620,9 +561,7 @@ def build_market_indicators(
             latest = latest_indicator_rows(indicators)
 
             rows_to_write = (
-                indicators
-                if cfg.mode == "full"
-                else indicators[indicators["date"] >= replacement_start].copy()
+                indicators if cfg.mode == "full" else indicators[indicators["date"] >= replacement_start].copy()
             )
 
             return {
@@ -663,9 +602,7 @@ def build_market_indicators(
                 indicators = result["indicators"]
                 rows_to_write = result["rows_to_write"]
                 latest = result["latest"]
-                replacement_start = pd.Timestamp(
-                    result["replacement_start"]
-                ).normalize()
+                replacement_start = pd.Timestamp(result["replacement_start"]).normalize()
 
                 if cfg.mode == "full":
                     keys, old_keys = _write_full_history(
@@ -694,12 +631,8 @@ def build_market_indicators(
                 if bool(result.get("is_new_asset")):
                     new_assets += 1
 
-                total_calculated_rows += int(
-                    result.get("n_rows_calculated", 0)
-                )
-                total_written_rows += int(
-                    result.get("n_rows_to_write", 0)
-                )
+                total_calculated_rows += int(result.get("n_rows_calculated", 0))
+                total_written_rows += int(result.get("n_rows_to_write", 0))
 
             elif status == "unchanged":
                 unchanged_assets += 1
@@ -720,10 +653,7 @@ def build_market_indicators(
                     }
                 )
 
-            if (
-                done % int(cfg.progress_every) == 0
-                or done == len(asset_ids)
-            ):
+            if done % int(cfg.progress_every) == 0 or done == len(asset_ids):
                 print(
                     f"[indicators] progress {done}/{len(asset_ids)} "
                     f"kept={kept_assets} new={new_assets} "
@@ -733,20 +663,14 @@ def build_market_indicators(
                 )
 
     if latest_rows:
-        refreshed_latest = _normalize_dates(
-            pd.concat(latest_rows, ignore_index=True)
-        )
-        refreshed_assets = set(
-            refreshed_latest["asset_id"].astype(str).str.strip()
-        )
+        refreshed_latest = _normalize_dates(pd.concat(latest_rows, ignore_index=True))
+        refreshed_assets = set(refreshed_latest["asset_id"].astype(str).str.strip())
 
         if existing_latest.empty:
             latest_df = refreshed_latest
         else:
             preserved = existing_latest[
-                ~existing_latest["asset_id"].astype(str).str.strip().isin(
-                    refreshed_assets
-                )
+                ~existing_latest["asset_id"].astype(str).str.strip().isin(refreshed_assets)
             ].copy()
             latest_df = pd.concat(
                 [preserved, refreshed_latest],
@@ -777,9 +701,7 @@ def build_market_indicators(
         "start": str(full_start.date()),
         "end": str(end_ts.date()),
         "lookback_calendar_days": int(cfg.lookback_calendar_days),
-        "replacement_calendar_days": int(
-            cfg.replacement_calendar_days
-        ),
+        "replacement_calendar_days": int(cfg.replacement_calendar_days),
         "skip_unchanged_assets": bool(cfg.skip_unchanged_assets),
         "assets_requested": int(len(asset_ids)),
         "assets_kept": int(kept_assets),
@@ -797,9 +719,7 @@ def build_market_indicators(
         "failures_sample": failures[:50],
         "annualization_days": int(cfg.annualization_days),
         "min_obs": int(cfg.min_obs),
-        "filter_to_active_universe": bool(
-            cfg.filter_to_active_universe
-        ),
+        "filter_to_active_universe": bool(cfg.filter_to_active_universe),
         "universe_csv": cfg.universe_csv,
         "excluded_csv": cfg.excluded_csv,
     }
@@ -822,10 +742,7 @@ def build_market_indicators(
     print(f"[OK] replacement_rows:   {total_written_rows}")
     print(f"[OK] written_parts:      {len(written_keys)}")
     print(f"[OK] superseded_parts:   {len(set(superseded_keys))}")
-    print(
-        f"[OK] latest_snapshot:    "
-        f"s3://{store.bucket}/{latest_key}"
-    )
+    print(f"[OK] latest_snapshot:    s3://{store.bucket}/{latest_key}")
     print(f"[OK] meta:               s3://{store.bucket}/{meta_key}")
     print("")
 
@@ -840,10 +757,7 @@ def build_market_indicators(
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description=(
-            "Build historical market indicators and the latest "
-            "indicator snapshot."
-        )
+        description=("Build historical market indicators and the latest indicator snapshot.")
     )
 
     parser.add_argument(
@@ -866,10 +780,7 @@ def parse_args() -> argparse.Namespace:
         "--mode",
         choices=["full", "incremental"],
         default="full",
-        help=(
-            "full rebuilds all history; incremental recalculates a "
-            "limited overlap and upserts affected partitions."
-        ),
+        help=("full rebuilds all history; incremental recalculates a limited overlap and upserts affected partitions."),
     )
     parser.add_argument("--start", default="2010-01-01")
     parser.add_argument("--end", default=None)
@@ -916,23 +827,13 @@ def main() -> None:
 
     bucket = str(args.bucket or runtime_cfg.bucket)
     region = str(args.region or runtime_cfg.region)
-    market_root = str(
-        args.market_root or runtime_cfg.market_root
-    ).strip("/")
+    market_root = str(args.market_root or runtime_cfg.market_root).strip("/")
 
-    universe_csv = str(
-        args.universe_csv
-        or (paths.universe_dir() / "universe.csv")
-    )
-    excluded_csv = str(
-        args.excluded_csv
-        or (paths.universe_dir() / "asset_excluded.csv")
-    )
+    universe_csv = str(args.universe_csv or (paths.universe_dir() / "universe.csv"))
+    excluded_csv = str(args.excluded_csv or (paths.universe_dir() / "asset_excluded.csv"))
 
     indicators_prefix = (
-        str(args.indicators_prefix).strip("/")
-        if args.indicators_prefix
-        else f"{market_root}/indicators/v1"
+        str(args.indicators_prefix).strip("/") if args.indicators_prefix else f"{market_root}/indicators/v1"
     )
 
     input_args: Dict[str, Any] = vars(args).copy()
@@ -959,30 +860,20 @@ def main() -> None:
             market_root=market_root,
             universe_csv=universe_csv,
             excluded_csv=excluded_csv,
-            filter_to_active_universe=(
-                not bool(args.no_universe_filter)
-            ),
+            filter_to_active_universe=(not bool(args.no_universe_filter)),
             mode=str(args.mode),
             start=str(args.start),
             end=str(args.end) if args.end else None,
-            lookback_calendar_days=int(
-                args.lookback_calendar_days
-            ),
-            replacement_calendar_days=int(
-                args.replacement_calendar_days
-            ),
-            skip_unchanged_assets=(
-                not bool(args.no_skip_unchanged_assets)
-            ),
+            lookback_calendar_days=int(args.lookback_calendar_days),
+            replacement_calendar_days=int(args.replacement_calendar_days),
+            skip_unchanged_assets=(not bool(args.no_skip_unchanged_assets)),
             max_assets=args.max_assets,
             min_obs=int(args.min_obs),
             annualization_days=int(args.annualization_days),
             max_workers=int(args.max_workers),
             progress_every=int(args.progress_every),
             indicators_prefix=indicators_prefix,
-            latest_snapshot_name=str(
-                args.latest_snapshot_name
-            ),
+            latest_snapshot_name=str(args.latest_snapshot_name),
             dry_run=bool(args.dry_run),
         )
 
@@ -998,10 +889,7 @@ def main() -> None:
             source_script="build_market_indicators.py",
             source_mode=str(args.mode),
             status=("dry_run" if args.dry_run else "success"),
-            reason=(
-                "build full or incremental historical market "
-                "indicators and latest snapshot"
-            ),
+            reason=("build full or incremental historical market indicators and latest snapshot"),
             input_args=input_args,
             output_keys=[
                 str(result["latest_key"]),
@@ -1009,14 +897,8 @@ def main() -> None:
             ],
             metadata={
                 **dict(result["meta"]),
-                "written_keys_sample": [
-                    str(key)
-                    for key in result["written_keys"][:100]
-                ],
-                "superseded_keys_sample": [
-                    str(key)
-                    for key in result["superseded_keys"][:100]
-                ],
+                "written_keys_sample": [str(key) for key in result["written_keys"][:100]],
+                "superseded_keys_sample": [str(key) for key in result["superseded_keys"][:100]],
             },
         )
         write_audit_event(

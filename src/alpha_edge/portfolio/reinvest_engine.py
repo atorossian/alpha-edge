@@ -80,18 +80,18 @@ def _infer_core_from_asset_tp_plan(
 
     # tickers in positions but not in plan => treat as core (not traded)
     in_plan = set(df["ticker"].tolist())
-    core |= (pos_tickers - in_plan)
+    core |= pos_tickers - in_plan
     return core
 
 
 def reinvest_leftover_with_frozen_core(
     *,
     as_of: str,
-    returns_wide: pd.DataFrame,            # daily returns matrix (tickers columns)
-    exec_prices_usd: pd.Series,            # execution prices, indexed by ticker
+    returns_wide: pd.DataFrame,  # daily returns matrix (tickers columns)
+    exec_prices_usd: pd.Series,  # execution prices, indexed by ticker
     equity: float,
-    gross_target: float,                   # equity * lev_target
-    positions: dict[str, Position],        # for reference only (optional)
+    gross_target: float,  # equity * lev_target
+    positions: dict[str, Position],  # for reference only (optional)
     positions_qty_after_tp: dict[str, float],
     asset_tp_plan_df: pd.DataFrame | None,
     score_cfg: ScoreConfig,
@@ -209,7 +209,6 @@ def reinvest_leftover_with_frozen_core(
 
         return weights_full
 
-
     # --- helper: evaluate a sleeve candidate by merging with fixed core ---
     def eval_sleeve(weights_sleeve: dict[str, float], *, n_paths: int) -> Any | None:
         weights_full = _build_full_weights_from_sleeve(weights_sleeve)
@@ -249,7 +248,6 @@ def reinvest_leftover_with_frozen_core(
             return m
         except Exception:
             return None
-
 
     # baseline: evaluate current (core only + current sleeve exposures) for “must improve”
     # We treat current sleeve as "no reinvest": i.e., invest leftover in cash -> not modeled.
@@ -330,7 +328,7 @@ def reinvest_leftover_with_frozen_core(
         pop_metrics = elites_m + children_m[: max(0, pop_size - n_elite)]
 
         best = pop_metrics[0]
-        meta[f"gen_{gen+1}"] = {"best_score": float(best.score), "best_sharpe": float(best.sharpe)}
+        meta[f"gen_{gen + 1}"] = {"best_score": float(best.score), "best_sharpe": float(best.sharpe)}
 
     # final best
     idx = np.argsort([-float(m.score) for m in pop_metrics]).tolist()
@@ -341,7 +339,6 @@ def reinvest_leftover_with_frozen_core(
     meta["weights_target"] = dict(_build_full_weights_from_sleeve(best_w))  # optional but useful for logs
     meta["core"] = sorted(list(core))
     meta["core_active"] = list(core_active)
-
 
     best_score = float(best_m.score)
     meta["best_score"] = best_score

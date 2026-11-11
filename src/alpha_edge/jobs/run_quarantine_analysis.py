@@ -9,7 +9,7 @@ import datetime as dt
 import json
 import io
 from dataclasses import asdict
-from typing import Any, Optional
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -111,8 +111,6 @@ def _s3_list_keys(s3, *, bucket: str, prefix: str) -> list[str]:
     return keys
 
 
-
-
 def _read_parquet_s3_bytes(s3, *, bucket: str, key: str) -> pd.DataFrame:
     obj = s3.get_object(Bucket=bucket, Key=key)
     body = obj["Body"].read()
@@ -159,7 +157,9 @@ def _load_active_universe_resolution_maps() -> dict:
 
     dup_asset = u[u["asset_id"].duplicated(keep=False)].sort_values("asset_id")
     if not dup_asset.empty:
-        cols = [c for c in ["asset_id", "ticker", "yahoo_ticker_norm", "yahoo_ticker", "name"] if c in dup_asset.columns]
+        cols = [
+            c for c in ["asset_id", "ticker", "yahoo_ticker_norm", "yahoo_ticker", "name"] if c in dup_asset.columns
+        ]
         raise RuntimeError(
             "Duplicate active asset_id values found in universe. asset_id must be unique.\n"
             + dup_asset[cols].head(50).to_string(index=False)
@@ -260,11 +260,7 @@ def _canonicalize_shares_to_asset_id(shares: dict[str, float], *, maps: dict) ->
 
         out[aid] = float(out.get(aid, 0.0) + float(q))
 
-    return {
-        k: float(v)
-        for k, v in out.items()
-        if _safe_float(v) is not None and abs(float(v)) > 0
-    }, {
+    return {k: float(v) for k, v in out.items() if _safe_float(v) is not None and abs(float(v)) > 0}, {
         "input_count": int(len(shares or {})),
         "resolved_count": int(len(out)),
         "unresolved_count": int(len(unresolved)),
@@ -322,10 +318,7 @@ def _load_closes_usd_from_ohlcv_asset_ids(
         for y in years:
             seen_prefixes += 1
             prefix = f"{s3_root_prefix.strip('/')}/asset_id={aid}/year={y}/"
-            keys = [
-                k for k in _s3_list_keys(s3, bucket=s3_bucket, prefix=prefix)
-                if k.lower().endswith(".parquet")
-            ]
+            keys = [k for k in _s3_list_keys(s3, bucket=s3_bucket, prefix=prefix) if k.lower().endswith(".parquet")]
             for key in keys:
                 all_keys.append((aid, key))
 
@@ -334,8 +327,7 @@ def _load_closes_usd_from_ohlcv_asset_ids(
 
     if not all_keys:
         raise RuntimeError(
-            f"No parquet files found under s3://{s3_bucket}/{s3_root_prefix} "
-            f"for asset_ids={aids[:5]}... years={years}"
+            f"No parquet files found under s3://{s3_bucket}/{s3_root_prefix} for asset_ids={aids[:5]}... years={years}"
         )
 
     frames: list[pd.DataFrame] = []
@@ -348,9 +340,7 @@ def _load_closes_usd_from_ohlcv_asset_ids(
         date_col = cols.get("date")
         px_col = cols.get("adj_close_usd") or cols.get("close_usd") or cols.get("adj_close") or cols.get("close")
         if date_col is None or px_col is None:
-            raise RuntimeError(
-                f"Unexpected OHLCV parquet schema in s3://{s3_bucket}/{key}. Columns={list(df.columns)}"
-            )
+            raise RuntimeError(f"Unexpected OHLCV parquet schema in s3://{s3_bucket}/{key}. Columns={list(df.columns)}")
 
         out = df[[date_col, px_col]].copy()
         out.columns = ["date", "adj_close_usd"]
@@ -377,6 +367,7 @@ def _load_closes_usd_from_ohlcv_asset_ids(
         raise RuntimeError("Some asset_ids have no OHLCV close history: " + ", ".join(missing_cols[:20]))
 
     return wide
+
 
 def _s3_put_text(s3, *, bucket: str, key: str, text: str) -> None:
     s3.put_object(
@@ -411,7 +402,6 @@ def _metric(eval_dict: dict, *keys: str) -> float | None:
             if v is not None:
                 return v
     return None
-
 
 
 def _main_goal_probability(eval_dict: dict, goals: list[float] | tuple[float, ...], main_goal: float) -> float | None:
@@ -553,20 +543,28 @@ def _compute_quarantine_health_score(
     }
 
     risk_component = float(np.mean([components["ruin"], components["max_drawdown"], components["cvar_95"]]))
-    stability_component = float(np.mean([
-        components["stability_energy"],
-        components["path_mdd_mean"],
-        components["cdar_95"],
-        components["p_dd_breach"],
-        components["underwater_mean"],
-        components["ttr_mean_days"],
-    ]))
-    execution_component = float(np.mean([
-        components["deployment"],
-        components["cash"],
-        components["weight_drift"],
-        components["dropped_weight"],
-    ]))
+    stability_component = float(
+        np.mean(
+            [
+                components["stability_energy"],
+                components["path_mdd_mean"],
+                components["cdar_95"],
+                components["p_dd_breach"],
+                components["underwater_mean"],
+                components["ttr_mean_days"],
+            ]
+        )
+    )
+    execution_component = float(
+        np.mean(
+            [
+                components["deployment"],
+                components["cash"],
+                components["weight_drift"],
+                components["dropped_weight"],
+            ]
+        )
+    )
 
     weights = {"goal_probability": 0.30, "risk": 0.30, "stability": 0.30, "execution": 0.10}
     health_score = 100.0 * (
@@ -614,6 +612,7 @@ def _baseline_health_score(eval_dict: dict) -> float | None:
     if isinstance(h, dict):
         return _safe_float(h.get("health_score"))
     return None
+
 
 HEALTH_CONSISTENCY_METRIC_KEYS = [
     "ann_return",
@@ -705,14 +704,10 @@ def _build_metric_consistency_diagnostic(
                 baseline_weights_n[_norm_key(k)] = float(vf)
 
     weight_l1_vs_search = (
-        _l1_drift(current_weights, baseline_weights_n)
-        if current_weights and baseline_weights_n
-        else None
+        _l1_drift(current_weights, baseline_weights_n) if current_weights and baseline_weights_n else None
     )
     weight_cosine_vs_search = (
-        _cosine_sim(current_weights, baseline_weights_n)
-        if current_weights and baseline_weights_n
-        else None
+        _cosine_sim(current_weights, baseline_weights_n) if current_weights and baseline_weights_n else None
     )
 
     baseline_target_notional = _safe_float(candidate_context.get("target_notional"))
@@ -728,20 +723,12 @@ def _build_metric_consistency_diagnostic(
         "baseline_source": "portfolio_search.final_executable",
         "today_source": "quarantine.report_engine.build_portfolio_report",
         "baseline_metric_engine": (
-            candidate_context.get("metric_engine")
-            if isinstance(candidate_context, dict)
-            else None
+            candidate_context.get("metric_engine") if isinstance(candidate_context, dict) else None
         ),
         "baseline_return_basis": (
-            candidate_context.get("return_basis")
-            if isinstance(candidate_context, dict)
-            else None
+            candidate_context.get("return_basis") if isinstance(candidate_context, dict) else None
         ),
-        "baseline_mc_basis": (
-            candidate_context.get("mc_basis")
-            if isinstance(candidate_context, dict)
-            else None
-        ),
+        "baseline_mc_basis": (candidate_context.get("mc_basis") if isinstance(candidate_context, dict) else None),
         "baseline_health_score": baseline_health,
         "quarantine_health_score": health_today,
         "health_delta": _metric_delta(health_today, baseline_health),
@@ -780,6 +767,7 @@ def _build_metric_consistency_diagnostic(
             "portfolio-search baseline. The mismatch must be diagnosed first."
         ),
     }
+
 
 def _s3_get_json_or_none(s3, *, bucket: str, key: str) -> dict | None:
     try:
@@ -883,9 +871,7 @@ def _discover_candidates_from_portfolio_runs(
                 baseline_search_eval["score_basis"] = "health_score"
                 baseline_weights = final_exec.get("weights") if isinstance(final_exec.get("weights"), dict) else {}
                 baseline_execution_quality = (
-                    final_exec.get("execution_quality")
-                    if isinstance(final_exec.get("execution_quality"), dict)
-                    else {}
+                    final_exec.get("execution_quality") if isinstance(final_exec.get("execution_quality"), dict) else {}
                 )
             else:
                 # Legacy fallback for older search runs. New runs should come
@@ -932,11 +918,7 @@ def _discover_candidates_from_portfolio_runs(
                             if isinstance(final_metrics, dict) and final_metrics
                             else "legacy_best_refined"
                         ),
-                        "final_executable_status": (
-                            final_status
-                            if final_status
-                            else None
-                        ),
+                        "final_executable_status": (final_status if final_status else None),
                     },
                 }
             )
@@ -1192,7 +1174,9 @@ def run_quarantine_analysis_asof(
         table="configs/score_config",
     )
     if not raw_score_cfg:
-        raise RuntimeError(f"Missing S3 latest score_config under s3://{bucket}/{root_prefix}/configs/score_config/latest.json")
+        raise RuntimeError(
+            f"Missing S3 latest score_config under s3://{bucket}/{root_prefix}/configs/score_config/latest.json"
+        )
 
     score_cfg = ScoreConfig(**raw_score_cfg)
 
@@ -1239,7 +1223,7 @@ def run_quarantine_analysis_asof(
                 "root_prefix": root_prefix,
                 "lookback_days": int(lookback_days),
                 "ttl_days": int(ttl_days),
-                "skipped_resolution": skipped_resolution[:50] if 'skipped_resolution' in locals() else [],
+                "skipped_resolution": skipped_resolution[:50] if "skipped_resolution" in locals() else [],
             },
         }
 
@@ -1257,12 +1241,15 @@ def run_quarantine_analysis_asof(
 
         return out
 
-    market_hmm = s3_load_latest_json(
-        s3,
-        bucket=bucket,
-        root_prefix=str(engine_root).strip("/"),
-        table="regimes/market_hmm",
-    ) or {}
+    market_hmm = (
+        s3_load_latest_json(
+            s3,
+            bucket=bucket,
+            root_prefix=str(engine_root).strip("/"),
+            table="regimes/market_hmm",
+        )
+        or {}
+    )
 
     cur_regime_label = str(market_hmm.get("label_commit") or market_hmm.get("label") or "UNKNOWN")
 
@@ -1329,7 +1316,7 @@ def run_quarantine_analysis_asof(
                 "root_prefix": root_prefix,
                 "lookback_days": int(lookback_days),
                 "ttl_days": int(ttl_days),
-                "skipped_resolution": skipped_resolution[:50] if 'skipped_resolution' in locals() else [],
+                "skipped_resolution": skipped_resolution[:50] if "skipped_resolution" in locals() else [],
             },
         }
 
@@ -1410,7 +1397,9 @@ def run_quarantine_analysis_asof(
             cand_state["baseline_weights"] = item.get("baseline_weights")
         elif item.get("baseline_weights"):
             cand_state["baseline_weights"] = item.get("baseline_weights")
-        if item.get("baseline_execution_quality") and not isinstance(cand_state.get("baseline_execution_quality"), dict):
+        if item.get("baseline_execution_quality") and not isinstance(
+            cand_state.get("baseline_execution_quality"), dict
+        ):
             cand_state["baseline_execution_quality"] = item.get("baseline_execution_quality")
         elif item.get("baseline_execution_quality"):
             cand_state["baseline_execution_quality"] = item.get("baseline_execution_quality")
@@ -1461,9 +1450,7 @@ def run_quarantine_analysis_asof(
         goals = [float(x) for x in goals]
 
         main_goal = (
-            _safe_float(cand_state.get("main_goal"))
-            or _safe_float(candidate_context.get("main_goal"))
-            or 10000.0
+            _safe_float(cand_state.get("main_goal")) or _safe_float(candidate_context.get("main_goal")) or 10000.0
         )
 
         score_cfg_for_candidate = score_cfg
@@ -1477,8 +1464,7 @@ def run_quarantine_analysis_asof(
         actuarial_diagnostics = None
         try:
             positions = {
-                t: Position(ticker=t, quantity=float(qv), entry_price=None, currency="USD")
-                for t, qv in shares.items()
+                t: Position(ticker=t, quantity=float(qv), entry_price=None, currency="USD") for t, qv in shares.items()
             }
             closes = closes_all[list(positions.keys())].copy()
 
@@ -1548,7 +1534,9 @@ def run_quarantine_analysis_asof(
         baseline_weights = cand_state.get("baseline_weights") or item.get("baseline_weights") or {}
         if not isinstance(baseline_weights, dict):
             baseline_weights = {}
-        baseline_execution_quality = cand_state.get("baseline_execution_quality") or item.get("baseline_execution_quality") or {}
+        baseline_execution_quality = (
+            cand_state.get("baseline_execution_quality") or item.get("baseline_execution_quality") or {}
+        )
         if not isinstance(baseline_execution_quality, dict):
             baseline_execution_quality = {}
 
@@ -1584,7 +1572,9 @@ def run_quarantine_analysis_asof(
             health_today=health_today,
             execution_quality_today=execution_quality_today,
             candidate_context=candidate_context if isinstance(candidate_context, dict) else {},
-            baseline_execution_quality=baseline_execution_quality if isinstance(baseline_execution_quality, dict) else {},
+            baseline_execution_quality=baseline_execution_quality
+            if isinstance(baseline_execution_quality, dict)
+            else {},
             baseline_weights=baseline_weights if isinstance(baseline_weights, dict) else {},
             shares=shares,
             prices_usd=prices_usd,
@@ -1615,11 +1605,7 @@ def run_quarantine_analysis_asof(
 
             q = {
                 "start_as_of": as_of_date,
-                "baseline_eval": (
-                    dict(baseline_search_eval)
-                    if isinstance(baseline_search_eval, dict)
-                    else {}
-                ),
+                "baseline_eval": (dict(baseline_search_eval) if isinstance(baseline_search_eval, dict) else {}),
                 "baseline_regime_label": cur_regime_label,
                 "streak_amber": 0,
                 "streak_red": 0,
@@ -1636,9 +1622,7 @@ def run_quarantine_analysis_asof(
                     "health_today": health_today,
                     "health_ref": entry_health,
                     "health_decay": (
-                        None
-                        if health_today is None or entry_health is None
-                        else float(health_today - entry_health)
+                        None if health_today is None or entry_health is None else float(health_today - entry_health)
                     ),
                     "health_decay_rate": None,
                     "score_today": score_today,
@@ -1802,8 +1786,7 @@ def run_quarantine_analysis_asof(
             health_for_status_source = "portfolio_search_baseline"
 
         if status == "PENDING" and (
-            health_for_status is None
-            or float(health_for_status) < float(min_entry_health_score)
+            health_for_status is None or float(health_for_status) < float(min_entry_health_score)
         ):
             status = "REJECTED"
             sev = "RED"
@@ -1818,7 +1801,9 @@ def run_quarantine_analysis_asof(
             status = "REJECTED"
 
         if status == "PENDING":
-            if age_days >= int(min_quarantine_days) and int(q.get("streak_green", 0) or 0) >= int(approve_requires_green_days):
+            if age_days >= int(min_quarantine_days) and int(q.get("streak_green", 0) or 0) >= int(
+                approve_requires_green_days
+            ):
                 status = "APPROVED"
 
         q["status"] = status
@@ -1929,8 +1914,7 @@ def run_quarantine_analysis_asof(
                     lines.append(f"  {k}: {v}")
 
             report_key = (
-                f"{root_prefix.strip('/')}/{QUAR_REPORTS_TABLE}/"
-                f"dt={run_dt.strftime('%Y-%m-%d')}/report_{cid}.txt"
+                f"{root_prefix.strip('/')}/{QUAR_REPORTS_TABLE}/dt={run_dt.strftime('%Y-%m-%d')}/report_{cid}.txt"
             )
             _s3_put_text(s3, bucket=bucket, key=report_key, text="\n".join(lines))
 
@@ -1972,8 +1956,8 @@ def run_quarantine_analysis_asof(
             "market_regime_label": cur_regime_label,
             "n_union": int(len(discovered)),
             "n_resolved": int(len(resolved)),
-            "n_skipped_resolution": int(len(skipped_resolution)) if 'skipped_resolution' in locals() else 0,
-            "skipped_resolution_sample": skipped_resolution[:20] if 'skipped_resolution' in locals() else [],
+            "n_skipped_resolution": int(len(skipped_resolution)) if "skipped_resolution" in locals() else 0,
+            "skipped_resolution_sample": skipped_resolution[:20] if "skipped_resolution" in locals() else [],
             "source_table": PORTFOLIO_RUNS_TABLE,
             "lookback_days": int(lookback_days),
             "min_quarantine_days": int(min_quarantine_days),
@@ -2118,7 +2102,9 @@ def main_with_audit() -> None:
                 event_type="build_dataset",
                 entity_type="quarantine_analysis",
                 entity_id=None,
-                as_of=str(getattr(args, "as_of", None) or getattr(args, "dt", None) or getattr(args, "run_dt", None) or ""),
+                as_of=str(
+                    getattr(args, "as_of", None) or getattr(args, "dt", None) or getattr(args, "run_dt", None) or ""
+                ),
                 source_script="run_quarantine_analysis.py",
                 source_mode="quarantine_analysis",
                 status=("dry_run" if is_dry_run else "success"),
@@ -2137,7 +2123,9 @@ def main_with_audit() -> None:
                 event_type="build_dataset",
                 entity_type="quarantine_analysis",
                 entity_id=None,
-                as_of=str(getattr(args, "as_of", None) or getattr(args, "dt", None) or getattr(args, "run_dt", None) or ""),
+                as_of=str(
+                    getattr(args, "as_of", None) or getattr(args, "dt", None) or getattr(args, "run_dt", None) or ""
+                ),
                 source_script="run_quarantine_analysis.py",
                 source_mode="quarantine_analysis",
                 status="failed",

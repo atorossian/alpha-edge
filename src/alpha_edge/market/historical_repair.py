@@ -3,6 +3,7 @@
 Called only through ingest_market_data's explicit repair options. No market
 writes in prepare mode. A per-asset commit can be recovered from its journal.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -17,8 +18,6 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-
-from alpha_edge.core.market_store import MarketStore
 
 
 def _dates(frame):
@@ -90,10 +89,14 @@ def _merge_prices(downloaded, old, aid, ticker, yahoo, ccy, fx):
         if ccy not in fx:
             raise ValueError(f"No approved FX for {ccy}")
         fresh["fx_to_usd"] = fx[ccy].reindex(fresh["date"]).to_numpy()
-    fresh = fresh.loc[(fresh["close"] > 0) & (fresh["adj_close"] > 0)
-                      & (fresh["fx_to_usd"] > 0)
-                      & np.isfinite(fresh["close"]) & np.isfinite(fresh["adj_close"])
-                      & np.isfinite(fresh["fx_to_usd"])].copy()
+    fresh = fresh.loc[
+        (fresh["close"] > 0)
+        & (fresh["adj_close"] > 0)
+        & (fresh["fx_to_usd"] > 0)
+        & np.isfinite(fresh["close"])
+        & np.isfinite(fresh["adj_close"])
+        & np.isfinite(fresh["fx_to_usd"])
+    ].copy()
     if fresh.empty:
         raise ValueError("No usable Yahoo observations with approved FX")
     fresh["asset_id"] = aid
@@ -104,9 +107,24 @@ def _merge_prices(downloaded, old, aid, ticker, yahoo, ccy, fx):
     fresh["close_adjusted_usd"] = fresh["adj_close"] * fresh["fx_to_usd"]
     fresh["close_usd"] = fresh["close_raw_usd"]
     fresh["adj_close_usd"] = fresh["close_adjusted_usd"]
-    columns = ["date", "asset_id", "ticker", "yahoo_ticker", "open", "high",
-               "low", "close", "adj_close", "volume", "currency", "fx_to_usd",
-               "close_raw_usd", "close_adjusted_usd", "close_usd", "adj_close_usd"]
+    columns = [
+        "date",
+        "asset_id",
+        "ticker",
+        "yahoo_ticker",
+        "open",
+        "high",
+        "low",
+        "close",
+        "adj_close",
+        "volume",
+        "currency",
+        "fx_to_usd",
+        "close_raw_usd",
+        "close_adjusted_usd",
+        "close_usd",
+        "adj_close_usd",
+    ]
     fresh = fresh[columns]
     old = _dates(old) if not old.empty else pd.DataFrame(columns=columns)
     if not old.empty and (old["asset_id"].astype(str) != aid).any():
@@ -120,11 +138,15 @@ def _merge_prices(downloaded, old, aid, ticker, yahoo, ccy, fx):
         rates = fx[ccy].reindex(retained["date"])
         ok = rates.notna().to_numpy()
         retained.loc[ok, "fx_to_usd"] = rates.to_numpy()[ok]
-        for local, usd in (("close", "close_raw_usd"), ("adj_close", "close_adjusted_usd"),
-                           ("close", "close_usd"), ("adj_close", "adj_close_usd")):
-            retained.loc[ok, usd] = (
-                pd.to_numeric(retained.loc[ok, local], errors="coerce")
-                * pd.to_numeric(retained.loc[ok, "fx_to_usd"], errors="coerce"))
+        for local, usd in (
+            ("close", "close_raw_usd"),
+            ("adj_close", "close_adjusted_usd"),
+            ("close", "close_usd"),
+            ("adj_close", "adj_close_usd"),
+        ):
+            retained.loc[ok, usd] = pd.to_numeric(retained.loc[ok, local], errors="coerce") * pd.to_numeric(
+                retained.loc[ok, "fx_to_usd"], errors="coerce"
+            )
     combined = pd.concat([retained, fresh], ignore_index=True).sort_values("date")
     if combined.duplicated(["asset_id", "date"]).any():
         raise ValueError("Merged dataset contains duplicate dates")
@@ -139,8 +161,7 @@ def _returns(prices, aid, ticker):
     px["close_adjusted_usd"] = pd.to_numeric(px["close_adjusted_usd"], errors="coerce")
     px = px.loc[px["close_adjusted_usd"].gt(0)].sort_values("date")
     log = np.log(px["close_adjusted_usd"] / px["close_adjusted_usd"].shift(1))
-    out = pd.DataFrame({"date": px["date"], "asset_id": aid, "ticker": ticker,
-                        "ret_log_close_adjusted_usd": log})
+    out = pd.DataFrame({"date": px["date"], "asset_id": aid, "ticker": ticker, "ret_log_close_adjusted_usd": log})
     out = out.replace([np.inf, -np.inf], np.nan).dropna(subset=["ret_log_close_adjusted_usd"])
     out["ret_close_adjusted_usd"] = np.expm1(out["ret_log_close_adjusted_usd"])
     out["ret_adj_close_usd"] = out["ret_close_adjusted_usd"]
@@ -162,16 +183,18 @@ def _prepare(store, aid, prices, returns, old_manifests, root, *, identity_reset
             blob = io.BytesIO()
             group.to_parquet(blob, index=False)
             data = blob.getvalue()
-            record = {"table": table, "year": year, "manifest_key": key,
-                      "original_manifest_sha256": (
-                          hashlib.sha256(previous[key]).hexdigest() if key in previous else None),
-                      "rows": len(group),
-                      "dates": sorted(group["date"].dt.strftime("%Y-%m-%d").unique().tolist()),
-                      "sha256": hashlib.sha256(data).hexdigest(),
-                      "new_part": store._part_key(base, aid, year)}
+            record = {
+                "table": table,
+                "year": year,
+                "manifest_key": key,
+                "original_manifest_sha256": (hashlib.sha256(previous[key]).hexdigest() if key in previous else None),
+                "rows": len(group),
+                "dates": sorted(group["date"].dt.strftime("%Y-%m-%d").unique().tolist()),
+                "sha256": hashlib.sha256(data).hexdigest(),
+                "new_part": store._part_key(base, aid, year),
+            }
             stage_key = (
-                f"{store.base_prefix}/repairs/aea87/staging/{root.name}/"
-                f"asset_id={aid}/{table}/year={year}/part.parquet"
+                f"{store.base_prefix}/repairs/aea87/staging/{root.name}/asset_id={aid}/{table}/year={year}/part.parquet"
             )
             if store._key_exists(stage_key):
                 if hashlib.sha256(store._get_bytes(stage_key)).hexdigest() != record["sha256"]:
@@ -198,8 +221,14 @@ def _promote(store, aid, records, root, run_id):
         actual_sha = hashlib.sha256(originals[key]).hexdigest() if originals[key] is not None else None
         if actual_sha != item["original_manifest_sha256"]:
             raise RuntimeError(f"Concurrent manifest change: {key}")
-    journal = {"asset_id": aid, "run_id": run_id, "state": "PREPARING",
-               "records": records, "backups": {}, "committed": []}
+    journal = {
+        "asset_id": aid,
+        "run_id": run_id,
+        "state": "PREPARING",
+        "records": records,
+        "backups": {},
+        "committed": [],
+    }
     store._put_bytes(journal_key, _dump_json(journal), "application/json")
     for item in records:
         key = item["manifest_key"]
@@ -226,9 +255,13 @@ def _promote(store, aid, records, root, run_id):
             key = item["manifest_key"]
             if _read_manifest(store, key) != originals[key]:
                 raise RuntimeError(f"Concurrent manifest change: {key}")
-            updated = {"asset_id": aid, "year": item["year"],
-                       "dates": item["dates"], "parts": [item["new_part"]],
-                       "repair_run_id": run_id}
+            updated = {
+                "asset_id": aid,
+                "year": item["year"],
+                "dates": item["dates"],
+                "parts": [item["new_part"]],
+                "repair_run_id": run_id,
+            }
             store._put_bytes(key, _dump_json(updated), "application/json")
             journal["committed"].append(key)
             journal["state"] = "COMMITTING"
@@ -267,12 +300,31 @@ def _repair_assets_from_universe(frame, selected):
     return u
 
 
-def run(*, cfg, bad_cells, fx_parquet, universe_path, start, end,
-        max_assets, confirm_prod_write, mode="prepare", run_id=None, repair_asset_ids=None, reset_asset_ids=None):
+def run(
+    *,
+    cfg,
+    bad_cells,
+    fx_parquet,
+    universe_path,
+    start,
+    end,
+    max_assets,
+    confirm_prod_write,
+    mode="prepare",
+    run_id=None,
+    repair_asset_ids=None,
+    reset_asset_ids=None,
+):
     from alpha_edge.market.ingest_market_data import (
-        download_ohlcv, _clean_ccy, _normalize_crypto_symbol_to_yahoo,
-        _normalize_fx_symbol_to_yahoo, _is_fx_pair_like_symbol, _make_market_store,
-        _cfg_bucket, _cfg_region, _cfg_market_root,
+        download_ohlcv,
+        _clean_ccy,
+        _normalize_crypto_symbol_to_yahoo,
+        _normalize_fx_symbol_to_yahoo,
+        _is_fx_pair_like_symbol,
+        _make_market_store,
+        _cfg_bucket,
+        _cfg_region,
+        _cfg_market_root,
     )
 
     if repair_asset_ids is not None:
@@ -298,6 +350,7 @@ def run(*, cfg, bad_cells, fx_parquet, universe_path, start, end,
         raise ValueError("Repair mode must be prepare or promote")
     if mode == "promote":
         from alpha_edge.core.runtime import require_prod_confirmation
+
         require_prod_confirmation(cfg, bool(confirm_prod_write))
         if not confirm_prod_write or str(getattr(cfg, "env", "")) != "prod":
             raise ValueError("Production promotion requires --env prod --confirm-prod-write")
@@ -311,8 +364,7 @@ def run(*, cfg, bad_cells, fx_parquet, universe_path, start, end,
     # Promotion consumes the exact S3 preparation manifest.
     # Never re-download Yahoo data during publication.
     if mode == "promote":
-        store = _make_market_store(bucket=_cfg_bucket(cfg), region=_cfg_region(cfg),
-                                   market_root=_cfg_market_root(cfg))
+        store = _make_market_store(bucket=_cfg_bucket(cfg), region=_cfg_region(cfg), market_root=_cfg_market_root(cfg))
         campaign_key = f"{store.base_prefix}/repairs/aea87/staging/{run_id}/prepared_campaign.json"
         campaign = _json(store._get_bytes(campaign_key))
         if campaign.get("run_id") != run_id:
@@ -346,14 +398,24 @@ def run(*, cfg, bad_cells, fx_parquet, universe_path, start, end,
         if any(x["status"] != "COMMITTED" for x in report):
             print("PARTIAL_CAMPAIGN: trusted cache publication deferred")
             return
-        cmd = [sys.executable, "-m", "alpha_edge.market.build_returns_wide_cache",
-               "--env", "prod", "--confirm-prod-write", "--mode", "full", "--force"]
+        cmd = [
+            sys.executable,
+            "-m",
+            "alpha_edge.market.build_returns_wide_cache",
+            "--env",
+            "prod",
+            "--confirm-prod-write",
+            "--mode",
+            "full",
+            "--force",
+        ]
         subprocess.run(cmd, check=True)
         print(f"COMMITTED_AND_CACHE_REBUILT; report={f's3://{store.bucket}/{report_key}'}")
         return
     from urllib.parse import urlparse
-    store = _make_market_store(bucket=_cfg_bucket(cfg), region=_cfg_region(cfg),
-                               market_root=_cfg_market_root(cfg))
+
+    store = _make_market_store(bucket=_cfg_bucket(cfg), region=_cfg_region(cfg), market_root=_cfg_market_root(cfg))
+
     def read_s3_csv(uri, label):
         parsed = urlparse(str(uri))
         if parsed.scheme != "s3" or parsed.netloc != store.bucket or not parsed.path.lstrip("/"):
@@ -407,8 +469,9 @@ def run(*, cfg, bad_cells, fx_parquet, universe_path, start, end,
     prepared = []
     for _, row in u.iterrows():
         aid = row["asset_id"]
-        sym = _normalize_crypto_symbol_to_yahoo(_normalize_fx_symbol_to_yahoo(str(
-            row.get("yahoo_ticker") or row.get("ticker") or "").upper()))
+        sym = _normalize_crypto_symbol_to_yahoo(
+            _normalize_fx_symbol_to_yahoo(str(row.get("yahoo_ticker") or row.get("ticker") or "").upper())
+        )
         ccy = _clean_ccy(row.get("currency"))
         if aid.startswith("CRYPTO:") or _is_fx_pair_like_symbol(sym):
             ccy = "USD"
@@ -421,35 +484,58 @@ def run(*, cfg, bad_cells, fx_parquet, universe_path, start, end,
             if downloaded.empty:
                 raise ValueError("Source history unavailable")
             prices, refreshed, retained, retained_dates = _merge_prices(
-                downloaded, old_prices.iloc[0:0] if aid in reset_ids else old_prices,
-                aid, str(row.get("ticker") or sym), sym, ccy, fx)
+                downloaded,
+                old_prices.iloc[0:0] if aid in reset_ids else old_prices,
+                aid,
+                str(row.get("ticker") or sym),
+                sym,
+                ccy,
+                fx,
+            )
             returns = _returns(prices, aid, str(row.get("ticker") or sym))
             flagged_preserved = int(bad.loc[bad["asset_id"].eq(aid), "date"].isin(retained_dates).sum())
-            records = _prepare(store, aid, prices, returns,
-                               {"ohlcv_usd": op, "returns_usd": or_}, root,
-                               identity_reset=aid in reset_ids)
+            records = _prepare(
+                store,
+                aid,
+                prices,
+                returns,
+                {"ohlcv_usd": op, "returns_usd": or_},
+                root,
+                identity_reset=aid in reset_ids,
+            )
             prepared.append((aid, records, flagged_preserved))
-            report.append({"asset_id": aid, "status": "PREPARED", "fresh_rows": refreshed,
-                           "retained_rows": retained, "flagged_retained": flagged_preserved,
-                           "partitions": len(records),
-                           "identity_reset": aid in reset_ids,
-                           "superseded_manifest_keys": sorted(set(op) | set(or_)) if aid in reset_ids else []})
+            report.append(
+                {
+                    "asset_id": aid,
+                    "status": "PREPARED",
+                    "fresh_rows": refreshed,
+                    "retained_rows": retained,
+                    "flagged_retained": flagged_preserved,
+                    "partitions": len(records),
+                    "identity_reset": aid in reset_ids,
+                    "superseded_manifest_keys": sorted(set(op) | set(or_)) if aid in reset_ids else [],
+                }
+            )
         except Exception as exc:
-            report.append({"asset_id": aid, "status": "SOURCE_UNAVAILABLE_OR_FAILED",
-                           "error": str(exc)})
+            report.append({"asset_id": aid, "status": "SOURCE_UNAVAILABLE_OR_FAILED", "error": str(exc)})
         report_key = f"{store.base_prefix}/repairs/aea87/staging/{run_id}/campaign_report.json"
     store._put_bytes(report_key, _dump_json(report), "application/json")
     if mode == "prepare":
-        manifest = {"run_id": run_id, "report": report, "prepared": [
-            {"asset_id": aid, "records": records, "flagged_retained": flagged,
-             "identity_reset": aid in reset_ids}
-            for aid, records, flagged in prepared
-        ]}
+        manifest = {
+            "run_id": run_id,
+            "report": report,
+            "prepared": [
+                {"asset_id": aid, "records": records, "flagged_retained": flagged, "identity_reset": aid in reset_ids}
+                for aid, records, flagged in prepared
+            ],
+        }
         campaign_key = f"{store.base_prefix}/repairs/aea87/staging/{run_id}/prepared_campaign.json"
         if store._key_exists(campaign_key):
             raise FileExistsError(f"Campaign manifest already exists: {campaign_key}")
         store._put_bytes(campaign_key, _dump_json(manifest), "application/json")
         if _json(store._get_bytes(campaign_key)) != manifest:
             raise IOError("S3 campaign manifest readback mismatch")
-        print(f"PREPARED_TO_S3 {len(prepared)} assets; {len(unmapped)} unmapped; manifest=s3://{store.bucket}/{campaign_key}")
+        print(
+            f"PREPARED_TO_S3 {len(prepared)} assets; {len(unmapped)} unmapped; manifest=s3://{store.bucket}/{campaign_key}"
+        )
         return

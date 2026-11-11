@@ -5,13 +5,13 @@ safe even with unresolved quality. Activation is fail-closed: ALL cohorts must
 have accepted independent reports and explicit source-evidence gate approval.
 Production v1 keys are never changed. Uses Alpha Edge's existing S3 audit log.
 """
+
 from __future__ import annotations
 
 import argparse
 import hashlib
 import json
 import re
-from typing import Any
 
 from botocore.exceptions import ClientError
 
@@ -54,16 +54,17 @@ def get(s3, bucket: str, key: str) -> bytes | None:
 def immutable_put(s3, bucket: str, key: str, body: bytes) -> None:
     if get(s3, bucket, key) is not None:
         raise ReleaseError(f"Immutable key occupied: {key}")
-    s3.put_object(Bucket=bucket, Key=key, Body=body,
-                  IfNoneMatch="*", ContentType="application/json")
+    s3.put_object(Bucket=bucket, Key=key, Body=body, IfNoneMatch="*", ContentType="application/json")
 
 
 def verify_object(s3, bucket: str, record: dict) -> bytes:
     key, digest = record.get("key"), record.get("sha256")
-    if not isinstance(key, str) or not (
-        key.startswith(ROOT + "/")
-        or key.startswith("dev/market/lake_v2/")
-    ) or "/../" in key or "/./" in key:
+    if (
+        not isinstance(key, str)
+        or not (key.startswith(ROOT + "/") or key.startswith("dev/market/lake_v2/"))
+        or "/../" in key
+        or "/./" in key
+    ):
         raise ReleaseError(f"Untrusted market data key: {key!r}")
     if not isinstance(digest, str) or not re.fullmatch("[0-9a-f]{64}", digest):
         raise ReleaseError("Missing verified source SHA-256")
@@ -96,8 +97,7 @@ def validate_release(s3, bucket: str, release: dict, *, require_approval: bool) 
         if seen_assets.intersection(c["assets"]):
             raise ReleaseError("Asset overlaps between release cohorts")
         seen_assets.update(c["assets"])
-        for field in ("bronze", "silver", "gold", "fx", "acceptance",
-                      "indicator_candidate"):
+        for field in ("bronze", "silver", "gold", "fx", "acceptance", "indicator_candidate"):
             if not isinstance(c.get(field), dict):
                 raise ReleaseError(f"Missing {field} lineage")
             data = verify_object(s3, bucket, c[field])
@@ -118,7 +118,11 @@ def validate_release(s3, bucket: str, release: dict, *, require_approval: bool) 
             verify_object(s3, bucket, c["corrections"])
         if require_approval:
             signed = c.get("independent_approval")
-            if not isinstance(signed, dict) or not isinstance(signed.get("reviewer"), str) or not signed["reviewer"].strip():
+            if (
+                not isinstance(signed, dict)
+                or not isinstance(signed.get("reviewer"), str)
+                or not signed["reviewer"].strip()
+            ):
                 raise ReleaseError("Explicit independent reviewer approval required")
             if signed.get("acceptance_manifest_sha256") != c["acceptance"]["sha256"]:
                 raise ReleaseError("Reviewer approval not pinned to acceptance evidence")
@@ -151,12 +155,16 @@ def stage(s3, *, bucket: str, release: dict, execute: bool) -> dict:
             raise ReleaseError("Existing release ID has different immutable contents")
         if get(s3, bucket, release_key) != body:
             raise ReleaseError("Staged release read-back mismatch")
-    return {"state": "staged" if execute else "dry_run", "release_key": release_key,
-            "release_sha256": sha(body), **totals, "consumer_cutover": False}
+    return {
+        "state": "staged" if execute else "dry_run",
+        "release_key": release_key,
+        "release_sha256": sha(body),
+        **totals,
+        "consumer_cutover": False,
+    }
 
 
-def activate(s3, *, bucket: str, release_key: str, approved_sha256: str,
-             execute: bool) -> dict:
+def activate(s3, *, bucket: str, release_key: str, approved_sha256: str, execute: bool) -> dict:
     if not re.fullmatch(r"market/lake_v2/releases/candidates/[A-Za-z0-9_.-]+\.json", release_key):
         raise ReleaseError("Activation only accepts immutable v2 release candidates")
     if not re.fullmatch("[0-9a-f]{64}", approved_sha256):
@@ -172,13 +180,12 @@ def activate(s3, *, bucket: str, release_key: str, approved_sha256: str,
         return {"state": "already_current", "release_id": release["release_id"]}
     if previous is not None and previous.get("as_of") is not None:
         if release["as_of"] <= previous["as_of"]:
-            raise ReleaseError(
-                "Refusing nonmonotonic Gold activation; audited rollback requires a separate operation"
-            )
+            raise ReleaseError("Refusing nonmonotonic Gold activation; audited rollback requires a separate operation")
     pointer = {
         "schema": "alpha_edge_v2_release_pointer_1",
         "release_id": release["release_id"],
-        "release_key": release_key, "release_sha256": approved_sha256,
+        "release_key": release_key,
+        "release_sha256": approved_sha256,
         "previous_release_id": previous.get("release_id") if previous else None,
         "previous_release_key": previous.get("release_key") if previous else None,
         "as_of": release["as_of"],
@@ -191,8 +198,7 @@ def activate(s3, *, bucket: str, release_key: str, approved_sha256: str,
         if get(s3, bucket, CURRENT) != current:
             raise ReleaseError("Concurrent pointer modification")
         params["IfMatch"] = etag
-    s3.put_object(Bucket=bucket, Key=CURRENT, Body=encoded(pointer),
-                  ContentType="application/json", **params)
+    s3.put_object(Bucket=bucket, Key=CURRENT, Body=encoded(pointer), ContentType="application/json", **params)
     if get(s3, bucket, CURRENT) != encoded(pointer):
         raise ReleaseError("Pointer activation verification failed")
     return {"state": "activated", "pointer": pointer}
@@ -214,6 +220,7 @@ def main():
     if a.execute:
         require_prod_confirmation(cfg, a.confirm_prod_write)
     import boto3
+
     s3 = boto3.client("s3", region_name=a.region or cfg.region)
     run_id = make_run_id("market_v2_release")
     try:
@@ -224,30 +231,40 @@ def main():
             if candidate is None:
                 raise ReleaseError("Candidate S3 JSON does not exist")
             release = json.loads(candidate)
-            result = stage(s3, bucket=bucket, release=release,
-                           execute=a.execute and a.action == "stage")
+            result = stage(s3, bucket=bucket, release=release, execute=a.execute and a.action == "stage")
         else:
             if not a.release_key or not a.approval_sha256:
                 p.error("--release-key and --approval-sha256 required")
-            result = activate(s3, bucket=bucket, release_key=a.release_key,
-                              approved_sha256=a.approval_sha256, execute=a.execute)
+            result = activate(
+                s3, bucket=bucket, release_key=a.release_key, approved_sha256=a.approval_sha256, execute=a.execute
+            )
     except Exception as exc:
         if a.execute:
             event = build_audit_event(
-                cfg=cfg, event_type="market_v2_release", entity_type="market_lake",
-                entity_id=a.release_key or a.candidate_s3_key, as_of=None,
+                cfg=cfg,
+                event_type="market_v2_release",
+                entity_type="market_lake",
+                entity_id=a.release_key or a.candidate_s3_key,
+                as_of=None,
                 source_script="alpha_edge.market.production_gold_release_v2",
-                source_mode=a.action, status="failed", run_id=run_id,
+                source_mode=a.action,
+                status="failed",
+                run_id=run_id,
                 error=f"{type(exc).__name__}: {exc}",
             )
             write_audit_event(cfg=cfg, event=event)
         raise
     if a.execute:
         event = build_audit_event(
-            cfg=cfg, event_type="market_v2_release", entity_type="market_lake",
-            entity_id=a.release_key or a.candidate_s3_key, as_of=None,
+            cfg=cfg,
+            event_type="market_v2_release",
+            entity_type="market_lake",
+            entity_id=a.release_key or a.candidate_s3_key,
+            as_of=None,
             source_script="alpha_edge.market.production_gold_release_v2",
-            source_mode=a.action, status="success", run_id=run_id,
+            source_mode=a.action,
+            status="success",
+            run_id=run_id,
             output_keys=[result.get("release_key", CURRENT)],
             metadata=result,
         )

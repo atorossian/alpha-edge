@@ -32,9 +32,7 @@ def s3_key_exists(s3, *, bucket: str, key: str) -> bool:
 
 
 def parse_args() -> argparse.Namespace:
-    ap = argparse.ArgumentParser(
-        description="Build ONLY fct_daily_report_stats warehouse partition for a single dt."
-    )
+    ap = argparse.ArgumentParser(description="Build ONLY fct_daily_report_stats warehouse partition for a single dt.")
 
     ap.add_argument("--env", default=None, choices=["dev", "staging", "prod"])
     ap.add_argument("--confirm-prod-write", action="store_true")
@@ -142,7 +140,9 @@ def main_with_audit() -> None:
                 event_type="build_dataset",
                 entity_type="daily_report_stats",
                 entity_id=None,
-                as_of=str(getattr(args, "as_of", None) or getattr(args, "dt", None) or getattr(args, "run_dt", None) or ""),
+                as_of=str(
+                    getattr(args, "as_of", None) or getattr(args, "dt", None) or getattr(args, "run_dt", None) or ""
+                ),
                 source_script="build_report_stats.py",
                 source_mode="daily_report_stats",
                 status=("dry_run" if is_dry_run else "success"),
@@ -161,7 +161,9 @@ def main_with_audit() -> None:
                 event_type="build_dataset",
                 entity_type="daily_report_stats",
                 entity_id=None,
-                as_of=str(getattr(args, "as_of", None) or getattr(args, "dt", None) or getattr(args, "run_dt", None) or ""),
+                as_of=str(
+                    getattr(args, "as_of", None) or getattr(args, "dt", None) or getattr(args, "run_dt", None) or ""
+                ),
                 source_script="build_report_stats.py",
                 source_mode="daily_report_stats",
                 status="failed",

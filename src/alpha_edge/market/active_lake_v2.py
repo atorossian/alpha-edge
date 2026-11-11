@@ -4,6 +4,7 @@ Reads only an explicitly approved active release pointer; never falls back
 to unapproved research, dev candidates or legacy MarketStore v1 data.
 Asset lookups load one cohort rather than every dataset in the universe.
 """
+
 from __future__ import annotations
 
 import io
@@ -41,8 +42,9 @@ class ActiveLakeV2:
         if version is None or sha(version) != pointer.get("release_sha256"):
             raise ActiveMarketDataError("Active release manifest SHA mismatch")
         release = json.loads(version)
-        if (release.get("schema") != "alpha_edge_v2_release_candidate_1"
-                or release.get("release_id") != pointer.get("release_id")):
+        if release.get("schema") != "alpha_edge_v2_release_candidate_1" or release.get("release_id") != pointer.get(
+            "release_id"
+        ):
             raise ActiveMarketDataError("Active release identity mismatch")
         if len(release.get("cohorts", [])) != release.get("expected_cohorts"):
             raise ActiveMarketDataError("Active release cohort population incomplete")
@@ -54,8 +56,9 @@ class ActiveLakeV2:
             raise ActiveMarketDataError(f"Asset missing or ambiguous in active release: {asset_id}")
         return matches[0]
 
-    def read_asset(self, asset_id: str, *, layer: str,
-                   start: str | None = None, end: str | None = None) -> pd.DataFrame:
+    def read_asset(
+        self, asset_id: str, *, layer: str, start: str | None = None, end: str | None = None
+    ) -> pd.DataFrame:
         if layer not in {"silver", "gold", "indicator_candidate"}:
             raise ActiveMarketDataError("Only Silver, Gold or indicator data can be read")
         cohort = self._cohort(asset_id)
@@ -87,16 +90,20 @@ class ActiveLakeV2:
 
     def prices(self, asset_id: str, **kwargs) -> pd.DataFrame:
         data = self.read_asset(asset_id, layer="gold", **kwargs)
-        columns = ["asset_id", "session_date", "close_raw_usd",
-                   "close_adjusted_usd", "quality_status"]
+        columns = ["asset_id", "session_date", "close_raw_usd", "close_adjusted_usd", "quality_status"]
         if missing := set(columns) - set(data):
             raise ActiveMarketDataError(f"Gold price contract missing: {missing}")
         return data[columns].rename(columns={"session_date": "date"})
 
     def returns(self, asset_id: str, **kwargs) -> pd.DataFrame:
         data = self.read_asset(asset_id, layer="gold", **kwargs)
-        columns = ["asset_id", "session_date", "ret_simple_close_adjusted_usd",
-                   "ret_log_close_adjusted_usd", "return_quality_status"]
+        columns = [
+            "asset_id",
+            "session_date",
+            "ret_simple_close_adjusted_usd",
+            "ret_log_close_adjusted_usd",
+            "return_quality_status",
+        ]
         if missing := set(columns) - set(data):
             raise ActiveMarketDataError(f"Gold return contract missing: {missing}")
         return data[columns].rename(columns={"session_date": "date"})

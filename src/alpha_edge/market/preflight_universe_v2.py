@@ -4,6 +4,7 @@ Each included asset must have explicit source identity, quote currency and
 exchange calendar; each non-USD currency must have an approved Yahoo FX pair
 and quote direction. No inference from suffixes or legacy metadata.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -27,13 +28,13 @@ def _nonblank(table: pd.DataFrame, cols: tuple[str, ...], label: str):
     if missing := set(cols) - set(table.columns):
         raise UniversePreflightError(f"{label} missing columns: {sorted(missing)}")
     for col in cols:
-        if (table[col].isna().any() or
-            table[col].astype(str).str.strip().isin({"", "nan", "None", "NULL"}).any()):
+        if table[col].isna().any() or table[col].astype(str).str.strip().isin({"", "nan", "None", "NULL"}).any():
             raise UniversePreflightError(f"{label}: empty {col}")
 
 
-def prepare_registry(universe: pd.DataFrame, fx_config: pd.DataFrame,
-                     *, check_calendars: bool = True) -> tuple[pd.DataFrame, pd.DataFrame]:
+def prepare_registry(
+    universe: pd.DataFrame, fx_config: pd.DataFrame, *, check_calendars: bool = True
+) -> tuple[pd.DataFrame, pd.DataFrame]:
     u = universe.copy()
     if "include" in u:
         included = pd.to_numeric(u["include"], errors="coerce")
@@ -50,8 +51,7 @@ def prepare_registry(universe: pd.DataFrame, fx_config: pd.DataFrame,
         raise UniversePreflightError("Duplicate asset IDs")
     if u["yahoo_ticker"].duplicated().any():
         raise UniversePreflightError("Ambiguous repeated Yahoo symbol")
-    if u[["asset_id", "yahoo_ticker"]].apply(
-            lambda s: s.str.contains(r"[/\\]|\.\.", regex=True)).any().any():
+    if u[["asset_id", "yahoo_ticker"]].apply(lambda s: s.str.contains(r"[/\\]|\.\.", regex=True)).any().any():
         raise UniversePreflightError("Unsafe asset or provider symbol")
     fx = fx_config.copy()
     _nonblank(fx, FX_REQUIRED, "FX reference")
@@ -70,25 +70,24 @@ def prepare_registry(universe: pd.DataFrame, fx_config: pd.DataFrame,
         raise UniversePreflightError(f"Missing FX mapping for {sorted(missing)}")
     if check_calendars:
         import pandas_market_calendars as mcal
+
         for cid in u["calendar_id"].unique():
             try:
                 mcal.get_calendar(cid)
             except (ValueError, KeyError, RuntimeError) as exc:
                 raise UniversePreflightError(f"Unknown exchange calendar: {cid}") from exc
-    return u.sort_values("asset_id").reset_index(drop=True), fx.loc[
-        fx["currency"].isin(required_ccy)
-    ].sort_values("currency").reset_index(drop=True)
+    return u.sort_values("asset_id").reset_index(drop=True), fx.loc[fx["currency"].isin(required_ccy)].sort_values(
+        "currency"
+    ).reset_index(drop=True)
 
 
 def make_cohorts(u: pd.DataFrame, *, cohort_size: int) -> list[pd.DataFrame]:
     if cohort_size < 1 or cohort_size > 100:
         raise UniversePreflightError("Cohort size must be between 1 and 100")
-    return [u.iloc[i:i + cohort_size].copy()
-            for i in range(0, len(u), cohort_size)]
+    return [u.iloc[i : i + cohort_size].copy() for i in range(0, len(u), cohort_size)]
 
 
-def prepare(*, universe_csv: Path, fx_csv: Path, output: Path,
-            cohort_size: int = 25) -> dict:
+def prepare(*, universe_csv: Path, fx_csv: Path, output: Path, cohort_size: int = 25) -> dict:
     if output.exists():
         raise FileExistsError(f"Refusing to overwrite preflight output: {output}")
     universe = pd.read_csv(universe_csv, dtype={"asset_id": "string"})
@@ -116,9 +115,11 @@ def prepare(*, universe_csv: Path, fx_csv: Path, output: Path,
         "status": "configuration_pass_not_data_acceptance",
         "s3_writes": 0,
         "production_eligible": False,
-        "limitations": ("Valid configuration does not establish FX observation timing, "
-                        "historical price accuracy, corporate-action factors or source "
-                        "provider capacity. Cohorts are plans, not ingestion runs."),
+        "limitations": (
+            "Valid configuration does not establish FX observation timing, "
+            "historical price accuracy, corporate-action factors or source "
+            "provider capacity. Cohorts are plans, not ingestion runs."
+        ),
     }
     (output / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     return manifest
@@ -131,8 +132,11 @@ def main():
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--cohort-size", type=int, default=25)
     a = parser.parse_args()
-    print(json.dumps(prepare(universe_csv=a.universe_csv, fx_csv=a.fx_csv,
-                             output=a.output, cohort_size=a.cohort_size), indent=2))
+    print(
+        json.dumps(
+            prepare(universe_csv=a.universe_csv, fx_csv=a.fx_csv, output=a.output, cohort_size=a.cohort_size), indent=2
+        )
+    )
 
 
 if __name__ == "__main__":

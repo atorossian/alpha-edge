@@ -27,7 +27,6 @@ from alpha_edge.portfolio.take_profit import (
 from alpha_edge.portfolio.execution_engine import weights_to_discrete_shares
 from alpha_edge.market.regime_filter import RegimeFilterState
 from alpha_edge.core.schemas import ScoreConfig, Position
-from alpha_edge.market.regime_leverage import leverage_from_hmm
 from alpha_edge.portfolio.report_engine import (
     build_portfolio_report,
     summarize_report,
@@ -41,13 +40,6 @@ from alpha_edge.risk.actuarial.portfolio_search_output import (
     maybe_print_actuarial_diagnostic_section,
 )
 
-from alpha_edge.market.hmm_engine import (
-    GaussianHMM,
-    compute_state_diagnostics,
-    label_states_4,
-    regime_probs_from_state_probs,
-    select_regime_label,
-)
 from alpha_edge.market.build_returns_wide_cache import build_returns_wide_cache, CacheConfig
 
 from alpha_edge.portfolio.portfolio_health import (
@@ -66,7 +58,6 @@ from alpha_edge.core.data_loader import (
     parse_ledger_positions_obj,
     clean_returns_matrix,
     s3_get_json,
-    s3_load_latest_json_asof,
 )
 from alpha_edge.portfolio.rebalance_engine import (
     RebalanceState,
@@ -116,7 +107,9 @@ def _load_returns_wide_cache(
     return df
 
 
-def _compute_live_equity_from_ledger_and_prices(*, pnl_summary: dict, spot_rows: list[dict], prices_for_valuation: pd.Series) -> float:
+def _compute_live_equity_from_ledger_and_prices(
+    *, pnl_summary: dict, spot_rows: list[dict], prices_for_valuation: pd.Series
+) -> float:
     net_cashflow = float(pnl_summary.get("net_cashflow_usd", 0.0) or 0.0)
     realized = float(pnl_summary.get("realized_pnl", 0.0) or 0.0)
     dividends = float(pnl_summary.get("dividends_pnl_usd", 0.0) or 0.0)
@@ -138,15 +131,21 @@ def _compute_live_equity_from_ledger_and_prices(*, pnl_summary: dict, spot_rows:
             continue
         unrealized += (float(px) - float(avg_cost)) * qty if qty > 0 else (float(avg_cost) - float(px)) * abs(qty)
     if missing:
-        raise RuntimeError("Cannot compute live equity: missing valuation prices for " + ", ".join(sorted(set(missing))))
+        raise RuntimeError(
+            "Cannot compute live equity: missing valuation prices for " + ", ".join(sorted(set(missing)))
+        )
     equity = net_cashflow + realized + dividends + unrealized
-    print("[equity] source=ledger_cashflows_realized_dividends_plus_live_marks "
-          f"net_cashflow={net_cashflow:.2f} realized={realized:.2f} dividends={dividends:.2f} "
-          f"live_unrealized={unrealized:.2f} equity={equity:.2f}")
+    print(
+        "[equity] source=ledger_cashflows_realized_dividends_plus_live_marks "
+        f"net_cashflow={net_cashflow:.2f} realized={realized:.2f} dividends={dividends:.2f} "
+        f"live_unrealized={unrealized:.2f} equity={equity:.2f}"
+    )
     return float(equity)
 
 
-def _asset_id_ticker_maps_from_ledger_rows(*, spot_rows: list[dict], deriv_rows: list[dict]) -> tuple[dict[str, str], dict[str, str]]:
+def _asset_id_ticker_maps_from_ledger_rows(
+    *, spot_rows: list[dict], deriv_rows: list[dict]
+) -> tuple[dict[str, str], dict[str, str]]:
     asset_to_ticker, ticker_to_asset = {}, {}
     for r in list(spot_rows or []) + list(deriv_rows or []):
         aid = str(r.get("asset_id") or "").strip()
@@ -161,10 +160,17 @@ def _asset_id_ticker_maps_from_ledger_rows(*, spot_rows: list[dict], deriv_rows:
 
 
 def _build_live_augmented_returns_for_portfolio(
-    *, returns_wide: pd.DataFrame, spot_rows: list[dict], deriv_rows: list[dict],
-    latest_close_prices: pd.Series, prices_for_valuation: pd.Series, as_of_run_date: str,
+    *,
+    returns_wide: pd.DataFrame,
+    spot_rows: list[dict],
+    deriv_rows: list[dict],
+    latest_close_prices: pd.Series,
+    prices_for_valuation: pd.Series,
+    as_of_run_date: str,
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
-    asset_to_ticker, ticker_to_asset = _asset_id_ticker_maps_from_ledger_rows(spot_rows=spot_rows, deriv_rows=deriv_rows)
+    asset_to_ticker, ticker_to_asset = _asset_id_ticker_maps_from_ledger_rows(
+        spot_rows=spot_rows, deriv_rows=deriv_rows
+    )
     if not asset_to_ticker:
         raise RuntimeError("No asset_id/ticker pairs in ledger positions for returns_wide evaluation.")
     missing = [aid for aid in asset_to_ticker if aid not in returns_wide.columns]
@@ -201,20 +207,27 @@ def _build_live_augmented_returns_for_portfolio(
         "live_returns": {k: float(v) for k, v in live.items()},
         "rows": int(len(df)),
     }
-    print(f"[returns_eval] source=returns_wide_plus_live_row assets={len(df.columns)} rows={len(df)} live_date={meta['live_return_date']}")
+    print(
+        f"[returns_eval] source=returns_wide_plus_live_row assets={len(df.columns)} rows={len(df)} live_date={meta['live_return_date']}"
+    )
     return df, meta
 
 
 def _clamp01(x: float) -> float:
-    try: v = float(x)
-    except Exception: return 0.0
+    try:
+        v = float(x)
+    except Exception:
+        return 0.0
     return 0.0 if not np.isfinite(v) else float(min(1.0, max(0.0, v)))
 
 
 def _safe_ratio_good(value: float, cap: float) -> float:
-    try: v, c = abs(float(value)), abs(float(cap))
-    except Exception: return 0.0
-    if not np.isfinite(v) or not np.isfinite(c) or c <= 0: return 0.0
+    try:
+        v, c = abs(float(value)), abs(float(cap))
+    except Exception:
+        return 0.0
+    if not np.isfinite(v) or not np.isfinite(c) or c <= 0:
+        return 0.0
     return _clamp01(1.0 - v / c)
 
 
@@ -251,11 +264,7 @@ def _parse_portfolio_health_compat(raw: dict | None):
         if not isinstance(raw, dict):
             raise
 
-        cleaned = {
-            k: v
-            for k, v in raw.items()
-            if k not in _HEALTH_LATEST_EXTRA_KEYS
-        }
+        cleaned = {k: v for k, v in raw.items() if k not in _HEALTH_LATEST_EXTRA_KEYS}
         return parse_portfolio_health(cleaned)
 
 
@@ -288,16 +297,11 @@ def _build_health_latest_payload(
     """
     legacy = asdict(current_health)
 
-    normalized_health_score = _none_if_not_finite(
-        health_score_payload.get("health_score")
-    )
-    raw_optimizer_score = _none_if_not_finite(
-        health_score_payload.get("raw_optimizer_score")
-    )
+    normalized_health_score = _none_if_not_finite(health_score_payload.get("health_score"))
+    raw_optimizer_score = _none_if_not_finite(health_score_payload.get("raw_optimizer_score"))
 
     out = {
         **legacy,
-
         # Explicit normalized health fields for consumers such as transition
         # assessment and shadow validation.
         "schema_version": "portfolio_health_latest_v2",
@@ -305,7 +309,6 @@ def _build_health_latest_payload(
         "normalized_health_score": normalized_health_score,
         "portfolio_health_score": normalized_health_score,
         "health_grade": health_score_payload.get("health_grade"),
-
         # Keep the old `score` field from `current_health` for backward
         # compatibility, but expose explicit raw aliases so consumers do not
         # confuse it with normalized health.
@@ -313,7 +316,6 @@ def _build_health_latest_payload(
         "raw_optimizer_score": raw_optimizer_score,
         "score_semantics": "legacy_raw_daily_report_score_not_normalized",
         "health_score_semantics": "normalized_0_100_daily_report_health_score",
-
         # Full explainability payload.
         "health_score_payload": dict(health_score_payload),
         "legacy_portfolio_health": legacy,
@@ -329,28 +331,82 @@ def _build_health_latest_payload(
     return out
 
 
-def _compute_daily_health_score(*, metrics, score_cfg: ScoreConfig, goals: list[float], main_goal: float) -> dict[str, Any]:
-    p_map = {float(goals[0]): float(getattr(metrics, "p_hit_goal_1_1y", 0.0)), float(goals[1]): float(getattr(metrics, "p_hit_goal_2_1y", 0.0)), float(goals[2]): float(getattr(metrics, "p_hit_goal_3_1y", 0.0))}
+def _compute_daily_health_score(
+    *, metrics, score_cfg: ScoreConfig, goals: list[float], main_goal: float
+) -> dict[str, Any]:
+    p_map = {
+        float(goals[0]): float(getattr(metrics, "p_hit_goal_1_1y", 0.0)),
+        float(goals[1]): float(getattr(metrics, "p_hit_goal_2_1y", 0.0)),
+        float(goals[2]): float(getattr(metrics, "p_hit_goal_3_1y", 0.0)),
+    }
     p_main = float(p_map.get(float(main_goal), 0.0))
     comp = {
         "goal_probability": _clamp01(p_main),
         "ruin": _safe_ratio_good(getattr(metrics, "ruin_prob_1y", np.nan), getattr(score_cfg, "ruin_cap", 0.10)),
         "max_drawdown": _safe_ratio_good(abs(float(getattr(metrics, "max_drawdown", np.nan))), 0.40),
-        "cvar_95": _safe_ratio_good(abs(float(getattr(metrics, "cvar_95", np.nan))), getattr(score_cfg, "cvar_cap", 0.03)),
+        "cvar_95": _safe_ratio_good(
+            abs(float(getattr(metrics, "cvar_95", np.nan))), getattr(score_cfg, "cvar_cap", 0.03)
+        ),
         "stability_energy": _safe_ratio_good(getattr(metrics, "stability_energy", np.nan), 2.00),
-        "path_mdd_mean": _safe_ratio_good(getattr(metrics, "path_mdd_mean", np.nan), getattr(score_cfg, "path_mdd_mean_cap", 0.30)),
+        "path_mdd_mean": _safe_ratio_good(
+            getattr(metrics, "path_mdd_mean", np.nan), getattr(score_cfg, "path_mdd_mean_cap", 0.30)
+        ),
         "cdar_95": _safe_ratio_good(getattr(metrics, "cdar_95", np.nan), 0.60),
-        "p_dd_breach": _safe_ratio_good(getattr(metrics, "p_dd_breach", np.nan), getattr(score_cfg, "p_dd_breach_cap", 0.25)),
-        "underwater_mean": _safe_ratio_good(getattr(metrics, "underwater_mean", np.nan), getattr(score_cfg, "underwater_mean_cap", 1.0)),
-        "ttr_mean_days": _safe_ratio_good(getattr(metrics, "ttr_mean_days", np.nan), getattr(score_cfg, "ttr_cap_days", 252.0)),
-        "deployment": 1.0, "cash": 1.0, "weight_drift": 1.0, "dropped_weight": 1.0,
+        "p_dd_breach": _safe_ratio_good(
+            getattr(metrics, "p_dd_breach", np.nan), getattr(score_cfg, "p_dd_breach_cap", 0.25)
+        ),
+        "underwater_mean": _safe_ratio_good(
+            getattr(metrics, "underwater_mean", np.nan), getattr(score_cfg, "underwater_mean_cap", 1.0)
+        ),
+        "ttr_mean_days": _safe_ratio_good(
+            getattr(metrics, "ttr_mean_days", np.nan), getattr(score_cfg, "ttr_cap_days", 252.0)
+        ),
+        "deployment": 1.0,
+        "cash": 1.0,
+        "weight_drift": 1.0,
+        "dropped_weight": 1.0,
     }
     risk = float(np.mean([comp["ruin"], comp["max_drawdown"], comp["cvar_95"]]))
-    stability = float(np.mean([comp["stability_energy"], comp["path_mdd_mean"], comp["cdar_95"], comp["p_dd_breach"], comp["underwater_mean"], comp["ttr_mean_days"]]))
+    stability = float(
+        np.mean(
+            [
+                comp["stability_energy"],
+                comp["path_mdd_mean"],
+                comp["cdar_95"],
+                comp["p_dd_breach"],
+                comp["underwater_mean"],
+                comp["ttr_mean_days"],
+            ]
+        )
+    )
     execution = float(np.mean([comp["deployment"], comp["cash"], comp["weight_drift"], comp["dropped_weight"]]))
     health_score = 100.0 * (0.30 * comp["goal_probability"] + 0.30 * risk + 0.30 * stability + 0.10 * execution)
-    grade = "A" if health_score >= 80 else "B" if health_score >= 70 else "C" if health_score >= 60 else "D" if health_score >= 50 else "F"
-    return {"schema_version": "portfolio_health_score_v1_daily_report", "health_score": float(health_score), "health_grade": grade, "raw_optimizer_score": float(getattr(metrics, "score", np.nan)), "components": {"goal_probability": float(comp["goal_probability"]), "risk": risk, "stability": stability, "execution": execution}, "component_details": {k: float(v) for k, v in comp.items()}, "note": "health_score is normalized 0-100; raw_optimizer_score may be negative."}
+    grade = (
+        "A"
+        if health_score >= 80
+        else "B"
+        if health_score >= 70
+        else "C"
+        if health_score >= 60
+        else "D"
+        if health_score >= 50
+        else "F"
+    )
+    return {
+        "schema_version": "portfolio_health_score_v1_daily_report",
+        "health_score": float(health_score),
+        "health_grade": grade,
+        "raw_optimizer_score": float(getattr(metrics, "score", np.nan)),
+        "components": {
+            "goal_probability": float(comp["goal_probability"]),
+            "risk": risk,
+            "stability": stability,
+            "execution": execution,
+        },
+        "component_details": {k: float(v) for k, v in comp.items()},
+        "note": "health_score is normalized 0-100; raw_optimizer_score may be negative.",
+    }
+
 
 def s3_load_ledger_positions_dt(s3, *, bucket: str, root_prefix: str, as_of: str) -> dict | None:
     key = f"{str(root_prefix).strip('/')}/ledger/dt={as_of}/positions.json"
@@ -363,6 +419,7 @@ def s3_load_ledger_pnl_dt(s3, *, bucket: str, root_prefix: str, as_of: str) -> d
 
 
 UNIVERSE_CSV_LOCAL = paths.universe_dir() / "universe.csv"
+
 
 def _load_universe_ticker_to_asset_id() -> dict[str, str]:
     """
@@ -402,18 +459,18 @@ def _load_universe_ticker_to_asset_id() -> dict[str, str]:
     else:
         df["include"] = 1
 
-    df = df[
-        (df["include"] == 1)
-        & (df["ticker"] != "")
-        & (df["asset_id"] != "")
-    ].copy()
+    df = df[(df["include"] == 1) & (df["ticker"] != "") & (df["asset_id"] != "")].copy()
 
     if df.empty:
         raise RuntimeError("Universe has no active (ticker, asset_id) pairs after normalization.")
 
     dup_asset = df[df["asset_id"].duplicated(keep=False)].sort_values("asset_id")
     if not dup_asset.empty:
-        cols = [c for c in ["asset_id", "ticker", "yahoo_ticker_norm", "yahoo_ticker", "name", "include"] if c in dup_asset.columns]
+        cols = [
+            c
+            for c in ["asset_id", "ticker", "yahoo_ticker_norm", "yahoo_ticker", "name", "include"]
+            if c in dup_asset.columns
+        ]
         raise RuntimeError(
             "Duplicate active asset_id values found in universe. asset_id must be unique.\n"
             + dup_asset[cols].head(50).to_string(index=False)
@@ -429,6 +486,7 @@ def _load_universe_ticker_to_asset_id() -> dict[str, str]:
 
     unique_df = df[df["ticker"].map(counts).eq(1)].copy()
     return dict(zip(unique_df["ticker"].tolist(), unique_df["asset_id"].tolist()))
+
 
 def _diagnose_hmm_history(*, closes: pd.DataFrame, tickers: list[str], as_of_date: str) -> None:
     """
@@ -448,7 +506,7 @@ def _diagnose_hmm_history(*, closes: pd.DataFrame, tickers: list[str], as_of_dat
     missing = [t for t in tickers if t not in c.columns]
 
     if missing:
-        print(f"[diag][hmm] missing tickers in closes: {missing[:20]}{'...' if len(missing)>20 else ''}")
+        print(f"[diag][hmm] missing tickers in closes: {missing[:20]}{'...' if len(missing) > 20 else ''}")
 
     if not cols:
         print("[diag][hmm] no tickers available in closes")
@@ -493,7 +551,7 @@ def _diagnose_hmm_history(*, closes: pd.DataFrame, tickers: list[str], as_of_dat
     print(f"[diag][hmm] returns window: rows_before={rets.shape[0]} rows_after_dropna_any={rets_any.shape[0]}")
     if not rets_any.empty:
         print(f"[diag][hmm] effective returns start={rets_any.index.min().date()} end={rets_any.index.max().date()}")
-    
+
 
 def _s3_list_keys(client, bucket: str, prefix: str) -> list[str]:
     keys: list[str] = []
@@ -540,8 +598,7 @@ def _load_closes_usd_from_ohlcv(
     missing = [t for t in tickers if t not in t2aid]
     if missing:
         raise RuntimeError(
-            "Some tickers in ledger are missing from universe mapping (ticker->asset_id): "
-            + ", ".join(missing[:20])
+            "Some tickers in ledger are missing from universe mapping (ticker->asset_id): " + ", ".join(missing[:20])
         )
 
     ticker_asset = [(t, t2aid[t]) for t in tickers]
@@ -555,7 +612,7 @@ def _load_closes_usd_from_ohlcv(
 
     print(f"[ohlcv] listing parquet keys assets={len(ticker_asset)} years={years[0]}..{years[-1]}")
 
-    for (_, aid) in ticker_asset:
+    for _, aid in ticker_asset:
         for y in years:
             seen_prefixes += 1
             prefix = f"{s3_root_prefix}/asset_id={aid}/year={y}/"
@@ -569,12 +626,11 @@ def _load_closes_usd_from_ohlcv(
 
     if not all_keys:
         raise RuntimeError(
-            f"No parquet files found under s3://{s3_bucket}/{s3_root_prefix} "
-            f"for tickers={tickers[:5]}... years={years}"
+            f"No parquet files found under s3://{s3_bucket}/{s3_root_prefix} for tickers={tickers[:5]}... years={years}"
         )
 
     frames: list[pd.DataFrame] = []
-    for (aid, key) in all_keys:
+    for aid, key in all_keys:
         df = _read_parquet_s3_bytes(s3, s3_bucket, key)
         if df is None or df.empty:
             continue
@@ -583,9 +639,7 @@ def _load_closes_usd_from_ohlcv(
         date_col = cols.get("date")
         px_col = cols.get("adj_close_usd") or cols.get("close_usd") or cols.get("adj_close") or cols.get("close")
         if date_col is None or px_col is None:
-            raise RuntimeError(
-                f"Unexpected OHLCV parquet schema in s3://{s3_bucket}/{key}. Columns={list(df.columns)}"
-            )
+            raise RuntimeError(f"Unexpected OHLCV parquet schema in s3://{s3_bucket}/{key}. Columns={list(df.columns)}")
 
         out = df[[date_col, px_col]].copy()
         out.columns = ["date", "adj_close_usd"]
@@ -616,12 +670,7 @@ def _load_closes_usd_from_ohlcv(
         print(sample.to_string(index=False))
         long = long.groupby(["date", "ticker"], as_index=False)["adj_close_usd"].last()
 
-    closes = (
-        long.set_index(["date", "ticker"])["adj_close_usd"]
-        .unstack("ticker")
-        .sort_index()
-        .ffill()
-    )
+    closes = long.set_index(["date", "ticker"])["adj_close_usd"].unstack("ticker").sort_index().ffill()
     return closes
 
 
@@ -671,12 +720,12 @@ def _fetch_spot_prices_usd(
                     for y in yahoo_list:
                         if y not in df.columns.get_level_values(1):
                             continue
-                        if ("Close" in df.columns.get_level_values(0)):
+                        if "Close" in df.columns.get_level_values(0):
                             s = df["Close"][y]
                             if not s.dropna().empty:
                                 spot_by_yahoo[y] = float(s.dropna().iloc[-1])
                                 continue
-                        if ("Adj Close" in df.columns.get_level_values(0)):
+                        if "Adj Close" in df.columns.get_level_values(0):
                             s = df["Adj Close"][y]
                             if not s.dropna().empty:
                                 spot_by_yahoo[y] = float(s.dropna().iloc[-1])
@@ -702,6 +751,7 @@ def _fetch_spot_prices_usd(
 # =========================
 # Take profit by asset
 # =========================
+
 
 def _load_asset_tp_anchors(raw: dict | None) -> dict[str, dict[str, Any]]:
     """
@@ -883,8 +933,10 @@ def build_take_profit_by_asset_plan(
         try:
             if t in closes.columns:
                 hist = closes[t].dropna()
-                hist_tail = hist.iloc[-int(dd_window_days):] if len(hist) > dd_window_days else hist
-                rel = _directional_return_series(prices=hist_tail, anchor_price=float(anchor_price), side_sign=side_sign)
+                hist_tail = hist.iloc[-int(dd_window_days) :] if len(hist) > dd_window_days else hist
+                rel = _directional_return_series(
+                    prices=hist_tail, anchor_price=float(anchor_price), side_sign=side_sign
+                )
                 dd_63 = _max_drawdown(rel)
         except Exception:
             dd_63 = None
@@ -1008,7 +1060,8 @@ def build_take_profit_by_asset_plan(
             float(abs(float(r["exec_price_usd"]) * float(r["qty_current"])))
             - float(abs(float(r["exec_price_usd"]) * float(r["qty_target"])))
         )
-        if np.isfinite(r.get("exec_price_usd", np.nan)) else np.nan,
+        if np.isfinite(r.get("exec_price_usd", np.nan))
+        else np.nan,
         axis=1,
     )
 
@@ -1094,9 +1147,9 @@ def run_daily_cycle_asof(
     equity = float(equity_override) if equity_override is not None else None
 
     # ---------- Load MARKET regime (GLOBAL path) ----------
-    market_hmm_payload = s3_load_latest_json(
-        s3, bucket=bucket, root_prefix=engine_root, table="regimes/market_hmm"
-    ) or {}
+    market_hmm_payload = (
+        s3_load_latest_json(s3, bucket=bucket, root_prefix=engine_root, table="regimes/market_hmm") or {}
+    )
 
     market_as_of = market_hmm_payload.get("as_of")
     market_as_of = str(market_as_of) if market_as_of else as_of_date
@@ -1112,12 +1165,8 @@ def run_daily_cycle_asof(
     print(f"[market regime] as_of={market_as_of} target_leverage={market_lev:.2f}x")
 
     # ---------- Inputs ----------
-    raw_ledger_positions = s3_load_ledger_positions_dt(
-        s3, bucket=bucket, root_prefix=root_prefix, as_of=as_of_date
-    )
-    raw_pnl = s3_load_ledger_pnl_dt(
-        s3, bucket=bucket, root_prefix=root_prefix, as_of=as_of_date
-    ) or {}
+    raw_ledger_positions = s3_load_ledger_positions_dt(s3, bucket=bucket, root_prefix=root_prefix, as_of=as_of_date)
+    raw_pnl = s3_load_ledger_pnl_dt(s3, bucket=bucket, root_prefix=root_prefix, as_of=as_of_date) or {}
 
     pnl_summary = raw_pnl.get("summary", {}) if isinstance(raw_pnl, dict) else {}
     equity_from_ledger = pnl_summary.get("equity_usd")
@@ -1128,9 +1177,7 @@ def run_daily_cycle_asof(
     if not spot_rows and not deriv_rows:
         raise RuntimeError("Ledger positions payload has no spot_positions and no derivatives_positions.")
 
-    raw_score_cfg = s3_load_latest_json(
-        s3, bucket=bucket, root_prefix=root_prefix, table="configs/score_config"
-    )
+    raw_score_cfg = s3_load_latest_json(s3, bucket=bucket, root_prefix=root_prefix, table="configs/score_config")
     if not raw_score_cfg:
         raise RuntimeError("Missing S3 latest score_config.")
     score_cfg = ScoreConfig(**raw_score_cfg)
@@ -1159,13 +1206,11 @@ def run_daily_cycle_asof(
         s3_bucket=bucket,
         s3_root_prefix=f"{market_root.strip('/')}/ohlcv_usd/v1",
         s3_region=region,
-        )
+    )
     latest_close_prices = closes_all.iloc[-1]
 
     pricing_as_of_utc = (
-        f"{as_of_date}T23:59:59Z"
-        if mode == "backtest"
-        else pd.Timestamp.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+        f"{as_of_date}T23:59:59Z" if mode == "backtest" else pd.Timestamp.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
     )
 
     provider_state = market.read_provider_symbol_state() or {}
@@ -1250,7 +1295,9 @@ def run_daily_cycle_asof(
 
     _diagnose_hmm_history(closes=closes, tickers=tickers, as_of_date=as_of_date)
 
-    values = np.array([float(prices_for_valuation[t]) * float(positions[t].quantity) for t in tickers], dtype=np.float64)
+    values = np.array(
+        [float(prices_for_valuation[t]) * float(positions[t].quantity) for t in tickers], dtype=np.float64
+    )
     gross = float(np.sum(np.abs(values)))
     if not np.isfinite(gross) or gross <= 0:
         raise ValueError("Gross exposure == 0 (or non-finite) from positions/prices")
@@ -1272,7 +1319,9 @@ def run_daily_cycle_asof(
         except Exception as e:
             print(f"[market regime][warn] failed to print persisted HMM summary: {type(e).__name__}: {e}")
     else:
-        print("\n[market regime][warn] missing persisted market HMM payload; daily report will not fit a local market HMM.")
+        print(
+            "\n[market regime][warn] missing persisted market HMM payload; daily report will not fit a local market HMM."
+        )
 
     st_raw = market.read_regime_filter_state() or {}
     filter_state = RegimeFilterState(
@@ -1289,9 +1338,9 @@ def run_daily_cycle_asof(
         lev_rec = {"leverage": float(market_lev), "mode": "persisted_or_default", "label": None, "conf": 0.0}
 
     # ---------- Market RESCALE trigger (ONLY on regime / leverage change) ----------
-    raw_mkt_state = s3_load_latest_json(
-        s3, bucket=bucket, root_prefix=root_prefix, table=MARKET_RESCALE_STATE_TABLE
-    ) or {}
+    raw_mkt_state = (
+        s3_load_latest_json(s3, bucket=bucket, root_prefix=root_prefix, table=MARKET_RESCALE_STATE_TABLE) or {}
+    )
     prev_label = raw_mkt_state.get("label")
     prev_lev = raw_mkt_state.get("leverage")
 
@@ -1304,10 +1353,9 @@ def run_daily_cycle_asof(
     )
     cur_lev = float(market_lev)
 
-    market_regime_changed = (prev_label is not None and cur_label != prev_label)
+    market_regime_changed = prev_label is not None and cur_label != prev_label
     market_lev_changed = (
-        prev_lev is not None
-        and abs(cur_lev - float(prev_lev)) / max(1e-9, abs(float(prev_lev))) >= 0.10
+        prev_lev is not None and abs(cur_lev - float(prev_lev)) / max(1e-9, abs(float(prev_lev))) >= 0.10
     )
     should_rescale_market = bool(market_regime_changed or market_lev_changed)
 
@@ -1342,32 +1390,30 @@ def run_daily_cycle_asof(
     actuarial_text = None
 
     try:
-        _actuarial_report, actuarial_text, actuarial_diagnostics = (
-            build_actuarial_diagnostic_from_portfolio_report(
-                report=report,
-                closes=closes,
-                goals=GOALS,
-                main_goal=float(MAIN_GOAL),
-                score_config=score_cfg,
-                portfolio_id="current_portfolio",
-                run_id=f"daily_report_{as_of_run_date}_{as_of_market_date}",
-                source="daily_report",
-                terminal_title="ACTUARIAL RISK DIAGNOSTICS - DAILY REPORT",
-                current_leverage=float(report.snapshot.leverage),
-                max_allowed_leverage=float(actuarial_max_allowed_leverage),
-                days=252,
-                n_paths=int(actuarial_n_paths),
-                mc_seed=97531,
-                path_source="bootstrap",
-                pca_k=5,
-                block_size=(8, 12),
-                metadata={
-                    "mode": mode,
-                    "as_of_market_date": as_of_market_date,
-                    "as_of_run_date": as_of_run_date,
-                    "root_prefix": root_prefix,
-                },
-            )
+        _actuarial_report, actuarial_text, actuarial_diagnostics = build_actuarial_diagnostic_from_portfolio_report(
+            report=report,
+            closes=closes,
+            goals=GOALS,
+            main_goal=float(MAIN_GOAL),
+            score_config=score_cfg,
+            portfolio_id="current_portfolio",
+            run_id=f"daily_report_{as_of_run_date}_{as_of_market_date}",
+            source="daily_report",
+            terminal_title="ACTUARIAL RISK DIAGNOSTICS - DAILY REPORT",
+            current_leverage=float(report.snapshot.leverage),
+            max_allowed_leverage=float(actuarial_max_allowed_leverage),
+            days=252,
+            n_paths=int(actuarial_n_paths),
+            mc_seed=97531,
+            path_source="bootstrap",
+            pca_k=5,
+            block_size=(8, 12),
+            metadata={
+                "mode": mode,
+                "as_of_market_date": as_of_market_date,
+                "as_of_run_date": as_of_run_date,
+                "root_prefix": root_prefix,
+            },
         )
         maybe_print_actuarial_diagnostic_section(actuarial_text, enabled=True)
     except Exception as e:
@@ -1453,9 +1499,7 @@ def run_daily_cycle_asof(
         reopt = should_reoptimize(baseline, current_health)
 
     # ---------- Take Profit (portfolio-level) ----------
-    raw_tp_state = s3_load_latest_json(
-        s3, bucket=bucket, root_prefix=root_prefix, table=TAKE_PROFIT_STATE_TABLE
-    ) or {}
+    raw_tp_state = s3_load_latest_json(s3, bucket=bucket, root_prefix=root_prefix, table=TAKE_PROFIT_STATE_TABLE) or {}
 
     tp_state = TakeProfitState(
         anchor_date=raw_tp_state.get("anchor_date"),
@@ -1533,11 +1577,29 @@ def run_daily_cycle_asof(
         )
 
         if asset_tp_plan_df is not None and not asset_tp_plan_df.empty:
-            used = float(asset_tp_plan_df["meta_reduce_used"].iloc[0]) if "meta_reduce_used" in asset_tp_plan_df.columns else 0.0
-            need = float(asset_tp_plan_df["meta_need_reduce"].iloc[0]) if "meta_need_reduce" in asset_tp_plan_df.columns else 0.0
-            mode_red = str(asset_tp_plan_df.get("meta_reduce_mode", pd.Series(["?"])).iloc[0]) if "meta_reduce_mode" in asset_tp_plan_df.columns else "?"
-            n_traded = int((asset_tp_plan_df["exp_gross_reduce"].fillna(0.0) >= 25.0).sum()) if "exp_gross_reduce" in asset_tp_plan_df.columns else 0
-            print(f"\n[take_profit_by_asset] need_reduce={need:,.2f} used={used:,.2f} traded_assets={n_traded} mode={mode_red}")
+            used = (
+                float(asset_tp_plan_df["meta_reduce_used"].iloc[0])
+                if "meta_reduce_used" in asset_tp_plan_df.columns
+                else 0.0
+            )
+            need = (
+                float(asset_tp_plan_df["meta_need_reduce"].iloc[0])
+                if "meta_need_reduce" in asset_tp_plan_df.columns
+                else 0.0
+            )
+            mode_red = (
+                str(asset_tp_plan_df.get("meta_reduce_mode", pd.Series(["?"])).iloc[0])
+                if "meta_reduce_mode" in asset_tp_plan_df.columns
+                else "?"
+            )
+            n_traded = (
+                int((asset_tp_plan_df["exp_gross_reduce"].fillna(0.0) >= 25.0).sum())
+                if "exp_gross_reduce" in asset_tp_plan_df.columns
+                else 0
+            )
+            print(
+                f"\n[take_profit_by_asset] need_reduce={need:,.2f} used={used:,.2f} traded_assets={n_traded} mode={mode_red}"
+            )
 
         if write_outputs and asset_tp_plan_df is not None and not asset_tp_plan_df.empty:
             s3_write_parquet_partition(
@@ -1592,20 +1654,16 @@ def run_daily_cycle_asof(
             as_of=as_of_market_date,
             equity=float(equity),
             recommended_leverage=float(lev_target),
-            positions_qty=qty_current,              # IMPORTANT: current quantities
+            positions_qty=qty_current,  # IMPORTANT: current quantities
             prices_usd=prices_for_valuation,
             max_notional_cap=None,
         )
 
         df_t = rescale_plan.targets
         if ("ticker" in df_t.columns) and ("qty_target" in df_t.columns):
-            qty_target_rescale = {
-                str(r["ticker"]).upper().strip(): float(r["qty_target"])
-                for _, r in df_t.iterrows()
-            }
+            qty_target_rescale = {str(r["ticker"]).upper().strip(): float(r["qty_target"]) for _, r in df_t.iterrows()}
         else:
             print("[rescale][warn] plan.targets missing (ticker,qty_target); cannot build qty_target_rescale")
-
 
     # Base for reinvest = current holdings (post-TP), NOT rescale targets
     qty_for_reinvest = dict(qty_current)
@@ -1619,7 +1677,7 @@ def run_daily_cycle_asof(
             equity=float(equity),
             gross_target=float(gross_target),
             positions=positions,
-            positions_qty_after_tp=qty_for_reinvest,   # <-- FIX: use current, not qty_base
+            positions_qty_after_tp=qty_for_reinvest,  # <-- FIX: use current, not qty_base
             asset_tp_plan_df=asset_tp_plan_df,
             score_cfg=score_cfg,
             goals=list(GOALS),
@@ -1661,7 +1719,7 @@ def run_daily_cycle_asof(
             alloc = weights_to_discrete_shares(
                 weights={str(t).upper().strip(): float(w) for t, w in sleeve_w.items()},
                 prices=px_dict,
-                notional=float(leftover),      # <-- critical: sleeve only
+                notional=float(leftover),  # <-- critical: sleeve only
                 min_weight=0.01,
                 min_units_equity=1.0,
                 min_units_crypto=0.0,
@@ -1719,7 +1777,6 @@ def run_daily_cycle_asof(
 
     positions_qty_for_rebalance = dict(qty_after)
 
-
     print(
         f"\n[reinvest] status={reinvest_meta.get('status')} "
         f"reason={reinvest_meta.get('reason', '')} "
@@ -1741,9 +1798,7 @@ def run_daily_cycle_asof(
 
     # ---------- Rebalance planning (market-rescale only) ----------
     # FIX: reb_state was missing in your latest version
-    raw_reb_state = s3_load_latest_json(
-        s3, bucket=bucket, root_prefix=root_prefix, table="rescale/state"
-    )
+    raw_reb_state = s3_load_latest_json(s3, bucket=bucket, root_prefix=root_prefix, table="rescale/state")
     reb_state = RebalanceState(
         last_rebalance_date=(raw_reb_state or {}).get("last_rebalance_date"),
         last_rebalance_equity=(raw_reb_state or {}).get("last_rebalance_equity"),
@@ -1768,6 +1823,7 @@ def run_daily_cycle_asof(
     )
 
     from alpha_edge.portfolio.rebalance_engine import RebalanceDecision
+
     L_real = float(gross_now) / float(equity) if float(equity) > 0 else float("inf")
     drift_ratio = (L_real / float(lev_target)) if float(lev_target) > 0 else float("inf")
 
@@ -1903,7 +1959,9 @@ def run_daily_cycle_asof(
                 "as_of": as_of_market_date,
                 "tickers": list(tickers),
                 "hmm": hmm_payload_for_output,
-                "leverage_recommendation": market_hmm_payload.get("leverage_recommendation") if isinstance(market_hmm_payload, dict) else None,
+                "leverage_recommendation": market_hmm_payload.get("leverage_recommendation")
+                if isinstance(market_hmm_payload, dict)
+                else None,
                 "meta": {
                     "as_of_market_date": as_of_market_date,
                     "as_of_run_date": as_of_run_date,
@@ -1945,8 +2003,7 @@ def run_daily_cycle_asof(
                     "tickers": tickers,
                     "start_history": START_HISTORY,
                     "spot_prices_usd": {
-                        k: (None if not np.isfinite(v) else float(v))
-                        for k, v in prices_for_valuation.items()
+                        k: (None if not np.isfinite(v) else float(v)) for k, v in prices_for_valuation.items()
                     },
                     "market_regime": {"target_leverage": float(market_lev), "source_table": "regimes/market_hmm"},
                 },
@@ -2035,7 +2092,9 @@ def run_daily_cycle_asof(
             update_latest=update_latest,
         )
 
-        print("\n[S3] Saved daily report + holdings + health + score_config + positions + regimes + take_profit_state (+ asset_tp if triggered).")
+        print(
+            "\n[S3] Saved daily report + holdings + health + score_config + positions + regimes + take_profit_state (+ asset_tp if triggered)."
+        )
 
     return {
         "mode": mode,
@@ -2060,12 +2119,15 @@ def run_daily_cycle_asof(
             "sharpe": tp_res.sharpe,
             "reasons": tp_res.reasons,
         },
-        "take_profit_by_asset": None if asset_tp_plan_df is None else {
+        "take_profit_by_asset": None
+        if asset_tp_plan_df is None
+        else {
             "n_rows": int(len(asset_tp_plan_df)),
             "gross_target": float(equity) * float(lev_target),
         },
         "reinvest": reinvest_meta,
     }
+
 
 def _parse_goals_arg(x: str | None) -> list[float] | None:
     if x is None:
@@ -2077,8 +2139,7 @@ def _parse_goals_arg(x: str | None) -> list[float] | None:
 
     if len(parts) != 3:
         raise ValueError(
-            f"--goals must contain exactly 3 comma-separated numbers, got {x!r}. "
-            "Example: --goals 7500,10000,12500"
+            f"--goals must contain exactly 3 comma-separated numbers, got {x!r}. Example: --goals 7500,10000,12500"
         )
 
     return [float(p) for p in parts]
@@ -2149,6 +2210,7 @@ def parse_args() -> argparse.Namespace:
 
     return ap.parse_args()
 
+
 def main() -> None:
     args = parse_args()
 
@@ -2160,9 +2222,7 @@ def main() -> None:
         # a same-day ledger exists, and defaulting to today causes NoSuchKey on
         # ledger/dt=<today>/positions.json.
         if args.backtest_run_id:
-            raise ValueError(
-                "--as-of is required when --backtest-run-id is provided."
-            )
+            raise ValueError("--as-of is required when --backtest-run-id is provided.")
 
         cfg = load_runtime_config(args.env)
         s3 = s3_init(cfg.region)
@@ -2172,15 +2232,8 @@ def main() -> None:
             root_prefix=cfg.engine_root,
             table="ledger/pnl",
         )
-        latest_summary = (
-            latest_pnl.get("summary", {})
-            if isinstance(latest_pnl, dict)
-            else {}
-        )
-        resolved_as_of = (
-            (latest_pnl or {}).get("as_of")
-            or latest_summary.get("as_of")
-        )
+        latest_summary = latest_pnl.get("summary", {}) if isinstance(latest_pnl, dict) else {}
+        resolved_as_of = (latest_pnl or {}).get("as_of") or latest_summary.get("as_of")
         if not resolved_as_of:
             raise RuntimeError(
                 "Could not resolve --as-of from "
@@ -2221,6 +2274,7 @@ def main() -> None:
     print(f"market_leverage:     {out.get('market_target_leverage')}")
     print(f"should_reoptimize:   {out.get('should_reoptimize')}")
 
+
 # ----------------------------
 # Audit/logging entrypoint wrapper
 # ----------------------------
@@ -2248,7 +2302,9 @@ def main_with_audit() -> None:
                 event_type="build_dataset",
                 entity_type="daily_report",
                 entity_id=None,
-                as_of=str(getattr(args, "as_of", None) or getattr(args, "dt", None) or getattr(args, "run_dt", None) or ""),
+                as_of=str(
+                    getattr(args, "as_of", None) or getattr(args, "dt", None) or getattr(args, "run_dt", None) or ""
+                ),
                 source_script="run_daily_report.py",
                 source_mode="daily_report",
                 status=("dry_run" if is_dry_run else "success"),
@@ -2267,7 +2323,9 @@ def main_with_audit() -> None:
                 event_type="build_dataset",
                 entity_type="daily_report",
                 entity_id=None,
-                as_of=str(getattr(args, "as_of", None) or getattr(args, "dt", None) or getattr(args, "run_dt", None) or ""),
+                as_of=str(
+                    getattr(args, "as_of", None) or getattr(args, "dt", None) or getattr(args, "run_dt", None) or ""
+                ),
                 source_script="run_daily_report.py",
                 source_mode="daily_report",
                 status="failed",

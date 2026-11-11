@@ -1,7 +1,7 @@
 """Independent acceptance contracts: no v1 inputs, fail-closed quality gate."""
+
 import hashlib
 import json
-from pathlib import Path
 
 import pandas as pd
 import pytest
@@ -20,18 +20,36 @@ def _fixture(tmp_path, *, mutate_gold=False, quarantine=False):
     candidate_dir = tmp_path / "candidate"
     bronze_dir.mkdir()
     candidate_dir.mkdir()
-    raw = pd.DataFrame([
-        dict(asset_id="A", provider_symbol="ABC", currency_original="USD",
-             session_date=date, open=price, high=price+1, low=price-1,
-             close=price, adj_close=price, volume=100)
-        for date, price in [("2026-10-01", 10.), ("2026-10-02", 11.)]
-    ])
-    bronze_files = {"source_ohlcv.parquet": _write(raw, bronze_dir, "source_ohlcv.parquet"),
-                    "source_fx_quotes.parquet": _write(pd.DataFrame(columns=[
-                        "provider_symbol", "session_date", "quote_close"
-                    ]), bronze_dir, "source_fx_quotes.parquet")}
-    bronze_manifest = {"schema_version": "bronze-v2-1", "batch_id": "batch1",
-                       "files": {key: {"sha256": digest} for key, digest in bronze_files.items()}}
+    raw = pd.DataFrame(
+        [
+            dict(
+                asset_id="A",
+                provider_symbol="ABC",
+                currency_original="USD",
+                session_date=date,
+                open=price,
+                high=price + 1,
+                low=price - 1,
+                close=price,
+                adj_close=price,
+                volume=100,
+            )
+            for date, price in [("2026-10-01", 10.0), ("2026-10-02", 11.0)]
+        ]
+    )
+    bronze_files = {
+        "source_ohlcv.parquet": _write(raw, bronze_dir, "source_ohlcv.parquet"),
+        "source_fx_quotes.parquet": _write(
+            pd.DataFrame(columns=["provider_symbol", "session_date", "quote_close"]),
+            bronze_dir,
+            "source_fx_quotes.parquet",
+        ),
+    }
+    bronze_manifest = {
+        "schema_version": "bronze-v2-1",
+        "batch_id": "batch1",
+        "files": {key: {"sha256": digest} for key, digest in bronze_files.items()},
+    }
     (bronze_dir / "manifest.json").write_text(json.dumps(bronze_manifest))
     g = raw.copy()
     g["fx_date"] = pd.to_datetime(g["session_date"])
@@ -45,18 +63,23 @@ def _fixture(tmp_path, *, mutate_gold=False, quarantine=False):
     prev = g["close_adjusted_usd"].shift()
     g["ret_simple_close_adjusted_usd"] = g["close_adjusted_usd"] / prev - 1
     import numpy as np
+
     g["ret_log_close_adjusted_usd"] = np.log(g["close_adjusted_usd"] / prev)
     g["return_quality_status"] = ["unavailable", "unavailable" if quarantine else "accepted"]
     if mutate_gold:
         g.loc[1, "close_adjusted_usd"] = 900.0
-    fx = pd.DataFrame(columns=["currency_original", "fx_date", "fx_to_usd",
-                                "quote_close", "fx_quote_direction", "fx_quote_symbol"])
+    fx = pd.DataFrame(
+        columns=["currency_original", "fx_date", "fx_to_usd", "quote_close", "fx_quote_direction", "fx_quote_symbol"]
+    )
     issues = pd.DataFrame(columns=["asset_id", "session_date", "issue"])
     evidence = pd.DataFrame(columns=["fx_validation_status"])
     files = {}
     for name, frame in [
-        ("silver.parquet", silver), ("gold.parquet", g), ("bronze_validated.parquet", raw),
-        ("fx_normalized.parquet", fx), ("fx_evidence.parquet", evidence),
+        ("silver.parquet", silver),
+        ("gold.parquet", g),
+        ("bronze_validated.parquet", raw),
+        ("fx_normalized.parquet", fx),
+        ("fx_evidence.parquet", evidence),
         ("session_issues.parquet", issues),
     ]:
         files[name] = _write(frame, candidate_dir, name)
@@ -68,9 +91,13 @@ def _fixture(tmp_path, *, mutate_gold=False, quarantine=False):
         "publication_state": "candidate_only",
         "legacy_production_unchanged": True,
         "bronze_manifest_sha256": hashlib.sha256((bronze_dir / "manifest.json").read_bytes()).hexdigest(),
-        "bronze_batch_id": "batch1", "source_rows": 2,
-        "candidate_input_rows": 2, "silver_rows": 2, "gold_rows": 2,
-        "files_sha256": files, "acceptance": "initial_contract_pass",
+        "bronze_batch_id": "batch1",
+        "source_rows": 2,
+        "candidate_input_rows": 2,
+        "silver_rows": 2,
+        "gold_rows": 2,
+        "files_sha256": files,
+        "acceptance": "initial_contract_pass",
         "manual_correction_rows": 0,
     }
     (candidate_dir / "manifest.json").write_text(json.dumps(manifest))

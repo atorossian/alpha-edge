@@ -162,8 +162,7 @@ def _load_closes_usd_from_ohlcv(
 
     if not using_asset_id and not using_ticker:
         raise RuntimeError(
-            "OHLCV dataset must contain either asset_id or ticker column. "
-            f"schema={sorted(schema_names)}"
+            f"OHLCV dataset must contain either asset_id or ticker column. schema={sorted(schema_names)}"
         )
 
     ticker_to_asset: dict[str, str] = {}
@@ -173,10 +172,7 @@ def _load_closes_usd_from_ohlcv(
         ticker_to_asset = _load_universe_ticker_to_asset_id(universe_path)
         missing = [t for t in tickers if t not in ticker_to_asset]
         if missing:
-            raise RuntimeError(
-                "Proxy tickers missing from universe ticker->asset_id mapping: "
-                + ", ".join(missing)
-            )
+            raise RuntimeError("Proxy tickers missing from universe ticker->asset_id mapping: " + ", ".join(missing))
 
         asset_ids = [ticker_to_asset[t] for t in tickers]
         asset_to_ticker = {aid: t for t, aid in ticker_to_asset.items() if t in tickers}
@@ -218,13 +214,7 @@ def _load_closes_usd_from_ohlcv(
         print(f"[ohlcv][warn] duplicate (date,ticker) rows detected: {n_dup}. Collapsing by last().")
         df = df.groupby(["date", "ticker"], as_index=False)[price_col].last()
 
-    closes = (
-        df.set_index(["date", "ticker"])[price_col]
-        .sort_index()
-        .unstack("ticker")
-        .sort_index()
-        .ffill()
-    )
+    closes = df.set_index(["date", "ticker"])[price_col].sort_index().unstack("ticker").sort_index().ffill()
 
     return closes
 
@@ -261,16 +251,12 @@ def _compute_equal_weight_proxy_returns(
         "min_assets_per_day": int(min_assets_per_day),
         "n_days_raw": int(rets.shape[0]),
         "n_days_used": int(proxy.shape[0]),
-        "assets_present_sample": {
-            str(d.date()): int(available.loc[d])
-            for d in available.index[-5:]
-        },
+        "assets_present_sample": {str(d.date()): int(available.loc[d]) for d in available.index[-5:]},
         "kept": kept,
         "dropped": dropped,
     }
 
     return proxy.astype("float64"), meta
-
 
 
 def _fit_market_hmm_point_in_time(
@@ -301,26 +287,16 @@ def _fit_market_hmm_point_in_time(
     last_date = pd.Timestamp(s.index[-1]).normalize()
 
     if last_date > as_of_ts:
-        raise RuntimeError(
-            f"Lookahead violation: last_date={last_date.date()} > as_of={as_of_ts.date()}"
-        )
+        raise RuntimeError(f"Lookahead violation: last_date={last_date.date()} > as_of={as_of_ts.date()}")
 
     r = s.to_numpy(dtype=np.float64)
-    vol20 = (
-        pd.Series(r, index=s.index)
-        .rolling(20)
-        .std()
-        .to_numpy(dtype=np.float64)
-    )
+    vol20 = pd.Series(r, index=s.index).rolling(20).std().to_numpy(dtype=np.float64)
 
     mask = np.isfinite(vol20)
     X = np.column_stack([r[mask], vol20[mask]])
 
     if X.shape[0] < int(min_obs_after_vol):
-        raise RuntimeError(
-            f"Market regime: not enough observations after vol window. "
-            f"as_of={as_of} X={X.shape}"
-        )
+        raise RuntimeError(f"Market regime: not enough observations after vol window. as_of={as_of} X={X.shape}")
 
     r_aligned = r[mask]
 
@@ -399,10 +375,7 @@ def _candidate_regime_dates(
     if end is not None:
         s = s[s.index <= _to_day(end)]
 
-    return [
-        pd.Timestamp(x).normalize().strftime("%Y-%m-%d")
-        for x in s.index
-    ]
+    return [pd.Timestamp(x).normalize().strftime("%Y-%m-%d") for x in s.index]
 
 
 def _build_market_regime_payload(
@@ -569,10 +542,7 @@ def _backfill_missing_market_regimes(
             )
 
         if i % 25 == 0:
-            print(
-                f"[PIT regime backfill] processed={i}/{len(missing_dates)} "
-                f"written={written} skipped={skipped}"
-            )
+            print(f"[PIT regime backfill] processed={i}/{len(missing_dates)} written={written} skipped={skipped}")
 
     return {
         "candidate_dates": int(len(candidate_dates)),
@@ -828,7 +798,9 @@ def main_with_audit() -> None:
                 event_type="build_dataset",
                 entity_type="market_regime",
                 entity_id=None,
-                as_of=str(getattr(args, "as_of", None) or getattr(args, "dt", None) or getattr(args, "run_dt", None) or ""),
+                as_of=str(
+                    getattr(args, "as_of", None) or getattr(args, "dt", None) or getattr(args, "run_dt", None) or ""
+                ),
                 source_script="compute_market_regime.py",
                 source_mode="market_regime",
                 status=("dry_run" if is_dry_run else "success"),
@@ -850,7 +822,9 @@ def main_with_audit() -> None:
                 event_type="build_dataset",
                 entity_type="market_regime",
                 entity_id=None,
-                as_of=str(getattr(args, "as_of", None) or getattr(args, "dt", None) or getattr(args, "run_dt", None) or ""),
+                as_of=str(
+                    getattr(args, "as_of", None) or getattr(args, "dt", None) or getattr(args, "run_dt", None) or ""
+                ),
                 source_script="compute_market_regime.py",
                 source_mode="market_regime",
                 status="failed",

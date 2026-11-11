@@ -3,6 +3,7 @@
 No active production manifests, caches, or snapshots are changed. This module
 produces an audit-ready deployment inventory for the approved release.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -14,8 +15,7 @@ from datetime import datetime, timezone
 import boto3
 
 APPROVED_PLAN = (
-    "market/repairs/aea87/staging/20261030T190922Z_03657655/"
-    "release_plans/20261031T125221550000Z_ae9af437/plan.json"
+    "market/repairs/aea87/staging/20261030T190922Z_03657655/release_plans/20261031T125221550000Z_ae9af437/plan.json"
 )
 
 
@@ -38,9 +38,13 @@ def select_candidates(reconciliation, plan):
         if item["status"] == "BLOCKED":
             blocked.append(aid)
             continue
-        if (item["status"] != "CANDIDATE_ONLY" or item["blockers"]
-                or asset["status"] != "VALID" or asset.get("flagged_retained")
-                or asset.get("quarantine_rows")):
+        if (
+            item["status"] != "CANDIDATE_ONLY"
+            or item["blockers"]
+            or asset["status"] != "VALID"
+            or asset.get("flagged_retained")
+            or asset.get("quarantine_rows")
+        ):
             raise ValueError(f"Unapproved publication candidate: {aid}")
         selected.append(aid)
     if len(selected) != 842 or len(blocked) != 11:
@@ -81,10 +85,14 @@ def prepare(s3, bucket, plan_key):
     }
     run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ") + "_" + uuid.uuid4().hex[:8]
     key = prefix + plan["reconciliation_id"] + "/publication_previews/" + run_id + "/manifest.json"
-    s3.put_object(Bucket=bucket, Key=key, Body=json.dumps(manifest, indent=2).encode(),
-                  ContentType="application/json", IfNoneMatch="*")
-    print(json.dumps({"candidates": len(candidates), "excluded": len(blocked),
-                      "publication_allowed": False}, indent=2))
+    s3.put_object(
+        Bucket=bucket,
+        Key=key,
+        Body=json.dumps(manifest, indent=2).encode(),
+        ContentType="application/json",
+        IfNoneMatch="*",
+    )
+    print(json.dumps({"candidates": len(candidates), "excluded": len(blocked), "publication_allowed": False}, indent=2))
     print(f"PUBLICATION_PREVIEW s3://{bucket}/{key}")
 
 

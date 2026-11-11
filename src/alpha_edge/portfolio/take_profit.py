@@ -18,9 +18,9 @@ class TakeProfitConfig:
     min_sharpe: float = 0.75
 
     # multiplier curve
-    max_harvest: float = 0.25   # at most reduce leverage by 25%
-    k: float = 8.0              # curve aggressiveness
-    m_min: float = 0.60         # never go below 60% of base
+    max_harvest: float = 0.25  # at most reduce leverage by 25%
+    k: float = 8.0  # curve aggressiveness
+    m_min: float = 0.60  # never go below 60% of base
 
     # churn control
     cooldown_days: int = 10
@@ -73,9 +73,9 @@ def take_profit_policy(
     *,
     cfg: TakeProfitConfig,
     state: TakeProfitState | None,
-    as_of: str,                 # "YYYY-MM-DD" market date
+    as_of: str,  # "YYYY-MM-DD" market date
     equity: float,
-    sharpe_value: float | None, # use health.sharpe (already computed)
+    sharpe_value: float | None,  # use health.sharpe (already computed)
     stability: float | None = None,
 ) -> TakeProfitResult:
     eq = float(equity)

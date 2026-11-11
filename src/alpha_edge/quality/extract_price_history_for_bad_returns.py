@@ -40,12 +40,10 @@ from __future__ import annotations
 import argparse
 import io
 import json
-import os
 import re
-import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, Optional
+from typing import Optional
 from urllib.parse import quote, unquote
 
 import boto3
@@ -144,7 +142,9 @@ def select_assets_from_reports(
         df = pd.read_csv(asset_ids_csv)
         if "asset_id" not in df.columns:
             raise RuntimeError(f"{asset_ids_csv} must contain asset_id")
-        sort_cols = [c for c in ["severity", "abs_gt_block", "gt_100pct", "le_minus_100pct", "max_abs_return"] if c in df.columns]
+        sort_cols = [
+            c for c in ["severity", "abs_gt_block", "gt_100pct", "le_minus_100pct", "max_abs_return"] if c in df.columns
+        ]
         if "max_abs_return" in df.columns:
             df = df.sort_values("max_abs_return", ascending=False)
         elif sort_cols:
@@ -189,7 +189,9 @@ def select_assets_from_reports(
     if top_n_assets and not explicit_assets:
         ordered = ordered[:top_n_assets]
 
-    return ordered, pd.DataFrame(rows).drop_duplicates(subset=["asset_id"], keep="first") if rows else pd.DataFrame({"asset_id": ordered})
+    return ordered, pd.DataFrame(rows).drop_duplicates(subset=["asset_id"], keep="first") if rows else pd.DataFrame(
+        {"asset_id": ordered}
+    )
 
 
 def load_bad_date_windows(bad_cells_csv: Optional[str], days: int) -> dict[str, tuple[pd.Timestamp, pd.Timestamp]]:
@@ -246,22 +248,44 @@ def add_recomputed_returns(df: pd.DataFrame, price_col: Optional[str]) -> pd.Dat
     out["next_price_for_return"] = out.groupby("asset_id")["price_for_return"].shift(-1)
     out["recalc_simple_return"] = out.groupby("asset_id")["price_for_return"].pct_change()
     out["recalc_log_return"] = out.groupby("asset_id")["price_for_return"].transform(lambda s: np.log(s).diff())
-    out["recalc_next_simple_return"] = out.groupby("asset_id")["price_for_return"].transform(lambda s: s.shift(-1) / s - 1)
+    out["recalc_next_simple_return"] = out.groupby("asset_id")["price_for_return"].transform(
+        lambda s: s.shift(-1) / s - 1
+    )
     return out
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description="Extract S3 historical prices for assets flagged by returns-quality reports.")
-    ap.add_argument("--prices-s3-prefix", required=True, help="Partitioned prices/OHLCV S3 prefix, e.g. s3://bucket/market/ohlcv_usd/v1/")
+    ap = argparse.ArgumentParser(
+        description="Extract S3 historical prices for assets flagged by returns-quality reports."
+    )
+    ap.add_argument(
+        "--prices-s3-prefix",
+        required=True,
+        help="Partitioned prices/OHLCV S3 prefix, e.g. s3://bucket/market/ohlcv_usd/v1/",
+    )
     ap.add_argument("--asset-id", action="append", default=[], help="Asset ID to extract. Repeatable.")
-    ap.add_argument("--asset-ids-csv", default=None, help="CSV with asset_id, e.g. returns_quality_assets.csv or returns_quarantine_assets.csv")
-    ap.add_argument("--bad-cells-csv", default=None, help="CSV with date, asset_id, return, e.g. returns_quality_cells.csv")
+    ap.add_argument(
+        "--asset-ids-csv",
+        default=None,
+        help="CSV with asset_id, e.g. returns_quality_assets.csv or returns_quarantine_assets.csv",
+    )
+    ap.add_argument(
+        "--bad-cells-csv", default=None, help="CSV with date, asset_id, return, e.g. returns_quality_cells.csv"
+    )
     ap.add_argument("--top-n-assets", type=int, default=25)
-    ap.add_argument("--days-around-bad-dates", type=int, default=0, help="If >0, filter each asset to min/max bad dates +/- N days.")
-    ap.add_argument("--price-col", default=None, help="Price column to use for recomputed returns; auto-detected if omitted.")
+    ap.add_argument(
+        "--days-around-bad-dates", type=int, default=0, help="If >0, filter each asset to min/max bad dates +/- N days."
+    )
+    ap.add_argument(
+        "--price-col", default=None, help="Price column to use for recomputed returns; auto-detected if omitted."
+    )
     ap.add_argument("--out-dir", required=True)
     ap.add_argument("--aws-region", default=None)
-    ap.add_argument("--scan-all-partitions", action="store_true", help="Fallback: list all parquet files under prefix and match /asset_id=. More expensive.")
+    ap.add_argument(
+        "--scan-all-partitions",
+        action="store_true",
+        help="Fallback: list all parquet files under prefix and match /asset_id=. More expensive.",
+    )
     args = ap.parse_args()
 
     uri = parse_s3_uri(args.prices_s3_prefix)
@@ -301,12 +325,14 @@ def main() -> None:
             keys = [k for k in all_keys if asset_from_key(k) == asset]
 
         if not keys:
-            manifest_rows.append({
-                "asset_id": asset,
-                "status": "not_found",
-                "n_files": 0,
-                "attempted_prefixes": " | ".join(attempted_prefixes),
-            })
+            manifest_rows.append(
+                {
+                    "asset_id": asset,
+                    "status": "not_found",
+                    "n_files": 0,
+                    "attempted_prefixes": " | ".join(attempted_prefixes),
+                }
+            )
             print(f"  ! no parquet files found for {asset}")
             continue
 
@@ -316,12 +342,14 @@ def main() -> None:
                 f = read_parquet_s3(s3, uri.bucket, key)
                 frames.append(normalize_price_frame(f, asset_id=asset, source_key=key))
             except Exception as exc:
-                manifest_rows.append({
-                    "asset_id": asset,
-                    "status": "read_failed",
-                    "s3_key": key,
-                    "error": f"{type(exc).__name__}: {exc}",
-                })
+                manifest_rows.append(
+                    {
+                        "asset_id": asset,
+                        "status": "read_failed",
+                        "s3_key": key,
+                        "error": f"{type(exc).__name__}: {exc}",
+                    }
+                )
 
         if not frames:
             continue
@@ -335,19 +363,21 @@ def main() -> None:
 
         df = add_recomputed_returns(df, args.price_col)
         extracted_frames.append(df)
-        asset_file = out_dir / f"price_history_{asset.replace(':','_').replace('/','_')}.csv"
+        asset_file = out_dir / f"price_history_{asset.replace(':', '_').replace('/', '_')}.csv"
         df.to_csv(asset_file, index=False)
 
-        manifest_rows.append({
-            "asset_id": asset,
-            "status": "ok",
-            "n_files": len(keys),
-            "n_rows": int(len(df)),
-            "first_date": str(df["date"].min().date()) if len(df) else None,
-            "last_date": str(df["date"].max().date()) if len(df) else None,
-            "asset_file": str(asset_file),
-            "attempted_prefixes": " | ".join(attempted_prefixes),
-        })
+        manifest_rows.append(
+            {
+                "asset_id": asset,
+                "status": "ok",
+                "n_files": len(keys),
+                "n_rows": int(len(df)),
+                "first_date": str(df["date"].min().date()) if len(df) else None,
+                "last_date": str(df["date"].max().date()) if len(df) else None,
+                "asset_file": str(asset_file),
+                "attempted_prefixes": " | ".join(attempted_prefixes),
+            }
+        )
 
     manifest = pd.DataFrame(manifest_rows)
     manifest.to_csv(out_dir / "price_extract_manifest.csv", index=False)

@@ -78,11 +78,7 @@ def _parse_goals(s: str) -> tuple[float, float, float]:
 
 
 def _returns_wide_cache_path(cfg: RuntimeConfig, *, min_years: int) -> str:
-    return (
-        f"s3://{cfg_bucket(cfg)}/"
-        f"{cfg_market_root(cfg)}/cache/v1/"
-        f"returns_wide_min{int(min_years)}y.parquet"
-    )
+    return f"s3://{cfg_bucket(cfg)}/{cfg_market_root(cfg)}/cache/v1/returns_wide_min{int(min_years)}y.parquet"
 
 
 def _load_returns_wide(
@@ -164,10 +160,7 @@ def _latest_prices_by_asset_id(cfg: RuntimeConfig) -> dict[str, float]:
     elif "close_raw_usd" in df.columns:
         px_col = "close_raw_usd"
     else:
-        raise RuntimeError(
-            "latest prices snapshot has no usable USD close column. "
-            f"Columns={list(df.columns)}"
-        )
+        raise RuntimeError(f"latest prices snapshot has no usable USD close column. Columns={list(df.columns)}")
 
     df[px_col] = pd.to_numeric(df[px_col], errors="coerce")
     df = df.dropna(subset=["asset_id", px_col])
@@ -227,12 +220,7 @@ def _resolve_asset_key(key: object, resolver: dict[str, str]) -> str | None:
     if not raw or raw.lower() == "nan":
         return None
 
-    return (
-        resolver.get(raw)
-        or resolver.get(raw.upper())
-        or resolver.get(raw.lower())
-        or resolver.get(raw.casefold())
-    )
+    return resolver.get(raw) or resolver.get(raw.upper()) or resolver.get(raw.lower()) or resolver.get(raw.casefold())
 
 
 def _load_current_positions(
@@ -328,11 +316,7 @@ def _weights_from_positions(
             f"missing_returns={missing_returns[:10]}"
         )
 
-    weights = {
-        asset_id: float(exp / gross)
-        for asset_id, exp in exposures.items()
-        if abs(exp) > 0
-    }
+    weights = {asset_id: float(exp / gross) for asset_id, exp in exposures.items() if abs(exp) > 0}
 
     diagnostics = {
         "raw_position_count": int(len(raw_positions_qty)),
@@ -386,11 +370,7 @@ def _load_universe_for_returns(
 
     returns_cols = {str(c) for c in returns.columns}
 
-    universe = {
-        str(k): v
-        for k, v in universe_all.items()
-        if str(k) in returns_cols
-    }
+    universe = {str(k): v for k, v in universe_all.items() if str(k) in returns_cols}
 
     if len(universe) < 2:
         raise RuntimeError(
@@ -661,9 +641,7 @@ def run_local_transition_optimizer_job(
     )
 
     candidate_weights = (
-        None
-        if result.best_candidate is None
-        else {k: float(v) for k, v in result.best_candidate.weights.items()}
+        None if result.best_candidate is None else {k: float(v) for k, v in result.best_candidate.weights.items()}
     )
 
     regime_fit = _load_regime_fit_diagnostics(
@@ -685,9 +663,7 @@ def run_local_transition_optimizer_job(
         "current_weights": {k: float(v) for k, v in result.current_weights.items()},
         "current_score": float(result.current_score),
         "current_health_score": result.current_health_score,
-        "best_candidate": (
-            None if result.best_candidate is None else asdict(result.best_candidate)
-        ),
+        "best_candidate": (None if result.best_candidate is None else asdict(result.best_candidate)),
         "candidates_evaluated": int(result.candidates_evaluated),
         "candidates_accepted_by_turnover": int(result.candidates_accepted_by_turnover),
         "config": asdict(result.config),
@@ -859,7 +835,9 @@ def main() -> None:
                 source_mode="local_transition_optimizer",
                 status=("dry_run" if is_dry_run else "success"),
                 input_args=vars(args),
-                output_keys=[] if is_dry_run else [
+                output_keys=[]
+                if is_dry_run
+                else [
                     f"{cfg_engine_root(cfg)}/{LOCAL_OPTIMIZER_TABLE}/dt={payload.get('as_of')}/local_transition_optimizer.json",
                     f"{cfg_engine_root(cfg)}/{LOCAL_OPTIMIZER_TABLE}/latest.json",
                 ],

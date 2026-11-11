@@ -1,0 +1,42 @@
+[
+  {
+    "asset_id": "CRYPTO:ADA-USD",
+    "year": 2026,
+    "source_rows": 267,
+    "output_rows": 267,
+    "patched_dates": 14,
+    "filename": "..\\data\\quality\\returns\\crypto_source_comparison\\full_year_replacements\\CRYPTO_ADA-USD_2026.parquet",
+    "sha256": "36da2bad18a768e22f0fc39ce905a8e51ec406509768d8ea8d077fde29e7d1a1",
+    "status": "LOCAL_STAGING_ONLY"
+  },
+  {
+    "asset_id": "CRYPTO:DOGE-USD",
+    "year": 2026,
+    "source_rows": 267,
+    "output_rows": 267,
+    "patched_dates": 6,
+    "filename": "..\\data\\quality\\returns\\crypto_source_comparison\\full_year_replacements\\CRYPTO_DOGE-USD_2026.parquet",
+    "sha256": "8c49e0ae074666511bc1f56714639c096da2b98b3407c87342507df2d1841625",
+    "status": "LOCAL_STAGING_ONLY"
+  },
+  {
+    "asset_id": "CRYPTO:FIL-USD",
+    "year": 2026,
+    "source_rows": 267,
+    "output_rows": 267,
+    "patched_dates": 6,
+    "filename": "..\\data\\quality\\returns\\crypto_source_comparison\\full_year_replacements\\CRYPTO_FIL-USD_2026.parquet",
+    "sha256": "3504cf316dc617ffc7d9c93041d18e42f8c3ee692643aed1da4121a7f0dbe12f",
+    "status": "LOCAL_STAGING_ONLY"
+  },
+  {
+    "asset_id": "CRYPTO:SOL-USD",
+    "year": 2026,
+    "source_rows": 267,
+    "output_rows": 267,
+    "patched_dates": 8,
+    "filename": "..\\data\\quality\\returns\\crypto_source_comparison\\full_year_replacements\\CRYPTO_SOL-USD_2026.parquet",
+    "sha256": "ce20a19785ba671f63f42f1103a8b09e84e705fb9adc2c6c1586e8e10676e50c",
+    "status": "LOCAL_STAGING_ONLY"
+  }
+]

@@ -1,12 +1,8 @@
 from __future__ import annotations
 
 import argparse
-import json
-import io
-from dataclasses import asdict
 from typing import Any
 
-import boto3
 import numpy as np
 import pandas as pd
 
@@ -50,12 +46,7 @@ def _load_universe() -> pd.DataFrame:
 
 
 def _portfolio_run_key(root_prefix: str, run_dt: str, run_id: str) -> str:
-    return (
-        f"{root_prefix.strip('/')}/"
-        f"{PORTFOLIO_RUNS_TABLE}/"
-        f"dt={run_dt}/"
-        f"run_{run_id}.json"
-    )
+    return f"{root_prefix.strip('/')}/{PORTFOLIO_RUNS_TABLE}/dt={run_dt}/run_{run_id}.json"
 
 
 def _load_returns_wide(
@@ -66,11 +57,7 @@ def _load_returns_wide(
     as_of: str,
     universe: pd.DataFrame,
 ) -> tuple[pd.DataFrame, dict]:
-    path = (
-        f"s3://{bucket}/"
-        f"{market_root.strip('/')}/cache/v1/"
-        f"returns_wide_min{int(float(min_years))}y.parquet"
-    )
+    path = f"s3://{bucket}/{market_root.strip('/')}/cache/v1/returns_wide_min{int(float(min_years))}y.parquet"
 
     returns_wide = pd.read_parquet(path, engine="pyarrow").sort_index()
     returns_wide, diag = clean_returns_matrix(returns_wide)
@@ -264,7 +251,9 @@ def diagnose(
                 "ticker": t,
                 "n_universe_matches": int(len(matches)),
                 "asset_ids": matches["asset_id"].tolist(),
-                "asset_classes": matches["asset_class"].astype(str).tolist() if "asset_class" in matches.columns else [],
+                "asset_classes": matches["asset_class"].astype(str).tolist()
+                if "asset_class" in matches.columns
+                else [],
                 "roles": matches["role"].astype(str).tolist() if "role" in matches.columns else [],
                 "regions": matches["region"].astype(str).tolist() if "region" in matches.columns else [],
             }
@@ -319,8 +308,7 @@ def diagnose(
     ).dropna(how="any")
 
     fx_like = [
-        t for t in tickers
-        if "-" in t and any(ccy in t for ccy in ["USD", "EUR", "JPY", "CNY", "BRL", "GBP", "CHF"])
+        t for t in tickers if "-" in t and any(ccy in t for ccy in ["USD", "EUR", "JPY", "CNY", "BRL", "GBP", "CHF"])
     ]
     fx_gross_weight = float(sum(abs(float(weights.get(t, 0.0))) for t in fx_like))
 
@@ -330,12 +318,24 @@ def diagnose(
         "common_start": None if port_cmp.empty else str(port_cmp.index.min().date()),
         "common_end": None if port_cmp.empty else str(port_cmp.index.max().date()),
         "common_rows": int(len(port_cmp)),
-        "portfolio_corr": None if len(port_cmp) < 20 else _safe_float(port_cmp["returns_wide_port"].corr(port_cmp["ohlcv_simple_port"])),
-        "portfolio_corr_negative": None if len(port_cmp) < 20 else _safe_float(port_cmp["returns_wide_port"].corr(-port_cmp["ohlcv_simple_port"])),
-        "returns_wide_port_mdd": _max_drawdown_from_returns(port_cmp["returns_wide_port"]) if not port_cmp.empty else None,
-        "ohlcv_simple_port_mdd": _max_drawdown_from_returns(port_cmp["ohlcv_simple_port"]) if not port_cmp.empty else None,
-        "returns_wide_port_max_abs_return": None if port_cmp.empty else _safe_float(port_cmp["returns_wide_port"].abs().max()),
-        "ohlcv_simple_port_max_abs_return": None if port_cmp.empty else _safe_float(port_cmp["ohlcv_simple_port"].abs().max()),
+        "portfolio_corr": None
+        if len(port_cmp) < 20
+        else _safe_float(port_cmp["returns_wide_port"].corr(port_cmp["ohlcv_simple_port"])),
+        "portfolio_corr_negative": None
+        if len(port_cmp) < 20
+        else _safe_float(port_cmp["returns_wide_port"].corr(-port_cmp["ohlcv_simple_port"])),
+        "returns_wide_port_mdd": _max_drawdown_from_returns(port_cmp["returns_wide_port"])
+        if not port_cmp.empty
+        else None,
+        "ohlcv_simple_port_mdd": _max_drawdown_from_returns(port_cmp["ohlcv_simple_port"])
+        if not port_cmp.empty
+        else None,
+        "returns_wide_port_max_abs_return": None
+        if port_cmp.empty
+        else _safe_float(port_cmp["returns_wide_port"].abs().max()),
+        "ohlcv_simple_port_max_abs_return": None
+        if port_cmp.empty
+        else _safe_float(port_cmp["ohlcv_simple_port"].abs().max()),
         "fx_like_tickers": fx_like,
         "fx_gross_weight": fx_gross_weight,
     }

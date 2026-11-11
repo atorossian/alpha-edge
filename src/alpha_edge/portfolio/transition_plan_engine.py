@@ -43,13 +43,7 @@ def weight_turnover(
 
     keys = set(current.keys()) | set(target.keys())
 
-    return float(
-        0.5
-        * sum(
-            abs(float(target.get(k, 0.0)) - float(current.get(k, 0.0)))
-            for k in keys
-        )
-    )
+    return float(0.5 * sum(abs(float(target.get(k, 0.0)) - float(current.get(k, 0.0))) for k in keys))
 
 
 def delta_weights(
@@ -100,20 +94,12 @@ def _scale_delta_to_turnover_limit(
     adjusted = {
         k: float(
             float(current_weights.get(k, 0.0))
-            + scale
-            * (
-                float(target_weights.get(k, 0.0))
-                - float(current_weights.get(k, 0.0))
-            )
+            + scale * (float(target_weights.get(k, 0.0)) - float(current_weights.get(k, 0.0)))
         )
         for k in keys
     }
 
-    adjusted = {
-        k: v
-        for k, v in adjusted.items()
-        if abs(v) > 1e-12
-    }
+    adjusted = {k: v for k, v in adjusted.items() if abs(v) > 1e-12}
 
     daily_turnover = weight_turnover(current_weights, adjusted)
     blocked_turnover = max(0.0, full_turnover - daily_turnover)
@@ -278,17 +264,11 @@ def build_transition_plan(
         is_blocked = False
 
         if abs(delta_value) < float(cfg.min_trade_value):
-            reason = (
-                f"delta_value {abs(delta_value):.2f} below "
-                f"min_trade_value {float(cfg.min_trade_value):.2f}"
-            )
+            reason = f"delta_value {abs(delta_value):.2f} below min_trade_value {float(cfg.min_trade_value):.2f}"
             is_blocked = True
 
         if abs(dw) < float(cfg.min_trade_weight):
-            reason = (
-                f"delta_weight {abs(dw):.6f} below "
-                f"min_trade_weight {float(cfg.min_trade_weight):.6f}"
-            )
+            reason = f"delta_weight {abs(dw):.6f} below min_trade_weight {float(cfg.min_trade_weight):.6f}"
             is_blocked = True
 
         trade = TransitionTradeRecommendation(

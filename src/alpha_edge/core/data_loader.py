@@ -6,19 +6,20 @@ import json
 import re
 import uuid
 from dataclasses import asdict, is_dataclass
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Optional
 
 import boto3
 import numpy as np
 import pandas as pd
 from collections.abc import KeysView, ValuesView, ItemsView
 
-from alpha_edge.core.schemas import ScoreConfig, Position, PortfolioHealth
+from alpha_edge.core.schemas import Position, PortfolioHealth
 
 
 # ----------------------------
 # JSON serialization helpers
 # ----------------------------
+
 
 def _json_default(o: Any):
     # dataclasses
@@ -51,6 +52,7 @@ def _json_default(o: Any):
 # ----------------------------
 # S3 generic read helpers
 # ----------------------------
+
 
 def s3_read_json(s3, *, bucket: str, key: str) -> dict:
     obj = s3.get_object(Bucket=bucket, Key=key)
@@ -102,6 +104,7 @@ def s3_read_df(
 # ----------------------------
 
 _DT_RE = re.compile(r"/dt=(\d{4}-\d{2}-\d{2})/")
+
 
 def s3_init(region: str = "eu-west-1"):
     return boto3.client("s3", region_name=region)
@@ -293,6 +296,7 @@ def s3_load_latest_report_score(
 # Data cleaning helpers (still used in engine)
 # ----------------------------
 
+
 def clean_returns_matrix(
     returns: pd.DataFrame,
     *,
@@ -333,6 +337,7 @@ def clean_returns_matrix(
 # Engine parsing utilities
 # ----------------------------
 
+
 def new_run_id(dt_: Optional[pd.Timestamp] = None) -> str:
     dt_ = pd.Timestamp(dt_ or pd.Timestamp.utcnow())
     return f"{dt_.strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:8]}"
@@ -358,6 +363,7 @@ def parse_positions_obj(obj: dict) -> dict[str, Position]:
             raise TypeError(f"Invalid position payload for {t}: {type(v)}")
     return out
 
+
 def parse_ledger_positions_obj(obj: dict) -> tuple[list[dict], list[dict]]:
     """
     Expects ledger positions payload from rebuild_ledger.py:
@@ -380,7 +386,6 @@ def parse_ledger_positions_obj(obj: dict) -> tuple[list[dict], list[dict]]:
     return spot, deriv
 
 
-
 def parse_portfolio_health(obj) -> PortfolioHealth:
     if isinstance(obj, PortfolioHealth):
         return obj
@@ -391,10 +396,12 @@ def parse_portfolio_health(obj) -> PortfolioHealth:
     d["date"] = pd.to_datetime(d["date"])
     return PortfolioHealth(**d)
 
+
 def s3_get_json(s3, *, bucket: str, key: str) -> dict:
     obj = s3.get_object(Bucket=bucket, Key=key)
     body = obj["Body"].read()
     return json.loads(body.decode("utf-8"))
+
 
 def s3_load_latest_json_asof(
     s3,

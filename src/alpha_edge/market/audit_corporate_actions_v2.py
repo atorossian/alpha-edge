@@ -4,6 +4,7 @@ Queries the existing MarketStore corporate-action partition keys with S3
 GetObject only; differentiates absent partitions from unreadable/corrupt data.
 It does not apply adjustment factors or mutate Bronze, Silver, Gold or S3.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -46,7 +47,10 @@ def _date_column(value: pd.Series, label: str) -> pd.Series:
 
 
 def load_existing_actions(
-    s3, *, bucket: str, asset_ids: list[str],
+    s3,
+    *,
+    bucket: str,
+    asset_ids: list[str],
     prefix: str = "market/reference/v1/corporate_actions",
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Strict counterpart to MarketStore.read_corporate_actions for audit use."""
@@ -59,8 +63,7 @@ def load_existing_actions(
     for asset_id in asset_ids:
         key = f"{prefix}/asset_id={asset_id}/part-00000.parquet"
         status, raw = _fetch(s3, bucket, key)
-        record = {"asset_id": asset_id, "source_key": key, "source_status": status,
-                  "sha256": None, "rows": 0}
+        record = {"asset_id": asset_id, "source_key": key, "source_status": status, "sha256": None, "rows": 0}
         if raw is None:
             sources.append(record)
             continue
@@ -89,14 +92,27 @@ def load_existing_actions(
         record["rows"] = len(table)
         record["source_status"] = "present_with_rows" if len(table) else "present_empty"
         sources.append(record)
-    columns = ["asset_id", "effective_date", "action_type", "split_factor",
-               "ticker", "yahoo_ticker", "source", "source_action_id", "detected_at_utc", "notes"]
+    columns = [
+        "asset_id",
+        "effective_date",
+        "action_type",
+        "split_factor",
+        "ticker",
+        "yahoo_ticker",
+        "source",
+        "source_action_id",
+        "detected_at_utc",
+        "notes",
+    ]
     actions = pd.concat(rows, ignore_index=True) if rows else pd.DataFrame(columns=columns)
     return actions, pd.DataFrame(sources)
 
 
 def inspect_adjustment_changes(
-    gold: pd.DataFrame, actions: pd.DataFrame, *, threshold: float = 0.005,
+    gold: pd.DataFrame,
+    actions: pd.DataFrame,
+    *,
+    threshold: float = 0.005,
     event_window_days: int = 7,
 ) -> pd.DataFrame:
     """Flag changes in Yahoo adjusted/raw close ratio without assigning causality."""
@@ -136,8 +152,13 @@ def inspect_adjustment_changes(
 
 
 def audit(
-    *, s3, bucket: str, candidate_dir: Path, output: Path,
-    threshold: float = 0.005, event_window_days: int = 7,
+    *,
+    s3,
+    bucket: str,
+    candidate_dir: Path,
+    output: Path,
+    threshold: float = 0.005,
+    event_window_days: int = 7,
 ) -> dict:
     if output.exists():
         raise FileExistsError(f"Refusing to overwrite existing audit: {output}")
@@ -145,8 +166,7 @@ def audit(
     gold = pd.read_parquet(candidate_dir / "gold.parquet")
     assets = sorted(gold["asset_id"].dropna().astype(str).unique().tolist())
     actions, sources = load_existing_actions(s3, bucket=bucket, asset_ids=assets)
-    flags = inspect_adjustment_changes(gold, actions, threshold=threshold,
-                                       event_window_days=event_window_days)
+    flags = inspect_adjustment_changes(gold, actions, threshold=threshold, event_window_days=event_window_days)
     output.mkdir(parents=True)
     for filename, df in [
         ("corporate_action_sources.csv", sources),
@@ -177,8 +197,7 @@ def audit(
         ),
         "files_sha256": {
             filename: _hash((output / filename).read_bytes())
-            for filename in ("corporate_action_sources.csv", "corporate_actions.csv",
-                             "adjustment_ratio_flags.csv")
+            for filename in ("corporate_action_sources.csv", "corporate_actions.csv", "adjustment_ratio_flags.csv")
         },
     }
     (output / "manifest.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
@@ -194,11 +213,19 @@ def main() -> None:
     parser.add_argument("--threshold", type=float, default=0.005)
     parser.add_argument("--event-window-days", type=int, default=7)
     args = parser.parse_args()
-    print(json.dumps(audit(
-        s3=boto3.client("s3", region_name=args.region), bucket=args.bucket,
-        candidate_dir=args.candidate_dir, output=args.output,
-        threshold=args.threshold, event_window_days=args.event_window_days,
-    ), indent=2))
+    print(
+        json.dumps(
+            audit(
+                s3=boto3.client("s3", region_name=args.region),
+                bucket=args.bucket,
+                candidate_dir=args.candidate_dir,
+                output=args.output,
+                threshold=args.threshold,
+                event_window_days=args.event_window_days,
+            ),
+            indent=2,
+        )
+    )
 
 
 if __name__ == "__main__":

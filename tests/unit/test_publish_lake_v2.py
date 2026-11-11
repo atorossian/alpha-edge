@@ -1,16 +1,20 @@
 """Read-only, isolated publisher and promotion-gate contracts."""
+
 from __future__ import annotations
 
 import hashlib
 import json
-from pathlib import Path
 
 import pytest
 from botocore.exceptions import ClientError
 
 from alpha_edge.market.publish_lake_v2 import (
-    PublicationError, _root, stage_candidate, validate_local_candidate,
-    verify_staged_candidate, promote_candidate,
+    PublicationError,
+    _root,
+    stage_candidate,
+    validate_local_candidate,
+    verify_staged_candidate,
+    promote_candidate,
 )
 
 
@@ -18,22 +22,23 @@ class FakeS3:
     def __init__(self):
         self.objects = {}
         self.write_keys = []
-    def put_object(self, *, Bucket, Key, Body, IfNoneMatch=None, IfMatch=None,
-                   ContentType=None):
+
+    def put_object(self, *, Bucket, Key, Body, IfNoneMatch=None, IfMatch=None, ContentType=None):
         if IfNoneMatch == "*" and (Bucket, Key) in self.objects:
             raise ClientError({"Error": {"Code": "PreconditionFailed"}}, "PutObject")
         old = self.objects.get((Bucket, Key))
-        if IfMatch is not None and (
-            old is None or hashlib.md5(old).hexdigest() != IfMatch.strip('"')
-        ):
+        if IfMatch is not None and (old is None or hashlib.md5(old).hexdigest() != IfMatch.strip('"')):
             raise ClientError({"Error": {"Code": "PreconditionFailed"}}, "PutObject")
         self.objects[(Bucket, Key)] = Body
         self.write_keys.append(Key)
+
     def get_object(self, *, Bucket, Key):
         if (Bucket, Key) not in self.objects:
             raise ClientError({"Error": {"Code": "NoSuchKey"}}, "GetObject")
         import io
+
         return {"Body": io.BytesIO(self.objects[(Bucket, Key)])}
+
     def head_object(self, *, Bucket, Key):
         data = self.objects[(Bucket, Key)]
         return {"ETag": '"' + hashlib.md5(data).hexdigest() + '"'}
@@ -43,9 +48,13 @@ def candidate(tmp_path, *, acceptance="review_required", manual=1):
     folder = tmp_path / "candidate"
     folder.mkdir()
     names = [
-        "silver.parquet", "gold.parquet", "bronze_validated.parquet",
-        "fx_normalized.parquet", "fx_evidence.parquet",
-        "session_issues.parquet", "asset_quality_summary.csv",
+        "silver.parquet",
+        "gold.parquet",
+        "bronze_validated.parquet",
+        "fx_normalized.parquet",
+        "fx_evidence.parquet",
+        "session_issues.parquet",
+        "asset_quality_summary.csv",
     ]
     for filename in names:
         (folder / filename).write_bytes(("candidate " + filename).encode())
@@ -64,18 +73,14 @@ def candidate(tmp_path, *, acceptance="review_required", manual=1):
         "fx_rejected_rows": 0,
         "acceptance": acceptance,
         "assets": [{"quarantined_prices": int(manual > 0), "review_returns": 0}],
-        "files_sha256": {
-            p.name: hashlib.sha256(p.read_bytes()).hexdigest()
-            for p in folder.iterdir()
-        },
+        "files_sha256": {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in folder.iterdir()},
     }
     (folder / "manifest.json").write_text(json.dumps(manifest))
     return folder
 
 
 def test_isolated_root_guards():
-    for root in ["market", "prod/market", "dev", "dev/market/../market",
-                 "dev/market//lake_v2", "dev/market/./lake_v2"]:
+    for root in ["market", "prod/market", "dev", "dev/market/../market", "dev/market//lake_v2", "dev/market/./lake_v2"]:
         with pytest.raises(PublicationError):
             _root(root)
     assert _root("dev/market") == "dev/market"
@@ -95,9 +100,7 @@ def test_stage_verify_immutable_receipt_written_last(tmp_path):
     s3 = FakeS3()
     receipt = stage_candidate(s3, "example-bucket", local, run_id="pilot-1")
     assert s3.write_keys[-1].endswith("/_committed.json")
-    staged, manifest = verify_staged_candidate(
-        s3, "example-bucket", run_id="pilot-1"
-    )
+    staged, manifest = verify_staged_candidate(s3, "example-bucket", run_id="pilot-1")
     assert staged == receipt
     assert manifest["manual_correction_rows"] == 1
     assert all(key.startswith("dev/market/lake_v2/") for key in s3.write_keys)
@@ -120,7 +123,9 @@ def test_manual_candidate_is_never_promoted(tmp_path):
     receipt = stage_candidate(s3, "example-bucket", local, run_id="pilot-1")
     with pytest.raises(PublicationError, match="not eligible"):
         promote_candidate(
-            s3, "example-bucket", run_id="pilot-1",
+            s3,
+            "example-bucket",
+            run_id="pilot-1",
             approval=receipt["candidate_manifest_sha256"],
         )
     assert "dev/market/lake_v2/current.json" not in s3.write_keys
@@ -131,15 +136,12 @@ def test_only_eligible_candidate_promotes_after_explicit_digest_approval(tmp_pat
     s3 = FakeS3()
     receipt = stage_candidate(s3, "example-bucket", local, run_id="pilot-1")
     with pytest.raises(PublicationError, match="Approval digest"):
-        promote_candidate(s3, "example-bucket", run_id="pilot-1",
-                          approval="bad-approval")
-    pointer = promote_candidate(s3, "example-bucket", run_id="pilot-1",
-                                approval=receipt["candidate_manifest_sha256"])
+        promote_candidate(s3, "example-bucket", run_id="pilot-1", approval="bad-approval")
+    pointer = promote_candidate(s3, "example-bucket", run_id="pilot-1", approval=receipt["candidate_manifest_sha256"])
     assert pointer["run_id"] == "pilot-1"
     assert s3.write_keys[-1] == "dev/market/lake_v2/current.json"
     with pytest.raises(PublicationError, match="already the current"):
-        promote_candidate(s3, "example-bucket", run_id="pilot-1",
-                          approval=receipt["candidate_manifest_sha256"])
+        promote_candidate(s3, "example-bucket", run_id="pilot-1", approval=receipt["candidate_manifest_sha256"])
 
 
 def test_windows_trace_key_validated_and_canonical_staged(tmp_path):
@@ -161,13 +163,16 @@ def test_windows_trace_key_validated_and_canonical_staged(tmp_path):
     verify_staged_candidate(s3, "example-bucket", run_id="windows-pilot")
 
 
-@pytest.mark.parametrize("bad", [
-    r"asset_traces\..\gold.parquet",
-    r"..\outside.csv",
-    r"C:\temp\oops.csv",
-    "asset_traces//file.csv",
-    "asset_traces/./file.csv",
-])
+@pytest.mark.parametrize(
+    "bad",
+    [
+        r"asset_traces\..\gold.parquet",
+        r"..\outside.csv",
+        r"C:\temp\oops.csv",
+        "asset_traces//file.csv",
+        "asset_traces/./file.csv",
+    ],
+)
 def test_unsafe_path_rejected_cross_platform(tmp_path, bad):
     local = candidate(tmp_path)
     manifest_path = local / "manifest.json"

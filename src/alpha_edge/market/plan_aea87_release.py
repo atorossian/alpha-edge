@@ -4,6 +4,7 @@ Reads a reconciled campaign and builds an immutable per-asset deployment plan.
 No production object is modified. Publication is intentionally NOT available in
 this module: sequential manifest replacement cannot provide atomic reader views.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -64,8 +65,7 @@ def classify_asset(asset, staged_records, active_hashes, equivalent_keys=None):
 
 def plan(s3, bucket, prefix, reconciliation_id, remediation_key=None):
     root = f"{prefix.strip('/')}/repairs/aea87/staging/"
-    reconciliation, reconciliation_hash = _json(
-        s3, bucket, root + reconciliation_id + "/reconciliation.json")
+    reconciliation, reconciliation_hash = _json(s3, bucket, root + reconciliation_id + "/reconciliation.json")
     if reconciliation.get("run_id") != reconciliation_id:
         raise ValueError("Reconciliation ID mismatch")
     verified_equivalences = {}
@@ -75,7 +75,10 @@ def plan(s3, bucket, prefix, reconciliation_id, remediation_key=None):
         if not remediation_key.startswith(expected_prefix) or not remediation_key.endswith("/report.json"):
             raise ValueError("Remediation evidence must belong to this reconciliation")
         remediation, remediation_sha = _json(s3, bucket, remediation_key)
-        if remediation.get("reconciliation_id") != reconciliation_id or remediation.get("reconciliation_sha256") != reconciliation_hash:
+        if (
+            remediation.get("reconciliation_id") != reconciliation_id
+            or remediation.get("reconciliation_sha256") != reconciliation_hash
+        ):
             raise ValueError("Remediation evidence references a different reconciliation")
         for row in remediation["assets"]:
             aid = row["asset_id"]
@@ -83,11 +86,13 @@ def plan(s3, bucket, prefix, reconciliation_id, remediation_key=None):
                 raise ValueError("Duplicate remediation asset")
             keys = {}
             for change in row.get("changed_manifests", []):
-                if (change.get("comparison_status") != "COMPARED"
-                        or change.get("active_only_count") != 0
-                        or change.get("staged_only_count") != 0
-                        or change.get("changed_overlap_count") != 0
-                        or change.get("table") != "returns_usd"):
+                if (
+                    change.get("comparison_status") != "COMPARED"
+                    or change.get("active_only_count") != 0
+                    or change.get("staged_only_count") != 0
+                    or change.get("changed_overlap_count") != 0
+                    or change.get("table") != "returns_usd"
+                ):
                     continue
                 key = change["manifest_key"]
                 keys[key] = change["current_sha256"]
@@ -126,30 +131,35 @@ def plan(s3, bucket, prefix, reconciliation_id, remediation_key=None):
         for key in keys - active.keys():
             active[key] = _active_hash(s3, bucket, key)
         proven = {
-            k for k, sha in verified_equivalences.get(aid, {}).items()
-            if k in {r["manifest_key"] for r in records}
-            and active.get(k) == sha
+            k
+            for k, sha in verified_equivalences.get(aid, {}).items()
+            if k in {r["manifest_key"] for r in records} and active.get(k) == sha
         }
         reasons = classify_asset(asset, records, active, equivalent_keys=proven)
-        output.append({
-            "asset_id": aid, "source_campaign": asset["campaign"],
-            "status": "BLOCKED" if reasons else "CANDIDATE_ONLY",
-            "blockers": reasons,
-            "expected_manifest_hashes": {k: active[k] for k in sorted(keys)},
-            "record_count": len(records),
-            "retire_manifest_keys": sorted(set(asset.get("superseded_manifest_keys", []))),
-            "semantic_equivalence_manifest_keys": sorted(proven),
-        })
+        output.append(
+            {
+                "asset_id": aid,
+                "source_campaign": asset["campaign"],
+                "status": "BLOCKED" if reasons else "CANDIDATE_ONLY",
+                "blockers": reasons,
+                "expected_manifest_hashes": {k: active[k] for k in sorted(keys)},
+                "record_count": len(records),
+                "retire_manifest_keys": sorted(set(asset.get("superseded_manifest_keys", []))),
+                "semantic_equivalence_manifest_keys": sorted(proven),
+            }
+        )
     counts = Counter(x["status"] for x in output)
     blockers = Counter(reason for x in output for reason in x["blockers"])
     run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ") + "_" + uuid.uuid4().hex[:8]
     report = {
-        "kind": "AEA87_GUARDED_RELEASE_PLAN", "run_id": run_id,
-        "reconciliation_id": reconciliation_id, "reconciliation_sha256": reconciliation_hash,
+        "kind": "AEA87_GUARDED_RELEASE_PLAN",
+        "run_id": run_id,
+        "reconciliation_id": reconciliation_id,
+        "reconciliation_sha256": reconciliation_hash,
         "created_utc": datetime.now(timezone.utc).isoformat(),
-        "summary": {"total": len(output), "asset_statuses": dict(counts),
-                    "blocker_counts": dict(blockers)},
-        "assets": output, "production_promotion_allowed": False,
+        "summary": {"total": len(output), "asset_statuses": dict(counts), "blocker_counts": dict(blockers)},
+        "assets": output,
+        "production_promotion_allowed": False,
         "semantic_equivalence_evidence": {"key": remediation_key, "sha256": remediation_sha},
         "quarantine_policy": "BLOCK_ALL_UNRESOLVED; NO_AUTOMATIC_WAIVERS",
         "publication_implementation_status": "NOT_ENABLED",
@@ -162,8 +172,7 @@ def plan(s3, bucket, prefix, reconciliation_id, remediation_key=None):
     }
     key = root + reconciliation_id + "/release_plans/" + run_id + "/plan.json"
     data = json.dumps(report, indent=2, sort_keys=True).encode()
-    s3.put_object(Bucket=bucket, Key=key, Body=data, ContentType="application/json",
-                  IfNoneMatch="*")
+    s3.put_object(Bucket=bucket, Key=key, Body=data, ContentType="application/json", IfNoneMatch="*")
     print(json.dumps(report["summary"], indent=2))
     print(f"RELEASE_PLAN s3://{bucket}/{key}")
     return report
@@ -172,13 +181,21 @@ def plan(s3, bucket, prefix, reconciliation_id, remediation_key=None):
 def main():
     p = argparse.ArgumentParser(description="AEA-87 guarded read-only promotion planning")
     p.add_argument("--reconciliation-id", required=True)
-    p.add_argument("--remediation-key", help="Immutable targeted remediation report; only verified equivalent returns may clear stale-hash blockers")
+    p.add_argument(
+        "--remediation-key",
+        help="Immutable targeted remediation report; only verified equivalent returns may clear stale-hash blockers",
+    )
     p.add_argument("--bucket", default="alpha-edge-algo")
     p.add_argument("--region", default="eu-west-1")
     p.add_argument("--market-prefix", default="market")
     args = p.parse_args()
-    plan(boto3.client("s3", region_name=args.region),
-         args.bucket, args.market_prefix, args.reconciliation_id, args.remediation_key)
+    plan(
+        boto3.client("s3", region_name=args.region),
+        args.bucket,
+        args.market_prefix,
+        args.reconciliation_id,
+        args.remediation_key,
+    )
 
 
 if __name__ == "__main__":

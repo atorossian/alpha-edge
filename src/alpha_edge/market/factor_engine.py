@@ -1,7 +1,6 @@
 # factor_engine.py
 from __future__ import annotations
 
-from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 from alpha_edge.core.schemas import PCAModel
@@ -95,10 +94,10 @@ def sample_portfolio_returns_paths_pca(
             raise ValueError("Weights sum <= 0 after aligning to PCA tickers")
         w = w / denom
 
-    F = model.factor_returns   # (T, K)
-    E = model.resid            # (T, N)
-    mu = model.mu              # (N,)
-    L = model.loadings         # (N, K)
+    F = model.factor_returns  # (T, K)
+    E = model.resid  # (T, N)
+    mu = model.mu  # (N,)
+    L = model.loadings  # (N, K)
 
     T_hist = F.shape[0]
 
@@ -159,6 +158,7 @@ def sample_iid_returns(
 
     idx = rng.integers(0, x.size, size=(n_paths, n_days), dtype=np.int64)
     return x[idx]
+
 
 def sample_block_bootstrap_returns(
     port_rets: np.ndarray,

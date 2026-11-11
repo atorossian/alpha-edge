@@ -91,10 +91,7 @@ def _latest_prices_by_asset_id(cfg: RuntimeConfig) -> dict[str, float]:
     elif "close_raw_usd" in df.columns:
         px_col = "close_raw_usd"
     else:
-        raise RuntimeError(
-            "latest prices snapshot has no usable USD close column. "
-            f"Columns={list(df.columns)}"
-        )
+        raise RuntimeError(f"latest prices snapshot has no usable USD close column. Columns={list(df.columns)}")
 
     df[px_col] = pd.to_numeric(df[px_col], errors="coerce")
     df = df.dropna(subset=["asset_id", px_col])
@@ -120,9 +117,7 @@ def _load_current_positions(
     raw = s3_get_json(s3, bucket=bucket, key=ledger_key)
 
     if not raw:
-        raise RuntimeError(
-            f"Missing current ledger positions: s3://{bucket}/{ledger_key}"
-        )
+        raise RuntimeError(f"Missing current ledger positions: s3://{bucket}/{ledger_key}")
 
     parsed = parse_positions_obj(raw)
 
@@ -137,8 +132,7 @@ def _load_current_positions(
 
     if not out:
         raise RuntimeError(
-            f"Loaded ledger positions from s3://{bucket}/{ledger_key}, "
-            "but no non-zero quantities were found."
+            f"Loaded ledger positions from s3://{bucket}/{ledger_key}, but no non-zero quantities were found."
         )
 
     return out
@@ -348,13 +342,17 @@ def run_transition_execution_plan_job(
             "diagnostics": {
                 "local_optimizer": {
                     "found": isinstance(local_payload, dict),
-                    "recommendation": None if not isinstance(local_payload, dict) else local_payload.get("recommendation"),
+                    "recommendation": None
+                    if not isinstance(local_payload, dict)
+                    else local_payload.get("recommendation"),
                     "status": None if not isinstance(local_payload, dict) else local_payload.get("status"),
                     "reason": None if not isinstance(local_payload, dict) else local_payload.get("reason"),
                 },
                 "shadow": {
                     "found": isinstance(shadow_payload, dict),
-                    "recommendation": None if not isinstance(shadow_payload, dict) else shadow_payload.get("recommendation"),
+                    "recommendation": None
+                    if not isinstance(shadow_payload, dict)
+                    else shadow_payload.get("recommendation"),
                     "status": None if not isinstance(shadow_payload, dict) else shadow_payload.get("status"),
                     "reason": None if not isinstance(shadow_payload, dict) else shadow_payload.get("reason"),
                 },
@@ -511,9 +509,7 @@ def run_transition_execution_plan_job(
 
 
 def parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(
-        description="Build recommendation-only transition execution plan."
-    )
+    p = argparse.ArgumentParser(description="Build recommendation-only transition execution plan.")
 
     p.add_argument("--env", default=None, choices=["dev", "staging", "prod"])
     p.add_argument("--as-of", default=None)
@@ -581,7 +577,9 @@ def main() -> None:
                 source_mode="transition_execution_plan",
                 status=("dry_run" if is_dry_run else "success"),
                 input_args=vars(args),
-                output_keys=[] if is_dry_run else [
+                output_keys=[]
+                if is_dry_run
+                else [
                     f"{cfg_engine_root(cfg)}/{TRANSITION_EXECUTION_PLAN_TABLE}/dt={payload.get('as_of')}/transition_execution_plan.json",
                     f"{cfg_engine_root(cfg)}/{TRANSITION_EXECUTION_PLAN_TABLE}/latest.json",
                 ],

@@ -8,6 +8,7 @@ Passing arithmetic is NOT independent verification of Yahoo observations,
 corporate actions, or closing-time semantics: publication remains blocked
 until those explicit external evidence gates are satisfied.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -61,32 +62,37 @@ def _equal(a: pd.Series, b: pd.Series, *, atol: float = 1e-9, rtol: float = 1e-8
 def _event(events: list[dict], *, check: str, frame: pd.DataFrame, mask, reason: str) -> None:
     bad = frame.loc[np.asarray(mask, dtype=bool)]
     for row in bad.itertuples(index=False):
-        events.append({
-            "check": check, "asset_id": str(row.asset_id),
-            "session_date": str(pd.Timestamp(row.session_date).date()),
-            "reason": reason,
-        })
+        events.append(
+            {
+                "check": check,
+                "asset_id": str(row.asset_id),
+                "session_date": str(pd.Timestamp(row.session_date).date()),
+                "reason": reason,
+            }
+        )
 
 
 def validate(
-    *, candidate_dir: Path, bronze_dir: Path, action_batch_dir: Path | None = None,
-    asset_registry_csv: Path | None = None, fx_registry_csv: Path | None = None,
+    *,
+    candidate_dir: Path,
+    bronze_dir: Path,
+    action_batch_dir: Path | None = None,
+    asset_registry_csv: Path | None = None,
+    fx_registry_csv: Path | None = None,
 ) -> tuple[pd.DataFrame, dict]:
     manifest, _ = validate_local_candidate(candidate_dir)
     configured = manifest.get("source_config_hashes")
     if configured:
         if asset_registry_csv is None or fx_registry_csv is None:
             raise AcceptanceError("Candidate requires original source configuration")
-        if (_sha(asset_registry_csv) != configured.get("asset_registry_sha256")
-                or _sha(fx_registry_csv) != configured.get("fx_registry_sha256")):
+        if _sha(asset_registry_csv) != configured.get("asset_registry_sha256") or _sha(
+            fx_registry_csv
+        ) != configured.get("fx_registry_sha256"):
             raise AcceptanceError("Configuration hash mismatch")
-        u, fx_config = prepare_registry(
-            pd.read_csv(asset_registry_csv), pd.read_csv(fx_registry_csv)
-        )
+        u, fx_config = prepare_registry(pd.read_csv(asset_registry_csv), pd.read_csv(fx_registry_csv))
         if set(u["asset_id"]) != {item["asset_id"] for item in manifest["assets"]}:
             raise AcceptanceError("Configured asset registry differs from candidate")
-        approved_pairs = {r.currency: (r.provider_symbol, r.direction)
-                          for r in fx_config.itertuples(index=False)}
+        approved_pairs = {r.currency: (r.provider_symbol, r.direction) for r in fx_config.itertuples(index=False)}
     else:
         if asset_registry_csv is not None or fx_registry_csv is not None:
             raise AcceptanceError("Candidate has no bound source configuration")
@@ -102,23 +108,50 @@ def validate(
     issues = pd.read_parquet(candidate_dir / "session_issues.parquet")
     evidence = pd.read_parquet(candidate_dir / "fx_evidence.parquet")
     required = {
-        "asset_id", "session_date", "provider_symbol", "currency_original",
-        "open", "high", "low", "close", "adj_close", "volume",
-        "fx_date", "fx_to_usd", "quality_status", "quality_reason",
-        "close_raw_usd", "close_adjusted_usd",
+        "asset_id",
+        "session_date",
+        "provider_symbol",
+        "currency_original",
+        "open",
+        "high",
+        "low",
+        "close",
+        "adj_close",
+        "volume",
+        "fx_date",
+        "fx_to_usd",
+        "quality_status",
+        "quality_reason",
+        "close_raw_usd",
+        "close_adjusted_usd",
     }
-    required_gold = required | {"ret_simple_close_adjusted_usd",
-                                "ret_log_close_adjusted_usd", "return_quality_status"}
+    required_gold = required | {"ret_simple_close_adjusted_usd", "ret_log_close_adjusted_usd", "return_quality_status"}
     if missing := required_gold - set(gold):
         raise AcceptanceError(f"Gold missing contract fields: {sorted(missing)}")
     if missing := required - set(silver):
         raise AcceptanceError(f"Silver missing contract fields: {sorted(missing)}")
-    source_required = {"asset_id", "session_date", "provider_symbol", "currency_original",
-                       "open", "high", "low", "close", "adj_close", "volume"}
+    source_required = {
+        "asset_id",
+        "session_date",
+        "provider_symbol",
+        "currency_original",
+        "open",
+        "high",
+        "low",
+        "close",
+        "adj_close",
+        "volume",
+    }
     if missing := source_required - set(bars):
         raise AcceptanceError(f"Bronze missing contract fields: {sorted(missing)}")
-    if missing := {"currency_original", "fx_date", "fx_to_usd", "quote_close",
-                   "fx_quote_direction", "fx_quote_symbol"} - set(fx):
+    if missing := {
+        "currency_original",
+        "fx_date",
+        "fx_to_usd",
+        "quote_close",
+        "fx_quote_direction",
+        "fx_quote_symbol",
+    } - set(fx):
         raise AcceptanceError(f"Normalized FX missing fields: {sorted(missing)}")
     if missing := {"provider_symbol", "session_date", "quote_close"} - set(quotes):
         raise AcceptanceError(f"Raw FX missing fields: {sorted(missing)}")
@@ -150,16 +183,18 @@ def validate(
         if pd.api.types.is_numeric_dtype(a) and pd.api.types.is_numeric_dtype(b):
             mismatch = ~_equal(a, b)
         else:
-            mismatch = ~a.astype("string").fillna("<NULL>").eq(
-                b.astype("string").fillna("<NULL>")
-            ).to_numpy()
-        _event(findings, check=f"silver_gold_{col}", frame=gold,
-               mask=mismatch, reason="Gold differs from Silver source value")
+            mismatch = ~a.astype("string").fillna("<NULL>").eq(b.astype("string").fillna("<NULL>")).to_numpy()
+        _event(
+            findings,
+            check=f"silver_gold_{col}",
+            frame=gold,
+            mask=mismatch,
+            reason="Gold differs from Silver source value",
+        )
 
     # Every original Yahoo observation must remain present, bit-for-bit as
     # interpreted numerically; manual additions may exist but not overwrite.
-    source = bars.merge(gold, on=key, how="left", suffixes=("_bronze", "_gold"),
-                        indicator=True, validate="one_to_one")
+    source = bars.merge(gold, on=key, how="left", suffixes=("_bronze", "_gold"), indicator=True, validate="one_to_one")
     if source["_merge"].ne("both").any():
         raise AcceptanceError("Gold missing original Bronze observations")
     for col in sorted(source_required - set(key)):
@@ -168,25 +203,29 @@ def validate(
         if col in {"open", "high", "low", "close", "adj_close", "volume"}:
             mismatch = ~_equal(a, b)
         else:
-            mismatch = ~a.astype("string").fillna("<NULL>").eq(
-                b.astype("string").fillna("<NULL>")
-            ).to_numpy()
-        _event(findings, check=f"bronze_lineage_{col}",
-               frame=source.rename(columns={"asset_id": "asset_id",
-                                            "session_date": "session_date"}),
-               mask=mismatch, reason="Candidate differs from immutable Yahoo Bronze")
+            mismatch = ~a.astype("string").fillna("<NULL>").eq(b.astype("string").fillna("<NULL>")).to_numpy()
+        _event(
+            findings,
+            check=f"bronze_lineage_{col}",
+            frame=source.rename(columns={"asset_id": "asset_id", "session_date": "session_date"}),
+            mask=mismatch,
+            reason="Candidate differs from immutable Yahoo Bronze",
+        )
 
     # Local USD arithmetic is independently recomputed; unaccepted rows
     # must never expose a purported valid USD price.
     accepted = gold["quality_status"].eq("accepted").to_numpy()
     for name, native in (("close_raw_usd", "close"), ("close_adjusted_usd", "adj_close")):
-        expected = pd.to_numeric(gold[native], errors="coerce") * pd.to_numeric(
-            gold["fx_to_usd"], errors="coerce")
+        expected = pd.to_numeric(gold[native], errors="coerce") * pd.to_numeric(gold["fx_to_usd"], errors="coerce")
         observed = pd.to_numeric(gold[name], errors="coerce")
-        mismatch = np.where(accepted, ~_equal(expected, observed),
-                            observed.notna().to_numpy())
-        _event(findings, check=f"usd_arithmetic_{name}", frame=gold, mask=mismatch,
-               reason="USD value or rejected-row masking inconsistent with native price and FX")
+        mismatch = np.where(accepted, ~_equal(expected, observed), observed.notna().to_numpy())
+        _event(
+            findings,
+            check=f"usd_arithmetic_{name}",
+            frame=gold,
+            mask=mismatch,
+            reason="USD value or rejected-row masking inconsistent with native price and FX",
+        )
     for asset_id, group in gold.groupby("asset_id"):
         currencies = group["currency_original"].dropna().unique()
         if len(currencies) != 1:
@@ -199,23 +238,26 @@ def validate(
     raw_fx["session_date"] = _dates(raw_fx["session_date"])
     if raw_fx.duplicated(["provider_symbol", "session_date"]).any():
         raise AcceptanceError("Raw FX contains duplicate symbol/session keys")
-    quoted = fx_native.merge(raw_fx, left_on=["fx_quote_symbol", "fx_date"],
-                             right_on=["provider_symbol", "session_date"],
-                             how="left", validate="many_to_one", suffixes=("", "_raw"))
+    quoted = fx_native.merge(
+        raw_fx,
+        left_on=["fx_quote_symbol", "fx_date"],
+        right_on=["provider_symbol", "session_date"],
+        how="left",
+        validate="many_to_one",
+        suffixes=("", "_raw"),
+    )
     if quoted["provider_symbol"].isna().any():
         raise AcceptanceError("Normalized FX includes quote not found in immutable Bronze")
     quoted_rate = pd.to_numeric(quoted["quote_close_raw"], errors="coerce")
     normalized_rate = pd.to_numeric(quoted["fx_to_usd"], errors="coerce")
-    expected_rate = np.where(quoted["fx_quote_direction"].eq("direct"),
-                             quoted_rate, 1.0 / quoted_rate)
+    expected_rate = np.where(quoted["fx_quote_direction"].eq("direct"), quoted_rate, 1.0 / quoted_rate)
     invalid_direction = ~quoted["fx_quote_direction"].isin(["direct", "inverse"])
     if invalid_direction.any() or not _equal(pd.Series(expected_rate), normalized_rate).all():
         raise AcceptanceError("FX inversion/direct quote arithmetic inconsistency")
     for currency, (symbol, direction) in approved_pairs.items():
         subset = quoted.loc[quoted["currency_original"].eq(currency)]
         if not subset.empty and (
-            subset["fx_quote_symbol"].ne(symbol).any()
-            or subset["fx_quote_direction"].ne(direction).any()
+            subset["fx_quote_symbol"].ne(symbol).any() or subset["fx_quote_direction"].ne(direction).any()
         ):
             raise AcceptanceError(f"Unexpected FX quote mapping for {currency}")
     if set(gold["currency_original"].astype(str)) - {"USD", *approved_pairs}:
@@ -241,14 +283,26 @@ def validate(
             latest = subset.sort_values("fx_date").iloc[-1]
             expected_dates.append(latest.fx_date)
             expected_rates.append(float(latest.fx_to_usd))
-    fx_dates_match = _dates(pd.Series(expected_dates)).fillna(pd.Timestamp("1900-01-01")).eq(
-        _dates(gold["fx_date"]).fillna(pd.Timestamp("1900-01-01"))
-    ).to_numpy()
-    _event(findings, check="fx_asof_date", frame=gold,
-           mask=~fx_dates_match, reason="FX as-of date differs from latest available accepted quote")
-    _event(findings, check="fx_asof_value", frame=gold,
-           mask=~_equal(pd.Series(expected_rates), gold["fx_to_usd"]),
-           reason="FX conversion differs from selected quote")
+    fx_dates_match = (
+        _dates(pd.Series(expected_dates))
+        .fillna(pd.Timestamp("1900-01-01"))
+        .eq(_dates(gold["fx_date"]).fillna(pd.Timestamp("1900-01-01")))
+        .to_numpy()
+    )
+    _event(
+        findings,
+        check="fx_asof_date",
+        frame=gold,
+        mask=~fx_dates_match,
+        reason="FX as-of date differs from latest available accepted quote",
+    )
+    _event(
+        findings,
+        check="fx_asof_value",
+        frame=gold,
+        mask=~_equal(pd.Series(expected_rates), gold["fx_to_usd"]),
+        reason="FX conversion differs from selected quote",
+    )
 
     # Recompute simple and logarithmic returns solely from acceptable Gold
     # prices; a quarantine on either side must break the return chain.
@@ -267,7 +321,9 @@ def validate(
             raise AcceptanceError("Duplicate calendar evidence keys")
         gap_flags = gold[["asset_id", "session_date"]].merge(
             gap_flags[["asset_id", "session_date", "previous_expected_session_missing"]],
-            on=["asset_id", "session_date"], how="left", validate="one_to_one",
+            on=["asset_id", "session_date"],
+            how="left",
+            validate="one_to_one",
         )
         if gap_flags["previous_expected_session_missing"].isna().any():
             raise AcceptanceError("Missing calendar continuity evidence")
@@ -276,21 +332,33 @@ def validate(
         log = log.mask(blocked_gap)
         if "return_quality_reason" in gold:
             observed_gap = gold["return_quality_reason"].eq("prior_expected_session_missing")
-            _event(findings, check="return_gap_reason", frame=gold,
-                   mask=observed_gap.ne(blocked_gap).to_numpy(),
-                   reason="Gap return reason differs from calendar evidence")
+            _event(
+                findings,
+                check="return_gap_reason",
+                frame=gold,
+                mask=observed_gap.ne(blocked_gap).to_numpy(),
+                reason="Gap return reason differs from calendar evidence",
+            )
     for name, expected in (
         ("ret_simple_close_adjusted_usd", simple),
         ("ret_log_close_adjusted_usd", log),
     ):
-        _event(findings, check=f"returns_{name}", frame=gold,
-               mask=~_equal(expected, gold[name], atol=1e-10),
-               reason="Return differs from independently computed accepted price path")
+        _event(
+            findings,
+            check=f"returns_{name}",
+            frame=gold,
+            mask=~_equal(expected, gold[name], atol=1e-10),
+            reason="Return differs from independently computed accepted price path",
+        )
     expected_status = pd.Series(np.where(simple.isna(), "unavailable", "accepted"))
     expected_status.loc[simple.abs().gt(0.5)] = "review"
-    _event(findings, check="returns_quality_status", frame=gold,
-           mask=expected_status.ne(gold["return_quality_status"]).to_numpy(),
-           reason="Return review/unavailable status inconsistent with computed return")
+    _event(
+        findings,
+        check="returns_quality_status",
+        frame=gold,
+        mask=expected_status.ne(gold["return_quality_status"]).to_numpy(),
+        reason="Return review/unavailable status inconsistent with computed return",
+    )
 
     # Manifest signals remain mandatory unresolved evidence even if arithmetic
     # is mathematically consistent. Corporate actions are external correlation
@@ -328,12 +396,11 @@ def validate(
         "schema": "alpha_edge_lake_v2_independent_acceptance_1",
         "candidate_manifest_sha256": _sha(candidate_dir / "manifest.json"),
         "bronze_manifest_sha256": _sha(bronze_dir / "manifest.json"),
-        "corporate_actions_manifest_sha256": (
-            _sha(action_batch_dir / "manifest.json") if action_batch_dir else None
-        ),
+        "corporate_actions_manifest_sha256": (_sha(action_batch_dir / "manifest.json") if action_batch_dir else None),
         "legacy_v1_used_as_reference": False,
         "assets": int(gold["asset_id"].nunique()),
-        "bronze_rows": len(bars), "gold_rows": len(gold),
+        "bronze_rows": len(bars),
+        "gold_rows": len(gold),
         "corporate_action_events": len(actions) if actions is not None else None,
         "blocker_counts": blockers,
         "open_external_evidence_gates": obligations,
@@ -350,16 +417,23 @@ def validate(
     return failures, result
 
 
-def generate(*, candidate_dir: Path, bronze_dir: Path, output: Path,
-             action_batch_dir: Path | None = None,
-             asset_registry_csv: Path | None = None,
-             fx_registry_csv: Path | None = None) -> dict:
+def generate(
+    *,
+    candidate_dir: Path,
+    bronze_dir: Path,
+    output: Path,
+    action_batch_dir: Path | None = None,
+    asset_registry_csv: Path | None = None,
+    fx_registry_csv: Path | None = None,
+) -> dict:
     if output.exists():
         raise FileExistsError(f"Refusing to overwrite audit: {output}")
     failures, report = validate(
-        candidate_dir=candidate_dir, bronze_dir=bronze_dir,
+        candidate_dir=candidate_dir,
+        bronze_dir=bronze_dir,
         action_batch_dir=action_batch_dir,
-        asset_registry_csv=asset_registry_csv, fx_registry_csv=fx_registry_csv,
+        asset_registry_csv=asset_registry_csv,
+        fx_registry_csv=fx_registry_csv,
     )
     output.mkdir(parents=True, exist_ok=False)
     target = output / "integrity_findings.csv"
@@ -378,12 +452,19 @@ def main() -> None:
     parser.add_argument("--fx-registry-csv", type=Path)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
-    print(json.dumps(generate(candidate_dir=args.candidate_dir,
-                              bronze_dir=args.bronze_dir,
-                              action_batch_dir=args.actions_dir,
-                              asset_registry_csv=args.asset_registry_csv,
-                              fx_registry_csv=args.fx_registry_csv,
-                              output=args.output), indent=2))
+    print(
+        json.dumps(
+            generate(
+                candidate_dir=args.candidate_dir,
+                bronze_dir=args.bronze_dir,
+                action_batch_dir=args.actions_dir,
+                asset_registry_csv=args.asset_registry_csv,
+                fx_registry_csv=args.fx_registry_csv,
+                output=args.output,
+            ),
+            indent=2,
+        )
+    )
 
 
 if __name__ == "__main__":

@@ -590,7 +590,9 @@ def main_with_audit() -> None:
                 event_type="build_dataset",
                 entity_type="warehouse",
                 entity_id=None,
-                as_of=str(getattr(args, "as_of", None) or getattr(args, "dt", None) or getattr(args, "run_dt", None) or ""),
+                as_of=str(
+                    getattr(args, "as_of", None) or getattr(args, "dt", None) or getattr(args, "run_dt", None) or ""
+                ),
                 source_script="build_warehouse.py",
                 source_mode="warehouse",
                 status=("dry_run" if is_dry_run else "success"),
@@ -609,7 +611,9 @@ def main_with_audit() -> None:
                 event_type="build_dataset",
                 entity_type="warehouse",
                 entity_id=None,
-                as_of=str(getattr(args, "as_of", None) or getattr(args, "dt", None) or getattr(args, "run_dt", None) or ""),
+                as_of=str(
+                    getattr(args, "as_of", None) or getattr(args, "dt", None) or getattr(args, "run_dt", None) or ""
+                ),
                 source_script="build_warehouse.py",
                 source_mode="warehouse",
                 status="failed",

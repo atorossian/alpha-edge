@@ -109,10 +109,35 @@ def _normalize_unit(u: Optional[str]) -> Optional[str]:
         return "ounces"
 
     if s in {
-        "btc", "eth", "sol", "ada", "xrp", "dot", "ltc", "bnb",
-        "avax", "link", "matic", "atom", "near", "uni", "aave",
-        "trx", "etc", "doge", "hbar", "sui", "dash", "bch",
-        "qtum", "apt", "arb", "inj", "mana", "neo", "render",
+        "btc",
+        "eth",
+        "sol",
+        "ada",
+        "xrp",
+        "dot",
+        "ltc",
+        "bnb",
+        "avax",
+        "link",
+        "matic",
+        "atom",
+        "near",
+        "uni",
+        "aave",
+        "trx",
+        "etc",
+        "doge",
+        "hbar",
+        "sui",
+        "dash",
+        "bch",
+        "qtum",
+        "apt",
+        "arb",
+        "inj",
+        "mana",
+        "neo",
+        "render",
     }:
         return "coins"
 
@@ -123,9 +148,35 @@ def _normalize_unit(u: Optional[str]) -> Optional[str]:
 
 
 _CRYPTO_BASES = {
-    "BTC", "ETH", "ADA", "XRP", "DOT", "BCH", "LTC", "SOL", "DOGE", "SUI",
-    "HBAR", "DASH", "BNB", "AVAX", "LINK", "MATIC", "ATOM", "NEAR", "UNI",
-    "AAVE", "TRX", "ETC", "QTUM", "APT", "ARB", "INJ", "MANA", "NEO", "RENDER",
+    "BTC",
+    "ETH",
+    "ADA",
+    "XRP",
+    "DOT",
+    "BCH",
+    "LTC",
+    "SOL",
+    "DOGE",
+    "SUI",
+    "HBAR",
+    "DASH",
+    "BNB",
+    "AVAX",
+    "LINK",
+    "MATIC",
+    "ATOM",
+    "NEAR",
+    "UNI",
+    "AAVE",
+    "TRX",
+    "ETC",
+    "QTUM",
+    "APT",
+    "ARB",
+    "INJ",
+    "MANA",
+    "NEO",
+    "RENDER",
 }
 _CRYPTO_QUOTES = {"USD", "USDT", "USDC", "EUR"}
 
@@ -405,8 +456,7 @@ def audit_crypto_quantity_consistency(trades: list[dict]) -> tuple[list[AuditRow
                             status = "REFactor"
                             issue_code = "SELL_CLOSE_EXCEEDS_LONG"
                             issue_detail = (
-                                f"SELL {action_tag} quantity={qty:.12f} exceeds long open quantity="
-                                f"{qty_before:.12f}."
+                                f"SELL {action_tag} quantity={qty:.12f} exceeds long open quantity={qty_before:.12f}."
                             )
                         else:
                             qty_delta = -qty

@@ -76,22 +76,13 @@ def assess_transition(
     if _grade_below(state.grade, cfg.min_grade):
         triggers.append("grade_below_minimum")
 
-    if (
-        state.ruin_probability is not None
-        and state.ruin_probability > cfg.max_ruin_probability
-    ):
+    if state.ruin_probability is not None and state.ruin_probability > cfg.max_ruin_probability:
         triggers.append("ruin_probability_above_limit")
 
-    if (
-        state.max_drawdown is not None
-        and abs(state.max_drawdown) > cfg.max_drawdown_limit
-    ):
+    if state.max_drawdown is not None and abs(state.max_drawdown) > cfg.max_drawdown_limit:
         triggers.append("max_drawdown_above_limit")
 
-    if (
-        state.days_since_full_search is not None
-        and state.days_since_full_search >= cfg.full_search_refresh_days
-    ):
+    if state.days_since_full_search is not None and state.days_since_full_search >= cfg.full_search_refresh_days:
         triggers.append("scheduled_full_search_refresh")
 
     if state.local_optimizer_failed_days >= cfg.shadow_confirmation_days:

@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, Optional
+from typing import Dict
 
 from alpha_edge.market.regime_filter import RegimeFilterState, update_regime_filter
 
@@ -17,7 +17,7 @@ REGIME_TO_LEVERAGE: Dict[str, LeverageBand] = {
     "STRESS_BEAR": LeverageBand(1.0, 3.0),
     "CHOPPY_BEAR": LeverageBand(3.0, 5.0),
     "CHOPPY_BULL": LeverageBand(5.0, 7.0),
-    "CALM_BULL":   LeverageBand(7.0, 12.0),
+    "CALM_BULL": LeverageBand(7.0, 12.0),
 }
 
 
@@ -50,7 +50,7 @@ def leverage_from_hmm(
     hard_cap: float | None = None,
     # ---- NEW: stability layer ----
     filter_state: RegimeFilterState | None = None,
-    as_of: str | None = None,   # YYYY-MM-DD (IMPORTANT)
+    as_of: str | None = None,  # YYYY-MM-DD (IMPORTANT)
     filter_alpha: float = 0.20,
     min_hold_days: int = 3,
     min_prob_to_switch: float = 0.60,
@@ -163,5 +163,7 @@ def leverage_from_hmm(
             "chosen_label": new_state.chosen_label,
             "days_in_regime": new_state.days_in_regime,
             "probs_smoothed": new_state.probs_smoothed,
-        } if new_state is not None else None,
+        }
+        if new_state is not None
+        else None,
     }

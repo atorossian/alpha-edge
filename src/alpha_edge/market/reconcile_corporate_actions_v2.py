@@ -2,6 +2,7 @@
 
 Local read-only evidence; source event proximity is not proof of causal adjustment.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -21,27 +22,33 @@ def _sha(content: bytes) -> str:
 
 
 def reconcile_events(
-    *, gold: pd.DataFrame, events: pd.DataFrame, threshold: float = 0.005,
+    *,
+    gold: pd.DataFrame,
+    events: pd.DataFrame,
+    threshold: float = 0.005,
 ) -> pd.DataFrame:
-    actions = events.rename(columns={
-        "value": "split_factor",
-        "effective_date": "effective_date",
-    })
+    actions = events.rename(
+        columns={
+            "value": "split_factor",
+            "effective_date": "effective_date",
+        }
+    )
     flags = inspect_adjustment_changes(
-        gold, actions, threshold=threshold, event_window_days=0,
+        gold,
+        actions,
+        threshold=threshold,
+        event_window_days=0,
     )
     if flags.empty:
         flags["evidence_status"] = pd.Series(dtype="object")
         return flags
     flags["evidence_status"] = flags["nearest_action_type"].apply(
-        lambda value: "same_day_reported_action" if pd.notna(value)
-        else "unmatched_requires_review"
+        lambda value: "same_day_reported_action" if pd.notna(value) else "unmatched_requires_review"
     )
     return flags
 
 
-def run(*, candidate_dir: Path, action_batch_dir: Path, output: Path,
-        threshold: float = 0.005) -> dict:
+def run(*, candidate_dir: Path, action_batch_dir: Path, output: Path, threshold: float = 0.005) -> dict:
     if output.exists():
         raise FileExistsError(f"Refusing to overwrite output: {output}")
     validate_local_candidate(candidate_dir)
@@ -79,8 +86,7 @@ def run(*, candidate_dir: Path, action_batch_dir: Path, output: Path,
             "No price, return, or corporate-action dataset is changed."
         ),
         "files_sha256": {
-            fn: _sha((output / fn).read_bytes())
-            for fn in ("adjustment_event_matches.csv", "reported_events.csv")
+            fn: _sha((output / fn).read_bytes()) for fn in ("adjustment_event_matches.csv", "reported_events.csv")
         },
     }
     (output / "manifest.json").write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
@@ -94,10 +100,17 @@ def main() -> None:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--threshold", type=float, default=0.005)
     args = parser.parse_args()
-    print(json.dumps(run(
-        candidate_dir=args.candidate_dir, action_batch_dir=args.actions_dir,
-        output=args.output, threshold=args.threshold,
-    ), indent=2))
+    print(
+        json.dumps(
+            run(
+                candidate_dir=args.candidate_dir,
+                action_batch_dir=args.actions_dir,
+                output=args.output,
+                threshold=args.threshold,
+            ),
+            indent=2,
+        )
+    )
 
 
 if __name__ == "__main__":

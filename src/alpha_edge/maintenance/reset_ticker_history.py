@@ -241,9 +241,9 @@ def state_keys_for_market_root(*, market_root: str) -> list[str]:
 
     return [
         f"{root}/state/last_date_by_asset.json",
-        f"{root}/state/last_date_by_ticker.json",          # legacy
+        f"{root}/state/last_date_by_ticker.json",  # legacy
         f"{root}/state/provider_symbol_by_asset.json",
-        f"{root}/state/provider_symbol_by_ticker.json",    # legacy
+        f"{root}/state/provider_symbol_by_ticker.json",  # legacy
     ]
 
 
@@ -312,9 +312,7 @@ def print_safety_banner(
 # CLI
 # ----------------------------
 def parse_args() -> argparse.Namespace:
-    ap = argparse.ArgumentParser(
-        description="Delete market partitions and reset ingestion state for one asset."
-    )
+    ap = argparse.ArgumentParser(description="Delete market partitions and reset ingestion state for one asset.")
 
     ap.add_argument("--env", default=None, choices=["dev", "staging", "prod"])
     ap.add_argument("--confirm-prod-write", action="store_true")
@@ -337,7 +335,9 @@ def parse_args() -> argparse.Namespace:
     ap.add_argument("--confirm", action="store_true", help="Required together with --execute.")
     ap.add_argument("--dry-run", action="store_true", help="Compatibility flag. Default is dry-run anyway.")
 
-    ap.add_argument("--reason", default=None, help="Required for real maintenance writes/deletes. Stored in audit trail.")
+    ap.add_argument(
+        "--reason", default=None, help="Required for real maintenance writes/deletes. Stored in audit trail."
+    )
 
     return ap.parse_args()
 
@@ -423,10 +423,7 @@ def main() -> None:
         )
 
         if dry_run:
-            print(
-                f"[DRY RUN] state {'would change' if changed else 'unchanged'}: "
-                f"s3://{bucket}/{state_key}"
-            )
+            print(f"[DRY RUN] state {'would change' if changed else 'unchanged'}: s3://{bucket}/{state_key}")
             if changed:
                 changed_state_files += 1
             continue
@@ -455,7 +452,6 @@ def main() -> None:
         print("\n[RESET DONE]")
 
 
-
 # ----------------------------
 # Audit/logging entrypoint wrapper
 # ----------------------------
@@ -479,7 +475,9 @@ def main_with_audit() -> None:
         captured_state_keys.append(str(key))
         return original_s3_put_json(s3, bucket=bucket, key=key, payload=payload)
 
-    with capture_script_run(cfg=cfg, script_name="reset_ticker_history.py", input_args=vars(args), dry_run=is_dry_run) as run_id:
+    with capture_script_run(
+        cfg=cfg, script_name="reset_ticker_history.py", input_args=vars(args), dry_run=is_dry_run
+    ) as run_id:
         globals()["delete_keys"] = _audited_delete_keys
         globals()["s3_put_json"] = _audited_s3_put_json
         try:
@@ -487,28 +485,57 @@ def main_with_audit() -> None:
             planned = sorted(set(captured_delete_keys))
             changed = sorted(set(captured_state_keys))
             event = build_audit_event(
-                cfg=cfg, run_id=run_id, event_type="delete", entity_type="asset_market_history_reset",
-                entity_id=str(getattr(args, "asset_id", None) or getattr(args, "ticker", None) or ""), as_of=None,
-                source_script="reset_ticker_history.py", source_mode="reset_ticker_history",
-                status=("dry_run" if is_dry_run else "success"), reason=getattr(args, "reason", None),
-                input_args=vars(args), output_keys=changed, deleted_keys=([] if is_dry_run else planned),
-                metadata={"tier": "tier_2", "payload_policy": "large_dataset_metadata_only", "planned_deleted_keys": planned,
-                          "planned_deleted_count": len(planned), "changed_state_keys": changed, "changed_state_count": len(changed),
-                          "ticker": getattr(args, "ticker", None), "asset_id": getattr(args, "asset_id", None),
-                          "execute": bool(getattr(args, "execute", False))},
+                cfg=cfg,
+                run_id=run_id,
+                event_type="delete",
+                entity_type="asset_market_history_reset",
+                entity_id=str(getattr(args, "asset_id", None) or getattr(args, "ticker", None) or ""),
+                as_of=None,
+                source_script="reset_ticker_history.py",
+                source_mode="reset_ticker_history",
+                status=("dry_run" if is_dry_run else "success"),
+                reason=getattr(args, "reason", None),
+                input_args=vars(args),
+                output_keys=changed,
+                deleted_keys=([] if is_dry_run else planned),
+                metadata={
+                    "tier": "tier_2",
+                    "payload_policy": "large_dataset_metadata_only",
+                    "planned_deleted_keys": planned,
+                    "planned_deleted_count": len(planned),
+                    "changed_state_keys": changed,
+                    "changed_state_count": len(changed),
+                    "ticker": getattr(args, "ticker", None),
+                    "asset_id": getattr(args, "asset_id", None),
+                    "execute": bool(getattr(args, "execute", False)),
+                },
             )
             write_audit_event(cfg=cfg, event=event, dry_run=is_dry_run)
         except Exception as exc:
             planned = sorted(set(captured_delete_keys))
             changed = sorted(set(captured_state_keys))
             event = build_audit_event(
-                cfg=cfg, run_id=run_id, event_type="delete", entity_type="asset_market_history_reset",
-                entity_id=str(getattr(args, "asset_id", None) or getattr(args, "ticker", None) or ""), as_of=None,
-                source_script="reset_ticker_history.py", source_mode="reset_ticker_history", status="failed",
-                reason=getattr(args, "reason", None), input_args=vars(args),
-                metadata={"tier": "tier_2", "payload_policy": "large_dataset_metadata_only", "planned_deleted_keys": planned,
-                          "planned_deleted_count": len(planned), "changed_state_keys": changed, "changed_state_count": len(changed),
-                          "execute": bool(getattr(args, "execute", False))}, error=f"{type(exc).__name__}: {exc}",
+                cfg=cfg,
+                run_id=run_id,
+                event_type="delete",
+                entity_type="asset_market_history_reset",
+                entity_id=str(getattr(args, "asset_id", None) or getattr(args, "ticker", None) or ""),
+                as_of=None,
+                source_script="reset_ticker_history.py",
+                source_mode="reset_ticker_history",
+                status="failed",
+                reason=getattr(args, "reason", None),
+                input_args=vars(args),
+                metadata={
+                    "tier": "tier_2",
+                    "payload_policy": "large_dataset_metadata_only",
+                    "planned_deleted_keys": planned,
+                    "planned_deleted_count": len(planned),
+                    "changed_state_keys": changed,
+                    "changed_state_count": len(changed),
+                    "execute": bool(getattr(args, "execute", False)),
+                },
+                error=f"{type(exc).__name__}: {exc}",
             )
             write_audit_event(cfg=cfg, event=event, dry_run=is_dry_run)
             raise

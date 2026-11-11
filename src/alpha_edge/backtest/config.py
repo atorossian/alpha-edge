@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Sequence
 
+
 @dataclass
 class BacktestConfig:
     bucket: str = "alpha-edge-algo"
@@ -17,7 +18,7 @@ class BacktestConfig:
     min_forward_days: int = 252
 
     # simulation controls
-    eval_freq: str = "M"          # monthly evaluation points ("W" weekly also ok)
+    eval_freq: str = "M"  # monthly evaluation points ("W" weekly also ok)
     close_to_close: bool = True
 
     # goals

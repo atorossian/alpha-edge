@@ -10,22 +10,59 @@ import pandas as pd
 
 
 REGION_SUFFIX_HINTS = {
-    "spain": [".MC"], "madrid": [".MC"], "bme": [".MC"],
-    "germany": [".DE", ".MU", ".F", ".DU", ".HM"], "xetra": [".DE"],
-    "france": [".PA"], "paris": [".PA"],
-    "italy": [".MI"], "milan": [".MI"],
-    "netherlands": [".AS"], "amsterdam": [".AS"],
-    "london": [".L"], "uk": [".L"],
-    "switzerland": [".SW"], "six": [".SW"],
-    "sweden": [".ST"], "stockholm": [".ST"],
-    "belgium": [".BR"], "brussels": [".BR"],
-    "brazil": [".SA"], "b3": [".SA"], "bovespa": [".SA"], "sao paulo": [".SA"], "são paulo": [".SA"], "bvmf": [".SA"],
-    "mexico": [".MX"], "bmv": [".MX"], "bolsa mexicana": [".MX"], "mexican": [".MX"],
-    "finland": [".HE"], "helsinki": [".HE"], "nasdaq helsinki": [".HE"],
+    "spain": [".MC"],
+    "madrid": [".MC"],
+    "bme": [".MC"],
+    "germany": [".DE", ".MU", ".F", ".DU", ".HM"],
+    "xetra": [".DE"],
+    "france": [".PA"],
+    "paris": [".PA"],
+    "italy": [".MI"],
+    "milan": [".MI"],
+    "netherlands": [".AS"],
+    "amsterdam": [".AS"],
+    "london": [".L"],
+    "uk": [".L"],
+    "switzerland": [".SW"],
+    "six": [".SW"],
+    "sweden": [".ST"],
+    "stockholm": [".ST"],
+    "belgium": [".BR"],
+    "brussels": [".BR"],
+    "brazil": [".SA"],
+    "b3": [".SA"],
+    "bovespa": [".SA"],
+    "sao paulo": [".SA"],
+    "são paulo": [".SA"],
+    "bvmf": [".SA"],
+    "mexico": [".MX"],
+    "bmv": [".MX"],
+    "bolsa mexicana": [".MX"],
+    "mexican": [".MX"],
+    "finland": [".HE"],
+    "helsinki": [".HE"],
+    "nasdaq helsinki": [".HE"],
     "cboe europe": [".DE", ".MC", ".PA", ".MI", ".AS", ".L", ".SW", ".BR", ".ST", ".MU", ".F", ".DU", ".HM"],
 }
 
-EU_FALLBACK_SUFFIXES = [".DE",".MC",".PA",".MI",".AS",".L",".SW",".BR",".ST",".SA",".MX",".HE",".MU",".F",".DU",".HM"]
+EU_FALLBACK_SUFFIXES = [
+    ".DE",
+    ".MC",
+    ".PA",
+    ".MI",
+    ".AS",
+    ".L",
+    ".SW",
+    ".BR",
+    ".ST",
+    ".SA",
+    ".MX",
+    ".HE",
+    ".MU",
+    ".F",
+    ".DU",
+    ".HM",
+]
 _BAD_QUOTETYPES = {"NONE", "MUTUALFUND", "ECNQUOTE"}
 STABLE_QUOTES = {"USD", "USDT", "USDC"}
 
@@ -163,14 +200,24 @@ def triage_failures(
     universe: pd.DataFrame,
     overrides: pd.DataFrame,
     excluded: pd.DataFrame,
-    verbose: bool = False,     # NEW
-    sample_n: int = 10,        # NEW
+    verbose: bool = False,  # NEW
+    sample_n: int = 10,  # NEW
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     if fails is None or fails.empty:
         return (
             pd.DataFrame(),
-            pd.DataFrame(columns=["ticker","yahoo_ticker","lock_yahoo_ticker","exclude","exclude_reason","expected_name","note"]),
-            pd.DataFrame(columns=["ticker","asset_class","reason"]),
+            pd.DataFrame(
+                columns=[
+                    "ticker",
+                    "yahoo_ticker",
+                    "lock_yahoo_ticker",
+                    "exclude",
+                    "exclude_reason",
+                    "expected_name",
+                    "note",
+                ]
+            ),
+            pd.DataFrame(columns=["ticker", "asset_class", "reason"]),
         )
 
     f = fails.copy()
@@ -183,10 +230,25 @@ def triage_failures(
     u = universe.copy()
     u["ticker"] = u.get("ticker", "").astype(str).str.strip()
 
-    keep_cols = [c for c in [
-        "ticker","name","asset_class","role","region","currency","yahoo_ok","quoteType",
-        "exchange","fullExchangeName","market","country","yahoo_ticker"
-    ] if c in u.columns]
+    keep_cols = [
+        c
+        for c in [
+            "ticker",
+            "name",
+            "asset_class",
+            "role",
+            "region",
+            "currency",
+            "yahoo_ok",
+            "quoteType",
+            "exchange",
+            "fullExchangeName",
+            "market",
+            "country",
+            "yahoo_ticker",
+        ]
+        if c in u.columns
+    ]
 
     u_ctx = u[keep_cols].drop_duplicates(subset=["ticker"], keep="last")
     df = f.merge(u_ctx, on="ticker", how="left", suffixes=("", "_u"))
@@ -196,7 +258,9 @@ def triage_failures(
     ov_map = _overrides_lookup(overrides)
 
     if verbose:
-        print(f"[triage_core] fails={len(f)} universe={len(u)} overrides={len(overrides) if overrides is not None else 0} excluded={len(excluded) if excluded is not None else 0}")
+        print(
+            f"[triage_core] fails={len(f)} universe={len(u)} overrides={len(overrides) if overrides is not None else 0} excluded={len(excluded) if excluded is not None else 0}"
+        )
         if "reason" in f.columns:
             print("[triage_core] reason_counts:")
             print(f["reason"].value_counts(dropna=False).head(20).to_string())
@@ -232,7 +296,11 @@ def triage_failures(
             )
 
         # Already overridden (locked yahoo_ticker)?
-        elif ticker in ov_map and ov_map[ticker].get("lock_yahoo_ticker", 0) == 1 and not _is_empty_symbol(ov_map[ticker].get("yahoo_ticker")):
+        elif (
+            ticker in ov_map
+            and ov_map[ticker].get("lock_yahoo_ticker", 0) == 1
+            and not _is_empty_symbol(ov_map[ticker].get("yahoo_ticker"))
+        ):
             d = Decision(
                 classification="OVERRIDE",
                 suggested_action=f"no-op (already overridden to {ov_map[ticker]['yahoo_ticker']})",
@@ -267,11 +335,13 @@ def triage_failures(
                         confidence="HIGH",
                         why=f"crypto pair quote != USD ({ticker})",
                     )
-                    sug_ex_rows.append({
-                        "ticker": ticker,
-                        "asset_class": asset_class if asset_class else "",
-                        "reason": "crypto quote != USD (yfinance often unsupported)",
-                    })
+                    sug_ex_rows.append(
+                        {
+                            "ticker": ticker,
+                            "asset_class": asset_class if asset_class else "",
+                            "reason": "crypto quote != USD (yfinance often unsupported)",
+                        }
+                    )
 
                 elif qt in _BAD_QUOTETYPES:
                     d = Decision(
@@ -280,11 +350,13 @@ def triage_failures(
                         confidence="HIGH",
                         why=f"quoteType={qt}",
                     )
-                    sug_ex_rows.append({
-                        "ticker": ticker,
-                        "asset_class": asset_class if asset_class else "",
-                        "reason": f"bad quoteType={qt}",
-                    })
+                    sug_ex_rows.append(
+                        {
+                            "ticker": ticker,
+                            "asset_class": asset_class if asset_class else "",
+                            "reason": f"bad quoteType={qt}",
+                        }
+                    )
 
                 else:
                     base_sym = yahoo_sym if yahoo_sym else ticker
@@ -295,11 +367,11 @@ def triage_failures(
                     if suggested:
                         reg = region.lower()
                         if "." not in base_sym:
-                            if any(k in reg for k in ["brazil","b3","bovespa","sao paulo","são paulo","bvmf"]):
+                            if any(k in reg for k in ["brazil", "b3", "bovespa", "sao paulo", "são paulo", "bvmf"]):
                                 high_conf = suggested.endswith(".SA")
-                            elif any(k in reg for k in ["mexico","bmv","bolsa mexicana","mexican"]):
+                            elif any(k in reg for k in ["mexico", "bmv", "bolsa mexicana", "mexican"]):
                                 high_conf = suggested.endswith(".MX")
-                            elif any(k in reg for k in ["spain","madrid","bme"]):
+                            elif any(k in reg for k in ["spain", "madrid", "bme"]):
                                 high_conf = suggested.endswith(".MC")
 
                     if suggested and suggested != base_sym:
@@ -310,15 +382,17 @@ def triage_failures(
                             confidence="HIGH" if high_conf else "LOW",
                             why=f"empty OHLCV; region-based suffix guess from region={region or 'n/a'}",
                         )
-                        sug_over_rows.append({
-                            "ticker": ticker,
-                            "yahoo_ticker": suggested,
-                            "lock_yahoo_ticker": 1,
-                            "exclude": 0,
-                            "exclude_reason": "",
-                            "expected_name": name,
-                            "note": f"auto-suggest from failures(empty); base={base_sym}; region={region}",
-                        })
+                        sug_over_rows.append(
+                            {
+                                "ticker": ticker,
+                                "yahoo_ticker": suggested,
+                                "lock_yahoo_ticker": 1,
+                                "exclude": 0,
+                                "exclude_reason": "",
+                                "expected_name": name,
+                                "note": f"auto-suggest from failures(empty); base={base_sym}; region={region}",
+                            }
+                        )
                     else:
                         d = Decision(
                             classification="RETRY",
@@ -328,7 +402,16 @@ def triage_failures(
                         )
 
             elif reason == "exception":
-                transients = ["timeout", "temporarily", "rate limit", "too many requests", "connection", "503", "502", "504"]
+                transients = [
+                    "timeout",
+                    "temporarily",
+                    "rate limit",
+                    "too many requests",
+                    "connection",
+                    "503",
+                    "502",
+                    "504",
+                ]
                 if any(t in err.lower() for t in transients):
                     d = Decision(
                         classification="RETRY",
@@ -351,24 +434,26 @@ def triage_failures(
                     why=f"reason={reason}; error={err[:160]}",
                 )
 
-        triage_rows.append({
-            "as_of": _normalize_str(r.get("as_of")),
-            "ticker": ticker,
-            "yahoo_ticker": yahoo_sym,
-            "reason": reason,
-            "error": err if err else None,
-            "asset_class": asset_class or None,
-            "role": role or None,
-            "region": region or None,
-            "currency": currency or None,
-            "quoteType": qt or None,
-            "yahoo_ok": yahoo_ok,
-            "classification": d.classification,
-            "suggested_action": d.suggested_action,
-            "suggested_yahoo_ticker": d.suggested_yahoo_ticker,
-            "confidence": d.confidence,
-            "why": d.why,
-        })
+        triage_rows.append(
+            {
+                "as_of": _normalize_str(r.get("as_of")),
+                "ticker": ticker,
+                "yahoo_ticker": yahoo_sym,
+                "reason": reason,
+                "error": err if err else None,
+                "asset_class": asset_class or None,
+                "role": role or None,
+                "region": region or None,
+                "currency": currency or None,
+                "quoteType": qt or None,
+                "yahoo_ok": yahoo_ok,
+                "classification": d.classification,
+                "suggested_action": d.suggested_action,
+                "suggested_yahoo_ticker": d.suggested_yahoo_ticker,
+                "confidence": d.confidence,
+                "why": d.why,
+            }
+        )
 
         # optional per-row logging (limited)
         if verbose and printed < int(sample_n):
@@ -390,35 +475,51 @@ def triage_failures(
         for i, row in sug_over.iterrows():
             t = row["ticker"]
             y = row["yahoo_ticker"]
-            if t in ov_map and ov_map[t].get("lock_yahoo_ticker", 0) == 1 and _normalize_str(ov_map[t].get("yahoo_ticker")) == y:
+            if (
+                t in ov_map
+                and ov_map[t].get("lock_yahoo_ticker", 0) == 1
+                and _normalize_str(ov_map[t].get("yahoo_ticker")) == y
+            ):
                 drop_idx.append(i)
         if drop_idx:
             sug_over = sug_over.drop(index=drop_idx)
 
         sug_over = sug_over.drop_duplicates(subset=["ticker"], keep="first").reset_index(drop=True)
     else:
-        sug_over = pd.DataFrame(columns=["ticker","yahoo_ticker","lock_yahoo_ticker","exclude","exclude_reason","expected_name","note"])
+        sug_over = pd.DataFrame(
+            columns=[
+                "ticker",
+                "yahoo_ticker",
+                "lock_yahoo_ticker",
+                "exclude",
+                "exclude_reason",
+                "expected_name",
+                "note",
+            ]
+        )
 
     # suggested exclusions: remove already excluded
     sug_ex = pd.DataFrame(sug_ex_rows)
     if not sug_ex.empty:
         sug_ex["ticker"] = sug_ex["ticker"].astype(str).str.strip()
         sug_ex["asset_class"] = sug_ex.get("asset_class", "").astype(str).str.strip().str.lower()
-        sug_ex = sug_ex.drop_duplicates(subset=["ticker","asset_class","reason"], keep="first")
+        sug_ex = sug_ex.drop_duplicates(subset=["ticker", "asset_class", "reason"], keep="first")
 
         drop_idx = []
         for i, row in sug_ex.iterrows():
-            if _is_excluded(row["ticker"], row.get("asset_class",""), ex_set):
+            if _is_excluded(row["ticker"], row.get("asset_class", ""), ex_set):
                 drop_idx.append(i)
         if drop_idx:
             sug_ex = sug_ex.drop(index=drop_idx)
 
         sug_ex = sug_ex.reset_index(drop=True)
     else:
-        sug_ex = pd.DataFrame(columns=["ticker","asset_class","reason"])
+        sug_ex = pd.DataFrame(columns=["ticker", "asset_class", "reason"])
 
     if verbose:
-        print(f"[triage_core] DONE triage_rows={len(triage_report)} sug_overrides={len(sug_over)} sug_exclusions={len(sug_ex)}")
+        print(
+            f"[triage_core] DONE triage_rows={len(triage_report)} sug_overrides={len(sug_over)} sug_exclusions={len(sug_ex)}"
+        )
 
     return triage_report, sug_over, sug_ex
 

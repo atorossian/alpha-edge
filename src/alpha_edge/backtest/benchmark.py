@@ -3,6 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+
 def compute_proxy_daily_returns(
     returns_wide: pd.DataFrame,
     proxy_tickers: list[str],
@@ -19,6 +20,7 @@ def compute_proxy_daily_returns(
     proxy = proxy.replace([np.inf, -np.inf], np.nan).dropna()
     proxy.name = "proxy_ret"
     return proxy
+
 
 def annualized_return_from_daily_returns(r: pd.Series) -> float | None:
     r = pd.to_numeric(r, errors="coerce").dropna()

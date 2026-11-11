@@ -1,5 +1,4 @@
 """Manual OHLCV correction contract regression tests."""
-from pathlib import Path
 
 import pandas as pd
 import pytest
@@ -10,47 +9,67 @@ from alpha_edge.market.standardize_bronze_v2 import build_silver_gold_from_bronz
 
 
 def sample():
-    return pd.DataFrame([
-        dict(asset_id="EQHd491d3c90f3be544", provider_symbol="ALSEA.MX",
-             currency_original="MXN", session_date=day, open=close,
-             high=close + 0.5, low=close - 0.5, close=close,
-             adj_close=close, volume=100000,
-             source_timestamp=f"{day}T00:00:00-06:00")
-        for day, close in [
-            ("2026-04-21", 51.10),
-            ("2026-04-23", 51.35),
-            ("2026-04-24", 52.53),
+    return pd.DataFrame(
+        [
+            dict(
+                asset_id="EQHd491d3c90f3be544",
+                provider_symbol="ALSEA.MX",
+                currency_original="MXN",
+                session_date=day,
+                open=close,
+                high=close + 0.5,
+                low=close - 0.5,
+                close=close,
+                adj_close=close,
+                volume=100000,
+                source_timestamp=f"{day}T00:00:00-06:00",
+            )
+            for day, close in [
+                ("2026-04-21", 51.10),
+                ("2026-04-23", 51.35),
+                ("2026-04-24", 52.53),
+            ]
         ]
-    ])
+    )
 
 
 def corrections():
-    return pd.DataFrame([{
-        "asset_id": "EQHd491d3c90f3be544", "provider_symbol": "ALSEA.MX",
-        "currency_original": "MXN", "session_date": "2026-04-22",
-        "open": 51.50, "high": 52.06, "low": 51.10, "close": 51.80,
-        "volume": 140975, "adj_close": float("nan"),
-        "correction_id": "manual-alsea-20260422-v1",
-        "reported_by": "user_supplied",
-        "verification_status": "pending_independent_verification",
-    }])
+    return pd.DataFrame(
+        [
+            {
+                "asset_id": "EQHd491d3c90f3be544",
+                "provider_symbol": "ALSEA.MX",
+                "currency_original": "MXN",
+                "session_date": "2026-04-22",
+                "open": 51.50,
+                "high": 52.06,
+                "low": 51.10,
+                "close": 51.80,
+                "volume": 140975,
+                "adj_close": float("nan"),
+                "correction_id": "manual-alsea-20260422-v1",
+                "reported_by": "user_supplied",
+                "verification_status": "pending_independent_verification",
+            }
+        ]
+    )
 
 
 def fx():
-    return pd.DataFrame({
-        "provider_symbol": ["USDMXN=X"] * 4,
-        "session_date": ["2026-04-21", "2026-04-22", "2026-04-23", "2026-04-24"],
-        "quote_close": [17.4, 17.5, 17.6, 17.7],
-    })
+    return pd.DataFrame(
+        {
+            "provider_symbol": ["USDMXN=X"] * 4,
+            "session_date": ["2026-04-21", "2026-04-22", "2026-04-23", "2026-04-24"],
+            "quote_close": [17.4, 17.5, 17.6, 17.7],
+        }
+    )
 
 
 def test_correction_is_append_only_and_keeps_unknown_adjusted_close():
     original = sample()
     candidate, audit = append_manual_observations(original, corrections())
     assert len(original) == 3
-    assert original["session_date"].tolist() == [
-        "2026-04-21", "2026-04-23", "2026-04-24"
-    ]
+    assert original["session_date"].tolist() == ["2026-04-21", "2026-04-23", "2026-04-24"]
     assert len(candidate) == 4
     row = candidate.loc[candidate["observation_origin"].eq("user_supplied_manual")].iloc[0]
     assert row["close"] == 51.80
@@ -66,7 +85,9 @@ def test_correction_is_append_only_and_keeps_unknown_adjusted_close():
 def test_candidate_calendar_gap_closes_but_unverified_adjusted_return_does_not():
     candidate, _ = append_manual_observations(sample(), corrections())
     result = build_silver_gold_from_bronze(
-        candidate, fx(), calendars={"ALSEA.MX": "XMEX"},
+        candidate,
+        fx(),
+        calendars={"ALSEA.MX": "XMEX"},
         pairs={"MXN": ("USDMXN=X", "inverse")},
     )
     gold = result["gold"].sort_values("session_date")
@@ -134,7 +155,9 @@ def test_user_assertion_restores_alsea_price_and_return_continuity():
     correction["adj_close_policy"] = "explicit_equal_close"
     candidate, _ = append_manual_observations(sample(), correction)
     gold = build_silver_gold_from_bronze(
-        candidate, fx(), calendars={"ALSEA.MX": "XMEX"},
+        candidate,
+        fx(),
+        calendars={"ALSEA.MX": "XMEX"},
         pairs={"MXN": ("USDMXN=X", "inverse")},
     )
     assert gold["session_issues"].empty

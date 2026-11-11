@@ -31,12 +31,14 @@ def trunc_toward_zero(x: float) -> int:
 # Rebalance state + policy
 # ----------------------------
 
+
 @dataclass(frozen=True)
 class RebalanceState:
     """
     Persisted state to support time/equity-band triggers.
     Stored in S3 as a small JSON payload.
     """
+
     last_rebalance_date: str | None = None  # "YYYY-MM-DD" in MARKET as-of date terms
     last_rebalance_equity: float | None = None
 
@@ -52,7 +54,7 @@ class RebalanceDecision:
 
 @dataclass(frozen=True)
 class RescalePlan:
-    as_of: str                       # market date "YYYY-MM-DD"
+    as_of: str  # market date "YYYY-MM-DD"
     equity: float
     recommended_leverage: float
 
@@ -60,7 +62,7 @@ class RescalePlan:
     max_notional_cap: float | None
 
     # outputs
-    targets: pd.DataFrame            # per ticker target quantities / exposures
+    targets: pd.DataFrame  # per ticker target quantities / exposures
     used_gross_notional: float
     leftover_notional: float
 
@@ -96,10 +98,10 @@ def should_rebalance(
     recommended_leverage: float,
     state: RebalanceState | None,
     # --- policy knobs ---
-    drift_threshold: float = 0.15,         # 15% drift allowed (hard)
-    min_days_between: int = 3,             # avoid churn
-    time_rule_days: int | None = 30,       # periodic rebalance (e.g. monthly). None disables.
-    equity_band: float | None = None,      # e.g. 0.10 for +/-10% equity vs last rebalance. None disables.
+    drift_threshold: float = 0.15,  # 15% drift allowed (hard)
+    min_days_between: int = 3,  # avoid churn
+    time_rule_days: int | None = 30,  # periodic rebalance (e.g. monthly). None disables.
+    equity_band: float | None = None,  # e.g. 0.10 for +/-10% equity vs last rebalance. None disables.
 ) -> RebalanceDecision:
     """
     Decides whether to rebalance, based on:

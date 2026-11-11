@@ -156,10 +156,35 @@ def _normalize_quantity_unit(x: Optional[str], ticker: str) -> Optional[str]:
     if "-" in t:
         base = t.split("-", 1)[0]
         crypto_bases = {
-            "BTC", "ETH", "SOL", "ADA", "XRP", "DOT", "LTC", "BNB",
-            "AVAX", "LINK", "MATIC", "ATOM", "NEAR", "UNI", "AAVE",
-            "TRX", "ETC", "DOGE", "HBAR", "SUI", "DASH", "BCH",
-            "QTUM", "APT", "ARB", "INJ", "MANA", "NEO", "RENDER",
+            "BTC",
+            "ETH",
+            "SOL",
+            "ADA",
+            "XRP",
+            "DOT",
+            "LTC",
+            "BNB",
+            "AVAX",
+            "LINK",
+            "MATIC",
+            "ATOM",
+            "NEAR",
+            "UNI",
+            "AAVE",
+            "TRX",
+            "ETC",
+            "DOGE",
+            "HBAR",
+            "SUI",
+            "DASH",
+            "BCH",
+            "QTUM",
+            "APT",
+            "ARB",
+            "INJ",
+            "MANA",
+            "NEO",
+            "RENDER",
         }
         if base in crypto_bases:
             return "coins"
@@ -182,10 +207,35 @@ def _is_crypto_pair(ticker: str) -> bool:
 
     base, quote = t.split("-", 1)
     crypto_bases = {
-        "BTC", "ETH", "SOL", "ADA", "XRP", "DOT", "LTC", "BNB",
-        "AVAX", "LINK", "MATIC", "ATOM", "NEAR", "UNI", "AAVE",
-        "TRX", "ETC", "DOGE", "HBAR", "SUI", "DASH", "BCH",
-        "QTUM", "APT", "ARB", "INJ", "MANA", "NEO", "RENDER",
+        "BTC",
+        "ETH",
+        "SOL",
+        "ADA",
+        "XRP",
+        "DOT",
+        "LTC",
+        "BNB",
+        "AVAX",
+        "LINK",
+        "MATIC",
+        "ATOM",
+        "NEAR",
+        "UNI",
+        "AAVE",
+        "TRX",
+        "ETC",
+        "DOGE",
+        "HBAR",
+        "SUI",
+        "DASH",
+        "BCH",
+        "QTUM",
+        "APT",
+        "ARB",
+        "INJ",
+        "MANA",
+        "NEO",
+        "RENDER",
     }
     crypto_quotes = {"USD", "USDT", "USDC", "EUR"}
     return base in crypto_bases and quote in crypto_quotes
@@ -337,7 +387,7 @@ def _build_edit_command_args(
 
 def _command_args_to_text(args: List[str]) -> str:
     def q(x: str) -> str:
-        if any(ch in x for ch in [' ', '"', "'"]):
+        if any(ch in x for ch in [" ", '"', "'"]):
             return '"' + x.replace('"', '\\"') + '"'
         return x
 

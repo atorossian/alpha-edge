@@ -316,7 +316,6 @@ def seed_trades(s3, *, cfg: RuntimeConfig, asset_map: dict[str, dict[str, Any]])
             action_tag="reduce",
             note="dev fixture SPY reduce",
         ),
-
         # QQQ open then full close
         make_trade(
             ticker="QQQ",
@@ -338,7 +337,6 @@ def seed_trades(s3, *, cfg: RuntimeConfig, asset_map: dict[str, dict[str, Any]])
             action_tag="close",
             note="dev fixture QQQ close",
         ),
-
         # AAPL open remains open
         make_trade(
             ticker="AAPL",
@@ -350,7 +348,6 @@ def seed_trades(s3, *, cfg: RuntimeConfig, asset_map: dict[str, dict[str, Any]])
             action_tag="open",
             note="dev fixture AAPL open",
         ),
-
         # KO open remains open for dividend test
         make_trade(
             ticker="KO",
@@ -362,7 +359,6 @@ def seed_trades(s3, *, cfg: RuntimeConfig, asset_map: dict[str, dict[str, Any]])
             action_tag="open",
             note="dev fixture KO open",
         ),
-
         # GLD short open/reduce/close to test short path
         make_trade(
             ticker="GLD",
@@ -474,7 +470,9 @@ def _main_impl(args: argparse.Namespace, cfg: RuntimeConfig) -> None:
         return
 
     s3 = s3_client(cfg)
-    asset_map = load_asset_map(args.sample_universe_out if Path(args.sample_universe_out).exists() else args.universe_path)
+    asset_map = load_asset_map(
+        args.sample_universe_out if Path(args.sample_universe_out).exists() else args.universe_path
+    )
 
     for t in SAMPLE_TICKERS:
         if t not in asset_map:

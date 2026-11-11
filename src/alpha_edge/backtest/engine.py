@@ -1,7 +1,7 @@
 # backtest/engine.py
 from __future__ import annotations
 from dataclasses import dataclass, asdict
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List
 
 import numpy as np
 import pandas as pd
@@ -14,7 +14,9 @@ from backtest.benchmark import compute_proxy_daily_returns, annualized_return_fr
 from backtest.data_view import slice_returns_wide_asof, get_close_prices_asof
 from backtest.executor import Trade, target_qty_from_weights, rebalance_to_target, mark_to_market, apply_trades
 from alpha_edge.portfolio.rebalance_engine import (
-    RebalanceState, should_rebalance, compute_gross_notional_from_positions
+    RebalanceState,
+    should_rebalance,
+    compute_gross_notional_from_positions,
 )
 
 # your existing health funcs
@@ -23,6 +25,7 @@ from alpha_edge.portfolio.portfolio_health import build_portfolio_health, should
 # you will plug your portfolio search here
 # (we keep it as a callable injected for minimal coupling)
 PortfolioSearchFn = Any  # callable signature described below
+
 
 @dataclass
 class BacktestResult:
@@ -33,6 +36,7 @@ class BacktestResult:
     trades: list[dict]
     events: list[dict]
     meta: dict
+
 
 def build_eval_dates(index: pd.DatetimeIndex, *, start: str, end: str, freq: str) -> list[str]:
     start_ts = pd.Timestamp(start).normalize()
@@ -58,6 +62,7 @@ def build_eval_dates(index: pd.DatetimeIndex, *, start: str, end: str, freq: str
     # de-dupe
     out = list(dict.fromkeys(out))
     return out
+
 
 def run_backtest_once(
     *,
@@ -142,7 +147,7 @@ def run_backtest_once(
 
         # compute benchmark ann return from proxy over same slice
         proxy_slice = proxy_ret_all.loc[proxy_ret_all.index <= pd.Timestamp(as_of).normalize()]
-        proxy_slice = proxy_slice.iloc[-min(len(proxy_slice), cfg.warmup_days):]
+        proxy_slice = proxy_slice.iloc[-min(len(proxy_slice), cfg.warmup_days) :]
         bench_ann = annualized_return_from_daily_returns(proxy_slice)
 
         # choose target leverage (MVP: use constant 1.0; next step: plug your market_hmm as-of)
@@ -153,7 +158,6 @@ def run_backtest_once(
         # Portfolio search at step 0 OR after reoptimize trigger
         do_search = (step_i == 0) or any(e.get("type") == "REOPTIMIZE" and e.get("as_of") == as_of for e in events)
         if do_search:
-
             goals3 = goals3_from_goalpath(gp)
 
             search_out = portfolio_search_fn(
@@ -161,8 +165,8 @@ def run_backtest_once(
                 as_of=as_of,
                 equity0=float(equity),
                 notional=float(target_notional),
-                goals=goals3,                 # <-- IMPORTANT: 3 goals only
-                main_goal=float(goals3[0]),   # <-- matches your EvalMetrics semantics
+                goals=goals3,  # <-- IMPORTANT: 3 goals only
+                main_goal=float(goals3[0]),  # <-- matches your EvalMetrics semantics
                 universe_csv=universe_csv,
             )
 
@@ -170,17 +174,21 @@ def run_backtest_once(
             # optional eval_metrics if you return it
             eval_metrics = search_out.get("eval_metrics")
 
-            events.append({
-                "type": "PORTFOLIO_SELECTED",
-                "as_of": as_of,
-                "main_goal": float(gp.main_goal),
-                "n_assets": len(current_weights),
-            })
+            events.append(
+                {
+                    "type": "PORTFOLIO_SELECTED",
+                    "as_of": as_of,
+                    "main_goal": float(gp.main_goal),
+                    "n_assets": len(current_weights),
+                }
+            )
 
             # build entry trades to reach target weights
             tickers = sorted(current_weights.keys())
             prices = get_prices_for_tickers(as_of, tickers)
-            target_qty = target_qty_from_weights(weights=current_weights, prices=prices, target_notional=target_notional)
+            target_qty = target_qty_from_weights(
+                weights=current_weights, prices=prices, target_notional=target_notional
+            )
             tds = rebalance_to_target(date=as_of, positions_qty=positions_qty, target_qty=target_qty, prices=prices)
             trades.extend(tds)
 
@@ -189,7 +197,9 @@ def run_backtest_once(
             # set baseline health at entry if available
             if eval_metrics is not None:
                 try:
-                    baseline_health = build_portfolio_health(eval_metrics, as_of=pd.Timestamp(as_of), benchmark_ann_return=bench_ann)
+                    baseline_health = build_portfolio_health(
+                        eval_metrics, as_of=pd.Timestamp(as_of), benchmark_ann_return=bench_ann
+                    )
                 except Exception:
                     baseline_health = baseline_health
 
@@ -201,11 +211,11 @@ def run_backtest_once(
         # NOTE: because you’re leveraged, “equity” is not identical to gross value.
         # MVP simplification: treat equity as marked-to-market of positions (you can upgrade with margin model later).
         equity = float(port_value) if tickers_now else float(equity)
-        
+
         reb_state = RebalanceState(
-                last_rebalance_date=None,
-                last_rebalance_equity=None,
-            )
+            last_rebalance_date=None,
+            last_rebalance_equity=None,
+        )
         goal_evt = gp.update(equity)
         if goal_evt.get("advanced"):
             events.append({"type": "GOAL_ADVANCED", "as_of": as_of, **goal_evt})
@@ -213,13 +223,15 @@ def run_backtest_once(
         # Evaluate portfolio health if eval_metrics is available from a daily report-style evaluator.
         # MVP: re-use eval_metrics only at selection time. Next: call your report evaluator per step.
         # We'll store alpha proxy anyway.
-        equity_path.append({
-            "as_of": as_of,
-            "equity": float(equity),
-            "target_leverage": float(target_leverage),
-            "target_notional": float(target_notional),
-            "bench_ann_return": None if bench_ann is None else float(bench_ann),
-        })
+        equity_path.append(
+            {
+                "as_of": as_of,
+                "equity": float(equity),
+                "target_leverage": float(target_leverage),
+                "target_notional": float(target_notional),
+                "bench_ann_return": None if bench_ann is None else float(bench_ann),
+            }
+        )
 
         # Reoptimize trigger (only if we have both baseline and a "current" health snapshot)
         # MVP: we can only do this if portfolio_search_fn returns eval_metrics at each step (or we add an evaluator)

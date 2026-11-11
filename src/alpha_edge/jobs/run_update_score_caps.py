@@ -128,8 +128,7 @@ def _validate_caps(cfg: ScoreConfig) -> None:
 
         if prev_hi is not None and lo < prev_hi:
             raise ValueError(
-                "fft_bands_days bands must be non-overlapping and ordered. "
-                f"Band {i} lo={lo} < previous hi={prev_hi}."
+                f"fft_bands_days bands must be non-overlapping and ordered. Band {i} lo={lo} < previous hi={prev_hi}."
             )
 
         prev_hi = hi
@@ -280,7 +279,9 @@ def main_with_audit() -> None:
                 event_type="modify",
                 entity_type="score_config",
                 entity_id=None,
-                as_of=str(getattr(args, "as_of", None) or getattr(args, "dt", None) or getattr(args, "run_dt", None) or ""),
+                as_of=str(
+                    getattr(args, "as_of", None) or getattr(args, "dt", None) or getattr(args, "run_dt", None) or ""
+                ),
                 source_script="run_update_score_caps.py",
                 source_mode="score_config",
                 status=("dry_run" if is_dry_run else "success"),
@@ -299,7 +300,9 @@ def main_with_audit() -> None:
                 event_type="modify",
                 entity_type="score_config",
                 entity_id=None,
-                as_of=str(getattr(args, "as_of", None) or getattr(args, "dt", None) or getattr(args, "run_dt", None) or ""),
+                as_of=str(
+                    getattr(args, "as_of", None) or getattr(args, "dt", None) or getattr(args, "run_dt", None) or ""
+                ),
                 source_script="run_update_score_caps.py",
                 source_mode="score_config",
                 status="failed",

@@ -7,14 +7,13 @@ Silver/Gold and indicator *candidates*, carrying raw provenance, quality
 reports, correction registry and original asset/FX mappings. It cannot
 activate a production pointer without independent acceptance.
 """
+
 from __future__ import annotations
 
 import argparse
-import hashlib
 import io
 import json
 import re
-import uuid
 from datetime import date
 
 import pandas as pd
@@ -23,7 +22,10 @@ from alpha_edge.core.audit import make_run_id, build_audit_event, write_audit_ev
 from alpha_edge.core.runtime import load_runtime_config, require_prod_confirmation
 from alpha_edge.market.archive_local_outputs_v2 import archive_prefix
 from alpha_edge.market.production_gold_release_v2 import (
-    ROOT, encoded, get, sha, immutable_put, verify_object, stage,
+    ROOT,
+    get,
+    sha,
+    stage,
 )
 from alpha_edge.market.run_daily_pipeline_v2 import _indicators, _put_parquet
 
@@ -39,8 +41,7 @@ def _read(s3, bucket: str, key: str, digest: str) -> bytes:
     return blob
 
 
-def _archive_files(s3, bucket: str, archive_id: str,
-                   relative_prefix: str) -> dict[str, bytes]:
+def _archive_files(s3, bucket: str, archive_id: str, relative_prefix: str) -> dict[str, bytes]:
     prefix = archive_prefix(archive_id)
     marker = get(s3, bucket, prefix + "/_verified_inventory.json")
     if marker is None:
@@ -55,11 +56,10 @@ def _archive_files(s3, bucket: str, archive_id: str,
         raise InitializationError("Requested cohort plan not present in archive")
     result = {}
     for item in selected:
-        suffix = item["path"][len(root):]
+        suffix = item["path"][len(root) :]
         if "/" in suffix or not re.fullmatch(r"[A-Za-z0-9_.-]+", suffix):
             raise InitializationError("Invalid archived plan filename")
-        result[suffix] = _read(
-            s3, bucket, prefix + "/files/" + item["path"], item["sha256"])
+        result[suffix] = _read(s3, bucket, prefix + "/files/" + item["path"], item["sha256"])
     return result
 
 
@@ -67,8 +67,7 @@ def _store(s3, bucket: str, key: str, blob: bytes) -> dict:
     previous = get(s3, bucket, key)
     if previous is None:
         try:
-            s3.put_object(Bucket=bucket, Key=key, Body=blob,
-                          IfNoneMatch="*", ContentType="application/octet-stream")
+            s3.put_object(Bucket=bucket, Key=key, Body=blob, IfNoneMatch="*", ContentType="application/octet-stream")
         except Exception:
             if get(s3, bucket, key) != blob:
                 raise
@@ -79,14 +78,12 @@ def _store(s3, bucket: str, key: str, blob: bytes) -> dict:
     return {"key": key, "sha256": sha(blob)}
 
 
-def build(*, s3, bucket: str, archive_id: str, plan_hash_prefix: str,
-          end: str, run_id: str, execute: bool) -> dict:
+def build(*, s3, bucket: str, archive_id: str, plan_hash_prefix: str, end: str, run_id: str, execute: bool) -> dict:
     if not re.fullmatch("[0-9a-f]{24}", plan_hash_prefix):
         raise InitializationError("Invalid plan prefix")
     if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", end):
         raise InitializationError("Invalid end date")
-    files = _archive_files(
-        s3, bucket, archive_id, "full_universe_preflight_v2/first_review")
+    files = _archive_files(s3, bucket, archive_id, "full_universe_preflight_v2/first_review")
     if "manifest.json" not in files or "fx_config.csv" not in files:
         raise InitializationError("Missing pinned cohort plan files")
     plan = json.loads(files["manifest.json"])
@@ -99,10 +96,8 @@ def build(*, s3, bucket: str, archive_id: str, plan_hash_prefix: str,
             raise InitializationError(f"Pinned cohort source differs: {filename}")
     count = int(plan["cohorts"])
     fx_mapping = pd.read_csv(io.BytesIO(files["fx_config.csv"])).to_dict("records")
-    source_prefix = (
-        f"dev/market/lake_v2/backfills/{plan_hash_prefix}/end-{end}")
-    raw_prefix = (
-        f"{ROOT}/bronze/full_history/{plan_hash_prefix}/end-{end}")
+    source_prefix = f"dev/market/lake_v2/backfills/{plan_hash_prefix}/end-{end}"
+    raw_prefix = f"{ROOT}/bronze/full_history/{plan_hash_prefix}/end-{end}"
     # PREFLIGHT FULL COMPLETENESS before a single production write.
     inventory = []
     missing = []
@@ -117,37 +112,47 @@ def build(*, s3, bucket: str, archive_id: str, plan_hash_prefix: str,
             continue
         research_commit = json.loads(research_raw)
         bronze_commit = json.loads(bronze_raw)
-        if (research_commit.get("schema") != "alpha_edge_s3_backfill_commit_v2_1"
-                or research_commit.get("prefix") != research
-                or bronze_commit.get("schema") != "alpha_edge_production_bronze_commit_v2_1"
-                or bronze_commit.get("source_commit_sha256") != sha(research_raw)):
+        if (
+            research_commit.get("schema") != "alpha_edge_s3_backfill_commit_v2_1"
+            or research_commit.get("prefix") != research
+            or bronze_commit.get("schema") != "alpha_edge_production_bronze_commit_v2_1"
+            or bronze_commit.get("source_commit_sha256") != sha(research_raw)
+        ):
             raise InitializationError(f"Source/production Bronze mismatch: {cohort}")
         entries = {item["path"]: item["sha256"] for item in research_commit["files"]}
         registry = pd.read_csv(io.BytesIO(files[f"cohort_{index:04d}.csv"])).to_dict("records")
         for row in registry:
             if pd.isna(row.get("currency")) or pd.isna(row.get("calendar_id")):
                 raise InitializationError(f"Invalid configured asset in cohort {index}")
-        inventory.append({
-            "index": index, "research": research, "production": production,
-            "entries": entries, "registry": registry,
-            "bronze_commit": bronze_commit,
-        })
+        inventory.append(
+            {
+                "index": index,
+                "research": research,
+                "production": production,
+                "entries": entries,
+                "registry": registry,
+                "bronze_commit": bronze_commit,
+            }
+        )
     if missing:
         return {
-            "status": "blocked_missing_cohorts", "missing_count": len(missing),
-            "missing_cohorts": missing, "expected_cohorts": count,
+            "status": "blocked_missing_cohorts",
+            "missing_count": len(missing),
+            "missing_cohorts": missing,
+            "expected_cohorts": count,
             "s3_writes": 0,
         }
     if not execute:
         return {
             "status": "ready_to_stage_unapproved_initial_release",
-            "cohorts": len(inventory), "assets": plan["assets_included"],
-            "release_id": run_id, "s3_writes": 0,
+            "cohorts": len(inventory),
+            "assets": plan["assets_included"],
+            "release_id": run_id,
+            "s3_writes": 0,
         }
     result = []
     for item in inventory:
-        index, research, production = (
-            item["index"], item["research"], item["production"])
+        index, research, production = (item["index"], item["research"], item["production"])
         prefix = f"{ROOT}/releases/data/{run_id}/cohort-{index:04d}"
         contents = {}
         for filename, output_name in (
@@ -164,26 +169,19 @@ def build(*, s3, bucket: str, archive_id: str, plan_hash_prefix: str,
                 raise InitializationError(f"Missing research artifact: {filename}")
             blob = _read(s3, bucket, research + "/files/" + filename, expected)
             extension = ".json" if output_name == "acceptance" else ".parquet"
-            contents[output_name] = _store(
-                s3, bucket, f"{prefix}/{output_name}{extension}", blob)
-        gold = pd.read_parquet(io.BytesIO(
-            _read(s3, bucket, contents["gold"]["key"], contents["gold"]["sha256"])))
+            contents[output_name] = _store(s3, bucket, f"{prefix}/{output_name}{extension}", blob)
+        gold = pd.read_parquet(io.BytesIO(_read(s3, bucket, contents["gold"]["key"], contents["gold"]["sha256"])))
         ids = [x["asset_id"] for x in item["registry"]]
         if set(gold["asset_id"]) != set(ids):
             raise InitializationError(f"Gold population mismatch cohort {index}")
         indicator = _indicators(gold)
-        contents["indicator_candidate"] = _put_parquet(
-            s3, bucket, f"{prefix}/indicators.parquet", indicator)
+        contents["indicator_candidate"] = _put_parquet(s3, bucket, f"{prefix}/indicators.parquet", indicator)
         corrections_name = "candidate/manual_corrections_audit.parquet"
         if corrections_name in item["entries"]:
-            blob = _read(
-                s3, bucket, research + "/files/" + corrections_name,
-                item["entries"][corrections_name])
-            contents["corrections"] = _store(
-                s3, bucket, f"{prefix}/corrections.parquet", blob)
+            blob = _read(s3, bucket, research + "/files/" + corrections_name, item["entries"][corrections_name])
+            contents["corrections"] = _store(s3, bucket, f"{prefix}/corrections.parquet", blob)
         else:
-            if "observation_origin" in gold and gold["observation_origin"].eq(
-                    "user_supplied_manual").any():
+            if "observation_origin" in gold and gold["observation_origin"].eq("user_supplied_manual").any():
                 raise InitializationError("Manual observations without pinned correction records")
             contents["corrections"] = None
         contents["bronze"] = {
@@ -194,16 +192,24 @@ def build(*, s3, bucket: str, archive_id: str, plan_hash_prefix: str,
             "key": production + "/source_fx_quotes.parquet",
             "sha256": item["bronze_commit"]["sha256"]["source_fx_quotes.parquet"],
         }
-        result.append({
-            "cohort": index, "assets": ids, "registry": item["registry"],
-            "fx_mapping": fx_mapping, "gold_rows": len(gold), **contents,
-        })
+        result.append(
+            {
+                "cohort": index,
+                "assets": ids,
+                "registry": item["registry"],
+                "fx_mapping": fx_mapping,
+                "gold_rows": len(gold),
+                **contents,
+            }
+        )
     release = {
         "schema": "alpha_edge_v2_release_candidate_1",
         "release_id": run_id,
         "as_of": (date.fromisoformat(end) - pd.Timedelta(days=1)).isoformat(),
-        "expected_cohorts": count, "expected_assets": plan["assets_included"],
-        "cohorts": result, "initial_backfill": True,
+        "expected_cohorts": count,
+        "expected_assets": plan["assets_included"],
+        "cohorts": result,
+        "initial_backfill": True,
         "source_archive_id": archive_id,
         "plan_manifest_sha256": sha(files["manifest.json"]),
         "universe_reconciliation": "pending",
@@ -238,29 +244,46 @@ def main():
     if a.execute:
         require_prod_confirmation(cfg, a.confirm_prod_write)
     import boto3
+
     s3 = boto3.client("s3", region_name=a.region)
     rid = a.run_id or make_run_id("market_v2_initial")
     try:
-        result = build(s3=s3, bucket=a.bucket, archive_id=a.plan_archive_id,
-                       plan_hash_prefix=a.plan_hash_prefix, end=a.end,
-                       run_id=rid, execute=a.execute)
+        result = build(
+            s3=s3,
+            bucket=a.bucket,
+            archive_id=a.plan_archive_id,
+            plan_hash_prefix=a.plan_hash_prefix,
+            end=a.end,
+            run_id=rid,
+            execute=a.execute,
+        )
         if a.execute:
             ev = build_audit_event(
-                cfg=cfg, event_type="market_v2_initial_release",
-                entity_type="market_lake", entity_id=rid, as_of=a.end,
+                cfg=cfg,
+                event_type="market_v2_initial_release",
+                entity_type="market_lake",
+                entity_id=rid,
+                as_of=a.end,
                 source_script="alpha_edge.market.prepare_initial_gold_v2",
-                source_mode="prod_candidate", status=result["status"],
-                output_keys=[result["release_manifest"]]
-                if "release_manifest" in result else [], metadata=result)
+                source_mode="prod_candidate",
+                status=result["status"],
+                output_keys=[result["release_manifest"]] if "release_manifest" in result else [],
+                metadata=result,
+            )
             write_audit_event(cfg=cfg, event=ev)
     except Exception as exc:
         if a.execute:
             ev = build_audit_event(
-                cfg=cfg, event_type="market_v2_initial_release",
-                entity_type="market_lake", entity_id=rid, as_of=a.end,
+                cfg=cfg,
+                event_type="market_v2_initial_release",
+                entity_type="market_lake",
+                entity_id=rid,
+                as_of=a.end,
                 source_script="alpha_edge.market.prepare_initial_gold_v2",
-                source_mode="prod_candidate", status="failed",
-                error=f"{type(exc).__name__}: {exc}")
+                source_mode="prod_candidate",
+                status="failed",
+                error=f"{type(exc).__name__}: {exc}",
+            )
             write_audit_event(cfg=cfg, event=ev)
         raise
     print(json.dumps(result, indent=2))

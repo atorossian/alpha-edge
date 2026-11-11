@@ -5,6 +5,7 @@ Expected sessions are evaluated between first and last observed source dates.
 Requested endpoint coverage is reported separately; inception cannot be
 inferred from an arbitrary earliest requested date.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -36,26 +37,36 @@ def report_missing(bars: pd.DataFrame, universe: pd.DataFrame) -> tuple[pd.DataF
             except (ValueError, TypeError):
                 numeric = float("nan")
             if not np.isfinite(numeric):
-                findings.append({
-                    "asset_id": row.asset_id, "provider_symbol": row.provider_symbol,
-                    "session_date": str(row.session_date)[:10],
-                    "field": field, "issue": "missing_or_nonfinite",
-                })
+                findings.append(
+                    {
+                        "asset_id": row.asset_id,
+                        "provider_symbol": row.provider_symbol,
+                        "session_date": str(row.session_date)[:10],
+                        "field": field,
+                        "issue": "missing_or_nonfinite",
+                    }
+                )
             elif field in ("open", "high", "low", "close", "adj_close") and numeric <= 0:
-                findings.append({
-                    "asset_id": row.asset_id, "provider_symbol": row.provider_symbol,
-                    "session_date": str(row.session_date)[:10],
-                    "field": field, "issue": "nonpositive_price",
-                })
+                findings.append(
+                    {
+                        "asset_id": row.asset_id,
+                        "provider_symbol": row.provider_symbol,
+                        "session_date": str(row.session_date)[:10],
+                        "field": field,
+                        "issue": "nonpositive_price",
+                    }
+                )
             elif field == "volume" and numeric < 0:
-                findings.append({
-                    "asset_id": row.asset_id, "provider_symbol": row.provider_symbol,
-                    "session_date": str(row.session_date)[:10],
-                    "field": field, "issue": "negative_volume",
-                })
-    frame = pd.DataFrame(findings, columns=[
-        "asset_id", "provider_symbol", "session_date", "field", "issue"
-    ])
+                findings.append(
+                    {
+                        "asset_id": row.asset_id,
+                        "provider_symbol": row.provider_symbol,
+                        "session_date": str(row.session_date)[:10],
+                        "field": field,
+                        "issue": "negative_volume",
+                    }
+                )
+    frame = pd.DataFrame(findings, columns=["asset_id", "provider_symbol", "session_date", "field", "issue"])
     return frame, sessions
 
 
@@ -67,8 +78,7 @@ def generate(bronze_dir: Path, asset_registry: Path, fx_registry: Path, output: 
     fields, sessions = report_missing(bars, universe)
     output.mkdir(parents=True, exist_ok=False)
     hashes = {}
-    for name, frame in (("missing_price_fields.csv", fields),
-                        ("missing_exchange_sessions.csv", sessions)):
+    for name, frame in (("missing_price_fields.csv", fields), ("missing_exchange_sessions.csv", sessions)):
         path = output / name
         frame.to_csv(path, index=False)
         hashes[name] = hashlib.sha256(path.read_bytes()).hexdigest()
@@ -77,13 +87,18 @@ def generate(bronze_dir: Path, asset_registry: Path, fx_registry: Path, output: 
         f = fields.loc[fields["asset_id"].eq(asset.asset_id)]
         s = sessions.loc[sessions["asset_id"].eq(asset.asset_id)]
         a = bars.loc[bars["asset_id"].eq(asset.asset_id)]
-        by_asset.append({
-            "asset_id": asset.asset_id, "provider_symbol": asset.yahoo_ticker,
-            "observations": len(a), "first_observed": str(a["session_date"].min())[:10],
-            "last_observed": str(a["session_date"].max())[:10],
-            "missing_field_count": len(f), "missing_session_count": int(s["issue"].eq("missing_expected_session").sum()),
-            "unexpected_session_count": int(s["issue"].eq("unexpected_session").sum()),
-        })
+        by_asset.append(
+            {
+                "asset_id": asset.asset_id,
+                "provider_symbol": asset.yahoo_ticker,
+                "observations": len(a),
+                "first_observed": str(a["session_date"].min())[:10],
+                "last_observed": str(a["session_date"].max())[:10],
+                "missing_field_count": len(f),
+                "missing_session_count": int(s["issue"].eq("missing_expected_session").sum()),
+                "unexpected_session_count": int(s["issue"].eq("unexpected_session").sum()),
+            }
+        )
     summary_path = output / "asset_coverage.csv"
     pd.DataFrame(by_asset).to_csv(summary_path, index=False)
     hashes["asset_coverage.csv"] = hashlib.sha256(summary_path.read_bytes()).hexdigest()
@@ -91,12 +106,14 @@ def generate(bronze_dir: Path, asset_registry: Path, fx_registry: Path, output: 
         "schema": "alpha_edge_lake_v2_missing_ohlcv_audit_1",
         "bronze_batch_id": manifest["batch_id"],
         "bronze_manifest_sha256": hashlib.sha256((bronze_dir / "manifest.json").read_bytes()).hexdigest(),
-        "assets": len(by_asset), "missing_price_fields": len(fields),
+        "assets": len(by_asset),
+        "missing_price_fields": len(fields),
         "missing_exchange_sessions": int(sessions["issue"].eq("missing_expected_session").sum()),
         "unexpected_exchange_sessions": int(sessions["issue"].eq("unexpected_session").sum()),
         "acceptance": "review_required" if len(fields) or len(sessions) else "internally_clean",
         "coverage_scope": "observed_history_first_to_last_excludes_unverified_inception_and_endpoints",
-        "files_sha256": hashes, "s3_writes": 0,
+        "files_sha256": hashes,
+        "s3_writes": 0,
     }
     (output / "manifest.json").write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
     return result
@@ -109,8 +126,7 @@ def main():
     p.add_argument("--fx-registry-csv", type=Path, required=True)
     p.add_argument("--output", type=Path, required=True)
     a = p.parse_args()
-    print(json.dumps(generate(a.bronze_dir, a.asset_registry_csv,
-                              a.fx_registry_csv, a.output), indent=2))
+    print(json.dumps(generate(a.bronze_dir, a.asset_registry_csv, a.fx_registry_csv, a.output), indent=2))
 
 
 if __name__ == "__main__":

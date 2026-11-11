@@ -528,9 +528,7 @@ def edit_dividend(
             old_dt = _extract_dt_from_key(old_key)
 
     if not old_key:
-        raise ValueError(
-            "Cannot resolve dividend location. Provide --old-as-of once, or run --mode migrate."
-        )
+        raise ValueError("Cannot resolve dividend location. Provide --old-as-of once, or run --mode migrate.")
 
     if not s3_exists(s3, bucket=cfg.bucket, key=old_key):
         raise RuntimeError(f"Dividend not found: s3://{cfg.bucket}/{old_key}")
@@ -798,7 +796,9 @@ def parse_args() -> argparse.Namespace:
     ap.add_argument("--old-as-of", default=None)
     ap.add_argument("--new-as-of", default=None)
 
-    ap.add_argument("--reason", default=None, help="Business reason for edit/migration/correction. Stored in audit trail.")
+    ap.add_argument(
+        "--reason", default=None, help="Business reason for edit/migration/correction. Stored in audit trail."
+    )
     ap.add_argument("--dry-run", action="store_true")
 
     return ap.parse_args()
@@ -829,7 +829,6 @@ def main() -> None:
                 reason=args.reason,
             )
             return
-
 
         if args.mode == "delete":
             if not args.dividend_id:
@@ -867,7 +866,7 @@ def main() -> None:
             if args.currency is not None:
                 patch["currency"] = str(args.currency).upper().strip() or "USD"
             if args.note is not None:
-                patch["note"] = (str(args.note) if args.note else None)
+                patch["note"] = str(args.note) if args.note else None
 
             if args.shares_held is not None:
                 patch["shares_held"] = float(_validate_positive_optional("shares_held", args.shares_held))
@@ -884,7 +883,7 @@ def main() -> None:
             if args.pay_date is not None:
                 patch["pay_date"] = _validate_date_optional("pay_date", args.pay_date)
             if args.source is not None:
-                patch["source"] = (str(args.source).strip() if args.source else None)
+                patch["source"] = str(args.source).strip() if args.source else None
 
             edit_dividend(
                 cfg=cfg,

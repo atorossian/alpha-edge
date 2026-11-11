@@ -2,10 +2,8 @@ from __future__ import annotations
 
 import argparse
 import io
-import json
 from typing import Any
 
-import boto3
 import numpy as np
 import pandas as pd
 
@@ -26,6 +24,7 @@ DIAG_TABLE = "diagnostics/data_quality/v1"
 # ---------------------------------------------------------------------
 # Generic helpers
 # ---------------------------------------------------------------------
+
 
 def _safe_float(x: Any) -> float | None:
     try:
@@ -113,6 +112,7 @@ def _read_parquet_s3(s3, *, bucket: str, key: str) -> pd.DataFrame:
 # Universe integrity
 # ---------------------------------------------------------------------
 
+
 def _load_universe(*, universe_csv: str | None = None) -> pd.DataFrame:
     path = universe_csv or str(paths.universe_dir() / "universe.csv")
     df = pd.read_csv(path)
@@ -198,6 +198,7 @@ def _universe_duplicate_diagnostics(active: pd.DataFrame) -> dict:
 # ---------------------------------------------------------------------
 # Data loading by asset_id
 # ---------------------------------------------------------------------
+
 
 def _load_ohlcv_for_asset_id(
     *,
@@ -329,6 +330,7 @@ def _load_returns_wide_cache(
 # Metrics
 # ---------------------------------------------------------------------
 
+
 def _max_drawdown_from_simple_returns(r: pd.Series) -> float | None:
     r = pd.to_numeric(r, errors="coerce").replace([np.inf, -np.inf], np.nan).dropna()
     if r.empty:
@@ -373,6 +375,7 @@ def _threshold_for_asset(row: pd.Series) -> float:
         return 0.50
 
     return 0.50
+
 
 def _mean_abs_diff_pair(df: pd.DataFrame, left: str, right: str, *, min_obs: int = 20) -> float | None:
     if df is None or df.empty:
@@ -444,7 +447,8 @@ def _classify_returns_wide_basis(cmp: pd.DataFrame) -> dict:
     near_zero = 1e-7
 
     simple_diffs = [
-        v for k, v in candidates.items()
+        v
+        for k, v in candidates.items()
         if k in {"returns_usd_simple_adj", "returns_usd_simple_close_adjusted", "returns_usd_log_as_simple"}
     ]
     best_simple = min(simple_diffs) if simple_diffs else None
@@ -455,11 +459,7 @@ def _classify_returns_wide_basis(cmp: pd.DataFrame) -> dict:
         "returns_usd_simple_close_adjusted",
         "returns_usd_log_as_simple",
     }:
-        out["basis"] = (
-            "simple"
-            if best_name != "returns_usd_log_as_simple"
-            else "log_converted_to_simple"
-        )
+        out["basis"] = "simple" if best_name != "returns_usd_log_as_simple" else "log_converted_to_simple"
         out["confidence"] = "high" if best_diff <= near_zero else "medium"
         return out
 
@@ -477,6 +477,7 @@ def _classify_returns_wide_basis(cmp: pd.DataFrame) -> dict:
     out["basis"] = "unknown"
     out["confidence"] = "low"
     return out
+
 
 def _summarize_asset_quality(
     *,
@@ -509,14 +510,13 @@ def _summarize_asset_quality(
     if ohlcv is not None and not ohlcv.empty:
         duplicate_dates = int(ohlcv["date"].duplicated(keep=False).sum())
         non_positive_prices = int((pd.to_numeric(ohlcv["price"], errors="coerce") <= 0).sum())
-        price_col_used = str(ohlcv["__price_col_used"].dropna().iloc[-1]) if "__price_col_used" in ohlcv.columns and not ohlcv["__price_col_used"].dropna().empty else None
-
-        price = (
-            ohlcv.set_index("date")["price"]
-            .sort_index()
-            .replace([np.inf, -np.inf], np.nan)
-            .dropna()
+        price_col_used = (
+            str(ohlcv["__price_col_used"].dropna().iloc[-1])
+            if "__price_col_used" in ohlcv.columns and not ohlcv["__price_col_used"].dropna().empty
+            else None
         )
+
+        price = ohlcv.set_index("date")["price"].sort_index().replace([np.inf, -np.inf], np.nan).dropna()
         price = price[price > 0]
 
         ohlcv_simple = price.pct_change().replace([np.inf, -np.inf], np.nan)
@@ -536,7 +536,9 @@ def _summarize_asset_quality(
             ru_simple_adj = pd.to_numeric(ru["ret_adj_close_usd"], errors="coerce").replace([np.inf, -np.inf], np.nan)
 
         if "ret_close_adjusted_usd" in ru.columns:
-            ru_simple_close_adjusted = pd.to_numeric(ru["ret_close_adjusted_usd"], errors="coerce").replace([np.inf, -np.inf], np.nan)
+            ru_simple_close_adjusted = pd.to_numeric(ru["ret_close_adjusted_usd"], errors="coerce").replace(
+                [np.inf, -np.inf], np.nan
+            )
 
         if "ret_log_close_adjusted_usd" in ru.columns:
             ru_log = pd.to_numeric(ru["ret_log_close_adjusted_usd"], errors="coerce").replace([np.inf, -np.inf], np.nan)
@@ -603,7 +605,9 @@ def _summarize_asset_quality(
     oh_ru_max_abs_diff = None
     if len(pair_oh_ru) >= 20:
         oh_ru_corr = _safe_float(pair_oh_ru["ohlcv_simple"].corr(pair_oh_ru["returns_usd_simple_adj"]))
-        oh_ru_max_abs_diff = _safe_float((pair_oh_ru["ohlcv_simple"] - pair_oh_ru["returns_usd_simple_adj"]).abs().max())
+        oh_ru_max_abs_diff = _safe_float(
+            (pair_oh_ru["ohlcv_simple"] - pair_oh_ru["returns_usd_simple_adj"]).abs().max()
+        )
         if oh_ru_corr is not None and oh_ru_corr < 0.98:
             flags.append("ohlcv_vs_returns_usd_simple_low_corr")
         if oh_ru_max_abs_diff is not None and oh_ru_max_abs_diff > 0.02:
@@ -612,7 +616,8 @@ def _summarize_asset_quality(
     status = "PASS"
     if flags:
         severe = [
-            f for f in flags
+            f
+            for f in flags
             if (
                 "missing_ohlcv_prices" in f
                 or "non_positive" in f
@@ -636,7 +641,6 @@ def _summarize_asset_quality(
         "threshold_max_abs_simple_return": float(threshold),
         "status": status,
         "flags": flags,
-
         "ohlcv": {
             "n_rows": int(len(ohlcv)) if ohlcv is not None else 0,
             "first_date": None if price.empty else str(price.index.min().date()),
@@ -649,18 +653,22 @@ def _summarize_asset_quality(
             "mdd_from_simple_returns": _max_drawdown_from_simple_returns(ohlcv_simple),
             "largest_simple_returns": _largest_abs_rows(ohlcv_simple, n=10),
         },
-
         "returns_usd": {
             "n_rows": int(len(returns_usd)) if returns_usd is not None else 0,
-            "first_date": _safe_date_str(returns_usd["date"].min()) if returns_usd is not None and not returns_usd.empty and "date" in returns_usd.columns else None,
-            "last_date": _safe_date_str(returns_usd["date"].max()) if returns_usd is not None and not returns_usd.empty and "date" in returns_usd.columns else None,
+            "first_date": _safe_date_str(returns_usd["date"].min())
+            if returns_usd is not None and not returns_usd.empty and "date" in returns_usd.columns
+            else None,
+            "last_date": _safe_date_str(returns_usd["date"].max())
+            if returns_usd is not None and not returns_usd.empty and "date" in returns_usd.columns
+            else None,
             "max_abs_ret_adj_close_usd": max_abs_ru_simple,
-            "max_abs_ret_close_adjusted_usd": _safe_float(ru_simple_close_adjusted.abs().max()) if not ru_simple_close_adjusted.empty else None,
+            "max_abs_ret_close_adjusted_usd": _safe_float(ru_simple_close_adjusted.abs().max())
+            if not ru_simple_close_adjusted.empty
+            else None,
             "max_abs_ret_log_close_adjusted_usd": max_abs_ru_log,
             "largest_ret_adj_close_usd": _largest_abs_rows(ru_simple_adj, n=10),
             "largest_ret_log_close_adjusted_usd": _largest_abs_rows(ru_log, n=10),
         },
-
         "returns_wide": {
             "exists": bool(not rw.empty),
             "n_rows": int(rw.notna().sum()) if not rw.empty else 0,
@@ -671,7 +679,6 @@ def _summarize_asset_quality(
             "basis_diagnostic": rw_basis_diag,
             "largest_returns": _largest_abs_rows(rw, n=10),
         },
-
         "comparisons": {
             "ohlcv_simple_vs_returns_usd_simple_corr": oh_ru_corr,
             "ohlcv_simple_vs_returns_usd_simple_max_abs_diff": oh_ru_max_abs_diff,
@@ -682,6 +689,7 @@ def _summarize_asset_quality(
 # ---------------------------------------------------------------------
 # Main diagnostic
 # ---------------------------------------------------------------------
+
 
 def run_diagnostic(
     *,
@@ -793,7 +801,6 @@ def run_diagnostic(
 
         return detail
 
-
     def _summary_row(detail: dict) -> dict:
         return {
             "asset_id": detail.get("asset_id"),
@@ -816,18 +823,29 @@ def run_diagnostic(
             "ohlcv_mdd_from_simple_returns": (detail.get("ohlcv") or {}).get("mdd_from_simple_returns"),
             "returns_usd_n_rows": (detail.get("returns_usd") or {}).get("n_rows"),
             "returns_usd_max_abs_ret_adj_close_usd": (detail.get("returns_usd") or {}).get("max_abs_ret_adj_close_usd"),
-            "returns_usd_max_abs_ret_log_close_adjusted_usd": (detail.get("returns_usd") or {}).get("max_abs_ret_log_close_adjusted_usd"),
+            "returns_usd_max_abs_ret_log_close_adjusted_usd": (detail.get("returns_usd") or {}).get(
+                "max_abs_ret_log_close_adjusted_usd"
+            ),
             "returns_wide_exists": (detail.get("returns_wide") or {}).get("exists"),
             "returns_wide_n_rows": (detail.get("returns_wide") or {}).get("n_rows"),
             "returns_wide_max_abs_return": (detail.get("returns_wide") or {}).get("max_abs_return"),
             "returns_wide_looks_like": (detail.get("returns_wide") or {}).get("looks_like"),
-            "returns_wide_basis_confidence": ((detail.get("returns_wide") or {}).get("basis_diagnostic") or {}).get("confidence"),
-            "returns_wide_diff_vs_simple_adj": ((detail.get("returns_wide") or {}).get("basis_diagnostic") or {}).get("diff_vs_returns_usd_simple_adj"),
-            "returns_wide_diff_vs_log": ((detail.get("returns_wide") or {}).get("basis_diagnostic") or {}).get("diff_vs_returns_usd_log"),
-            "ohlcv_vs_returns_usd_simple_corr": (detail.get("comparisons") or {}).get("ohlcv_simple_vs_returns_usd_simple_corr"),
-            "ohlcv_vs_returns_usd_simple_max_abs_diff": (detail.get("comparisons") or {}).get("ohlcv_simple_vs_returns_usd_simple_max_abs_diff"),
+            "returns_wide_basis_confidence": ((detail.get("returns_wide") or {}).get("basis_diagnostic") or {}).get(
+                "confidence"
+            ),
+            "returns_wide_diff_vs_simple_adj": ((detail.get("returns_wide") or {}).get("basis_diagnostic") or {}).get(
+                "diff_vs_returns_usd_simple_adj"
+            ),
+            "returns_wide_diff_vs_log": ((detail.get("returns_wide") or {}).get("basis_diagnostic") or {}).get(
+                "diff_vs_returns_usd_log"
+            ),
+            "ohlcv_vs_returns_usd_simple_corr": (detail.get("comparisons") or {}).get(
+                "ohlcv_simple_vs_returns_usd_simple_corr"
+            ),
+            "ohlcv_vs_returns_usd_simple_max_abs_diff": (detail.get("comparisons") or {}).get(
+                "ohlcv_simple_vs_returns_usd_simple_max_abs_diff"
+            ),
         }
-
 
     active_records = active.to_dict("records")
     max_workers = max(1, int(workers or 1))
@@ -839,8 +857,7 @@ def run_diagnostic(
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = {
-            executor.submit(_diagnose_one_asset, row_dict): row_dict.get("asset_id")
-            for row_dict in active_records
+            executor.submit(_diagnose_one_asset, row_dict): row_dict.get("asset_id") for row_dict in active_records
         }
 
         for i, future in enumerate(as_completed(futures), start=1):
@@ -873,8 +890,12 @@ def run_diagnostic(
             "status_counts": {str(k): int(v) for k, v in counts.items()},
             "n_fail": int(len(fail_assets)),
             "n_warn": int(len(warn_assets)),
-            "returns_wide_columns": int(returns_wide.shape[1]) if returns_wide is not None and not returns_wide.empty else 0,
-            "returns_wide_rows": int(returns_wide.shape[0]) if returns_wide is not None and not returns_wide.empty else 0,
+            "returns_wide_columns": int(returns_wide.shape[1])
+            if returns_wide is not None and not returns_wide.empty
+            else 0,
+            "returns_wide_rows": int(returns_wide.shape[0])
+            if returns_wide is not None and not returns_wide.empty
+            else 0,
         },
         "fail_assets_sample": fail_assets.head(100).to_dict("records") if not fail_assets.empty else [],
         "warn_assets_sample": warn_assets.head(100).to_dict("records") if not warn_assets.empty else [],
@@ -928,10 +949,7 @@ def run_diagnostic(
             df=summary_df,
         )
 
-        print(
-            f"\n[S3] Wrote diagnostics under "
-            f"s3://{bucket}/{market_root}/{DIAG_TABLE}/dt={end_ts.date()}/"
-        )
+        print(f"\n[S3] Wrote diagnostics under s3://{bucket}/{market_root}/{DIAG_TABLE}/dt={end_ts.date()}/")
 
     return payload
 

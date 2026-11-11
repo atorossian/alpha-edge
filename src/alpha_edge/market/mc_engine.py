@@ -6,9 +6,9 @@ import numpy as np
 
 
 def simulate_leveraged_paths_vectorized(
-    port_rets: np.ndarray | None,   # 1D history (N,) IF bootstrapping
+    port_rets: np.ndarray | None,  # 1D history (N,) IF bootstrapping
     equity0: float,
-    notional: float,               # GROSS notional (USD)
+    notional: float,  # GROSS notional (USD)
     goals: list[float],
     n_paths: int = 12000,
     n_days: int = 252,
@@ -18,7 +18,7 @@ def simulate_leveraged_paths_vectorized(
     clamp_ruined_to_zero: bool = True,
     return_paths: bool = False,
     precomputed_r: np.ndarray | None = None,  # shape (n_paths, n_days)
-    mmr: float = 0.0,               # maintenance margin ratio on gross notional
+    mmr: float = 0.0,  # maintenance margin ratio on gross notional
 ) -> dict[str, Any]:
     """
     Fixed-notional leveraged MC.

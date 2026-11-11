@@ -1,21 +1,24 @@
 """Preflight uses explicit contract metadata and never infers currencies/calendars."""
+
 import pandas as pd
 import pytest
 
 from alpha_edge.market.preflight_universe_v2 import (
-    UniversePreflightError, make_cohorts, prepare_registry,
+    UniversePreflightError,
+    make_cohorts,
+    prepare_registry,
 )
 
 
 def registry():
-    universe = pd.DataFrame([
-        {"asset_id": "A", "yahoo_ticker": "KESKOB.HE", "currency": "EUR", "calendar_id": "XHEL", "include": 1},
-        {"asset_id": "B", "yahoo_ticker": "GLD", "currency": "USD", "calendar_id": "NYSE", "include": 1},
-        {"asset_id": "C", "yahoo_ticker": "IGNORED", "currency": "USD", "calendar_id": "NYSE", "include": 0},
-    ])
-    fx = pd.DataFrame([{
-        "currency": "EUR", "provider_symbol": "EURUSD=X", "direction": "direct"
-    }])
+    universe = pd.DataFrame(
+        [
+            {"asset_id": "A", "yahoo_ticker": "KESKOB.HE", "currency": "EUR", "calendar_id": "XHEL", "include": 1},
+            {"asset_id": "B", "yahoo_ticker": "GLD", "currency": "USD", "calendar_id": "NYSE", "include": 1},
+            {"asset_id": "C", "yahoo_ticker": "IGNORED", "currency": "USD", "calendar_id": "NYSE", "include": 0},
+        ]
+    )
+    fx = pd.DataFrame([{"currency": "EUR", "provider_symbol": "EURUSD=X", "direction": "direct"}])
     return universe, fx
 
 

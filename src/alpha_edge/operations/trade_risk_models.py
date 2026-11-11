@@ -137,26 +137,24 @@ def _select_asset_row(
     missing = sorted(required - set(df.columns))
 
     if missing:
-        raise RuntimeError(
-            f"Indicator dataset missing required columns {missing}: {source_key}"
-        )
+        raise RuntimeError(f"Indicator dataset missing required columns {missing}: {source_key}")
 
     work = df.copy()
     work["asset_id"] = work["asset_id"].astype(str).str.strip()
-    work["date"] = pd.to_datetime(
-        work["date"],
-        errors="coerce",
-        utc=True,
-    ).dt.tz_convert(None).dt.normalize()
+    work["date"] = (
+        pd.to_datetime(
+            work["date"],
+            errors="coerce",
+            utc=True,
+        )
+        .dt.tz_convert(None)
+        .dt.normalize()
+    )
 
     requested_asset_id = str(asset_id).strip()
     as_of_ts = _date(as_of)
 
-    work = work[
-        (work["asset_id"] == requested_asset_id)
-        & work["date"].notna()
-        & (work["date"] <= as_of_ts)
-    ].copy()
+    work = work[(work["asset_id"] == requested_asset_id) & work["date"].notna() & (work["date"] <= as_of_ts)].copy()
 
     if work.empty:
         raise RuntimeError(
@@ -218,10 +216,7 @@ def load_latest_indicator_snapshot(
     key = snapshot_key or latest_indicators_key(store)
 
     if not store._key_exists(key):
-        raise RuntimeError(
-            f"Latest indicators snapshot does not exist: "
-            f"s3://{store.bucket}/{key}"
-        )
+        raise RuntimeError(f"Latest indicators snapshot does not exist: s3://{store.bucket}/{key}")
 
     df = _read_parquet(store, key)
 
@@ -265,22 +260,11 @@ def load_point_in_time_indicator_snapshot(
             year=year,
         )
 
-        parts = [
-            str(key)
-            for key in (manifest.get("parts") or [])
-            if isinstance(key, str) and key.endswith(".parquet")
-        ]
+        parts = [str(key) for key in (manifest.get("parts") or []) if isinstance(key, str) and key.endswith(".parquet")]
 
         if not parts:
-            prefix = (
-                f"{root}/asset_id={str(asset_id).strip()}/"
-                f"year={year}/"
-            )
-            parts = [
-                key
-                for key in store._list_keys(prefix)
-                if key.endswith(".parquet")
-            ]
+            prefix = f"{root}/asset_id={str(asset_id).strip()}/year={year}/"
+            parts = [key for key in store._list_keys(prefix) if key.endswith(".parquet")]
 
         for key in parts:
             try:
@@ -293,10 +277,7 @@ def load_point_in_time_indicator_snapshot(
                 continue
 
     if not frames:
-        raise RuntimeError(
-            f"No historical indicator partitions found for "
-            f"asset_id={asset_id!r}, as_of={as_of}."
-        )
+        raise RuntimeError(f"No historical indicator partitions found for asset_id={asset_id!r}, as_of={as_of}.")
 
     df = pd.concat(frames, ignore_index=True)
 
@@ -323,9 +304,7 @@ def load_indicator_snapshot(
     mode_norm = str(mode).strip().lower()
 
     if mode_norm not in {"auto", "latest", "point_in_time"}:
-        raise ValueError(
-            "indicator_mode must be auto, latest, or point_in_time."
-        )
+        raise ValueError("indicator_mode must be auto, latest, or point_in_time.")
 
     if mode_norm == "latest":
         return load_latest_indicator_snapshot(
@@ -367,9 +346,7 @@ def load_indicator_snapshot(
 
 def _require_positive(name: str, value: Optional[float]) -> float:
     if value is None or not np.isfinite(value) or value <= 0:
-        raise ValueError(
-            f"{name} is required and must be positive for this risk model."
-        )
+        raise ValueError(f"{name} is required and must be positive for this risk model.")
 
     return float(value)
 
@@ -384,10 +361,7 @@ def calculate_indicator_backed_risk_percentages(
     model = str(risk_model).strip().lower()
 
     if model not in {"atr_based", "volatility_based", "hybrid"}:
-        raise ValueError(
-            "Indicator-backed risk model must be atr_based, "
-            "volatility_based, or hybrid."
-        )
+        raise ValueError("Indicator-backed risk model must be atr_based, volatility_based, or hybrid.")
 
     if max_holding_days <= 0:
         raise ValueError("max_holding_days must be > 0.")
@@ -404,12 +378,8 @@ def calculate_indicator_backed_risk_percentages(
             indicators.atr_pct_14,
         )
 
-        atr_stop_pct = (
-            float(config.atr_stop_multiplier) * atr_pct
-        )
-        atr_target_pct = (
-            float(config.atr_target_multiplier) * atr_pct
-        )
+        atr_stop_pct = float(config.atr_stop_multiplier) * atr_pct
+        atr_target_pct = float(config.atr_target_multiplier) * atr_pct
 
     if model in {"volatility_based", "hybrid"}:
         daily_volatility = _require_positive(
@@ -417,18 +387,10 @@ def calculate_indicator_backed_risk_percentages(
             indicators.daily_vol_20,
         )
 
-        horizon_volatility = (
-            daily_volatility * math.sqrt(float(max_holding_days))
-        )
+        horizon_volatility = daily_volatility * math.sqrt(float(max_holding_days))
 
-        volatility_stop_pct = (
-            float(config.volatility_stop_multiplier)
-            * horizon_volatility
-        )
-        volatility_target_pct = (
-            float(config.volatility_target_multiplier)
-            * horizon_volatility
-        )
+        volatility_stop_pct = float(config.volatility_stop_multiplier) * horizon_volatility
+        volatility_target_pct = float(config.volatility_target_multiplier) * horizon_volatility
 
     if model == "atr_based":
         raw_stop_pct = _require_positive(
@@ -460,9 +422,7 @@ def calculate_indicator_backed_risk_percentages(
             ),
         )
 
-        raw_target_pct = (
-            float(config.reward_multiple) * raw_stop_pct
-        )
+        raw_target_pct = float(config.reward_multiple) * raw_stop_pct
 
     final_stop_pct = min(
         max(raw_stop_pct, float(config.min_stop_pct)),
@@ -476,9 +436,7 @@ def calculate_indicator_backed_risk_percentages(
     )
 
     if final_target_pct <= 0:
-        raise ValueError(
-            "Calculated target_profit_pct must be positive."
-        )
+        raise ValueError("Calculated target_profit_pct must be positive.")
 
     return {
         "stop_loss_pct": float(final_stop_pct),
@@ -491,12 +449,8 @@ def calculate_indicator_backed_risk_percentages(
             "horizon_volatility": horizon_volatility,
             "atr_stop_multiplier": config.atr_stop_multiplier,
             "atr_target_multiplier": config.atr_target_multiplier,
-            "volatility_stop_multiplier": (
-                config.volatility_stop_multiplier
-            ),
-            "volatility_target_multiplier": (
-                config.volatility_target_multiplier
-            ),
+            "volatility_stop_multiplier": (config.volatility_stop_multiplier),
+            "volatility_target_multiplier": (config.volatility_target_multiplier),
             "reward_multiple": config.reward_multiple,
             "min_stop_pct": config.min_stop_pct,
             "max_stop_pct": config.max_stop_pct,

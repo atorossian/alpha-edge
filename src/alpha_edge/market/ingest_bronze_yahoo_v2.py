@@ -7,6 +7,7 @@ Yahoo/yfinance does not expose the original HTTP response here; "raw" means
 untransformed provider bar values and source index representation with
 provenance, not byte-for-byte Yahoo API responses.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -45,9 +46,11 @@ def _single_symbol_columns(df: pd.DataFrame, symbol: str) -> pd.DataFrame:
     result = df.copy()
     if isinstance(result.columns, pd.MultiIndex):
         scores = [
-            sum(str(v).strip().lower().replace(" ", "_") in
-                {"open", "high", "low", "close", "adj_close", "volume", "dividends",
-                 "stock_splits"} for v in result.columns.get_level_values(i))
+            sum(
+                str(v).strip().lower().replace(" ", "_")
+                in {"open", "high", "low", "close", "adj_close", "volume", "dividends", "stock_splits"}
+                for v in result.columns.get_level_values(i)
+            )
             for i in range(result.columns.nlevels)
         ]
         level = scores.index(max(scores))
@@ -85,9 +88,16 @@ def _original_index_fields(index: pd.Index) -> tuple[list[str], list[str], list[
 
 
 def raw_bars_from_frame(
-    frame: pd.DataFrame, *, asset_id: str, symbol: str, currency: str,
-    batch_id: str, retrieved_at_utc: str, exchange: str = "",
-    quote_type: str = "", interval: str = "1d",
+    frame: pd.DataFrame,
+    *,
+    asset_id: str,
+    symbol: str,
+    currency: str,
+    batch_id: str,
+    retrieved_at_utc: str,
+    exchange: str = "",
+    quote_type: str = "",
+    interval: str = "1d",
 ) -> pd.DataFrame:
     """Preserve price numbers and source index representation as provided.
 
@@ -148,13 +158,20 @@ def _metadata(ticker: Any) -> dict:
 
 
 def acquire_yahoo_bars(
-    asset_id: str, symbol: str, *, start: str, end: str | None,
-    batch_id: str, ticker_factory: Callable[[str], Any] | None = None,
-    currency_hint: str | None = None, full_history: bool = False,
+    asset_id: str,
+    symbol: str,
+    *,
+    start: str,
+    end: str | None,
+    batch_id: str,
+    ticker_factory: Callable[[str], Any] | None = None,
+    currency_hint: str | None = None,
+    full_history: bool = False,
 ) -> tuple[pd.DataFrame, dict]:
     """Read single-symbol Yahoo history WITHOUT auto-adjust or repair."""
     if ticker_factory is None:
         import yfinance as yf
+
         ticker_factory = yf.Ticker
     ticker = ticker_factory(symbol)
     meta = _metadata(ticker)
@@ -165,70 +182,90 @@ def acquire_yahoo_bars(
     currency = provider_currency or str(currency_hint or "").strip()
     if not currency or currency.upper() in {"NAN", "NONE", "NULL"}:
         raise ValueError(f"{symbol}: currency unknown; Bronze acquisition quarantined")
-    query = ({"period": "max", "end": end} if full_history
-             else {"start": start, "end": end})
-    frame = ticker.history(interval="1d", auto_adjust=False,
-                           actions=True, repair=False, **query)
+    query = {"period": "max", "end": end} if full_history else {"start": start, "end": end}
+    frame = ticker.history(interval="1d", auto_adjust=False, actions=True, repair=False, **query)
     retrieved = _utc_now()
     bars = raw_bars_from_frame(
-        frame, asset_id=asset_id, symbol=symbol, currency=currency,
-        batch_id=batch_id, retrieved_at_utc=retrieved,
-        exchange=meta.get("exchange", ""), quote_type=meta.get("quoteType", ""),
+        frame,
+        asset_id=asset_id,
+        symbol=symbol,
+        currency=currency,
+        batch_id=batch_id,
+        retrieved_at_utc=retrieved,
+        exchange=meta.get("exchange", ""),
+        quote_type=meta.get("quoteType", ""),
     )
     provenance = {
-        "asset_id": asset_id, "provider_symbol": symbol,
+        "asset_id": asset_id,
+        "provider_symbol": symbol,
         "currency_original": currency,
         "currency_metadata_source": "provider" if provider_currency else "hint",
-        "provider_metadata": meta, "start": start, "end_exclusive": end,
-        "interval": "1d", "auto_adjust": False, "repair": False,
-        "actions": True, "full_history_requested": full_history,
+        "provider_metadata": meta,
+        "start": start,
+        "end_exclusive": end,
+        "interval": "1d",
+        "auto_adjust": False,
+        "repair": False,
+        "actions": True,
+        "full_history_requested": full_history,
         "first_observed_session": str(bars["session_date"].min()),
         "last_observed_session": str(bars["session_date"].max()),
-        "retrieved_at_utc": retrieved, "row_count": len(bars),
-        "provider": "yahoo_finance", "client": "yfinance",
+        "retrieved_at_utc": retrieved,
+        "row_count": len(bars),
+        "provider": "yahoo_finance",
+        "client": "yfinance",
     }
     return bars, provenance
 
 
 def acquire_yahoo_fx_quote(
-    symbol: str, *, start: str, end: str | None, batch_id: str,
+    symbol: str,
+    *,
+    start: str,
+    end: str | None,
+    batch_id: str,
     ticker_factory: Callable[[str], Any] | None = None,
     full_history: bool = False,
 ) -> tuple[pd.DataFrame, dict]:
     """Preserve Yahoo FX quotes, not normalized USD-per-currency rates."""
     if ticker_factory is None:
         import yfinance as yf
+
         ticker_factory = yf.Ticker
     if not symbol.upper().endswith("=X"):
         raise ValueError("FX ticker must be a Yahoo =X quote")
-    query = ({"period": "max", "end": end} if full_history
-             else {"start": start, "end": end})
-    frame = ticker_factory(symbol).history(
-        interval="1d", auto_adjust=False, actions=False,
-        repair=False, **query
-    )
+    query = {"period": "max", "end": end} if full_history else {"start": start, "end": end}
+    frame = ticker_factory(symbol).history(interval="1d", auto_adjust=False, actions=False, repair=False, **query)
     if frame.empty:
         raise ValueError(f"{symbol}: empty FX history")
     frame = _single_symbol_columns(frame, symbol)
     timestamps, sessions, zones = _original_index_fields(frame.index)
     retrieved = _utc_now()
-    out = pd.DataFrame({
+    out = pd.DataFrame(
+        {
+            "provider_symbol": symbol,
+            "source_timestamp": timestamps,
+            "source_timezone": zones,
+            "session_date": sessions,
+            "quote_close": frame["close"].to_numpy(),
+            "ingestion_batch_id": batch_id,
+            "ingested_at_utc": retrieved,
+            "provider": "yahoo_finance",
+        }
+    )
+    meta = {
         "provider_symbol": symbol,
-        "source_timestamp": timestamps,
-        "source_timezone": zones,
-        "session_date": sessions,
-        "quote_close": frame["close"].to_numpy(),
-        "ingestion_batch_id": batch_id,
-        "ingested_at_utc": retrieved,
-        "provider": "yahoo_finance",
-    })
-    meta = {"provider_symbol": symbol, "start": start, "end_exclusive": end,
-            "interval": "1d", "row_count": len(out),
-            "auto_adjust": False, "repair": False,
-            "full_history_requested": full_history,
-            "first_observed_session": str(out["session_date"].min()),
-            "last_observed_session": str(out["session_date"].max()),
-            "retrieved_at_utc": retrieved}
+        "start": start,
+        "end_exclusive": end,
+        "interval": "1d",
+        "row_count": len(out),
+        "auto_adjust": False,
+        "repair": False,
+        "full_history_requested": full_history,
+        "first_observed_session": str(out["session_date"].min()),
+        "last_observed_session": str(out["session_date"].max()),
+        "retrieved_at_utc": retrieved,
+    }
     return out, meta
 
 
@@ -239,9 +276,14 @@ def _parquet_bytes(frame: pd.DataFrame) -> bytes:
 
 
 def _save_batch(
-    *, destination: str, batch_id: str, tables: dict[str, pd.DataFrame],
-    provenance: list[dict], bucket: str | None = None,
-    region: str = "eu-west-1", upload: bool = False,
+    *,
+    destination: str,
+    batch_id: str,
+    tables: dict[str, pd.DataFrame],
+    provenance: list[dict],
+    bucket: str | None = None,
+    region: str = "eu-west-1",
+    upload: bool = False,
     market_root: str = "dev/market",
 ) -> dict:
     """Store immutable stage-local objects, manifest last. No legacy writes."""
@@ -254,13 +296,15 @@ def _save_batch(
     base.mkdir(parents=True, exist_ok=False)
     payloads = {f"{name}.parquet": _parquet_bytes(table) for name, table in tables.items()}
     manifest = {
-        "schema_version": "bronze-v2-1", "batch_id": batch_id,
-        "created_at_utc": _utc_now(), "sources": provenance,
+        "schema_version": "bronze-v2-1",
+        "batch_id": batch_id,
+        "created_at_utc": _utc_now(),
+        "sources": provenance,
         "files": {
-            name: {"sha256": hashlib.sha256(value).hexdigest(), "bytes": len(value)}
-            for name, value in payloads.items()
+            name: {"sha256": hashlib.sha256(value).hexdigest(), "bytes": len(value)} for name, value in payloads.items()
         },
-        "publication_state": "bronze_only", "legacy_production_unchanged": True,
+        "publication_state": "bronze_only",
+        "legacy_production_unchanged": True,
     }
     for name, value in payloads.items():
         (base / name).write_bytes(value)
@@ -268,6 +312,7 @@ def _save_batch(
     (base / "manifest.json").write_bytes(manifest_bytes)
     if upload:
         import boto3
+
         s3 = boto3.client("s3", region_name=region)
         prefix = f"{root}/lake_v2/bronze/batches/{batch_id}"
         manifest_key = f"{prefix}/manifest.json"
@@ -280,19 +325,25 @@ def _save_batch(
             raise FileExistsError(f"Already published: s3://{bucket}/{prefix}")
         for name, value in payloads.items():
             s3.put_object(Bucket=bucket, Key=f"{prefix}/{name}", Body=value)
-        s3.put_object(Bucket=bucket, Key=manifest_key, Body=manifest_bytes,
-                      ContentType="application/json")
+        s3.put_object(Bucket=bucket, Key=manifest_key, Body=manifest_bytes, ContentType="application/json")
         manifest["s3_prefix"] = f"s3://{bucket}/{prefix}"
     manifest["local_path"] = str(base)
     return manifest
 
 
 def run_batch(
-    *, universe: pd.DataFrame, fx_symbols: list[str], start: str,
-    end: str | None, batch_id: str, output: str,
+    *,
+    universe: pd.DataFrame,
+    fx_symbols: list[str],
+    start: str,
+    end: str | None,
+    batch_id: str,
+    output: str,
     ticker_factory: Callable[[str], Any] | None = None,
-    bucket: str | None = None, upload: bool = False,
-    market_root: str = "dev/market", full_history: bool = False,
+    bucket: str | None = None,
+    upload: bool = False,
+    market_root: str = "dev/market",
+    full_history: bool = False,
 ) -> dict:
     """All-or-nothing Bronze batch; any failed symbol prevents publication."""
     if not SAFE_ID.fullmatch(batch_id):
@@ -311,8 +362,12 @@ def run_batch(
         if pd.isna(currency_hint):
             currency_hint = None
         bars, provenance = acquire_yahoo_bars(
-            str(row["asset_id"]), symbol, start=start, end=end,
-            batch_id=batch_id, ticker_factory=ticker_factory,
+            str(row["asset_id"]),
+            symbol,
+            start=start,
+            end=end,
+            batch_id=batch_id,
+            ticker_factory=ticker_factory,
             currency_hint=currency_hint,
             full_history=full_history,
         )
@@ -321,22 +376,37 @@ def run_batch(
     fx_frames = []
     for symbol in fx_symbols:
         fx, provenance = acquire_yahoo_fx_quote(
-            symbol, start=start, end=end, batch_id=batch_id,
-            ticker_factory=ticker_factory, full_history=full_history,
+            symbol,
+            start=start,
+            end=end,
+            batch_id=batch_id,
+            ticker_factory=ticker_factory,
+            full_history=full_history,
         )
         fx_frames.append(fx)
         metas.append(provenance)
-    empty_fx = pd.DataFrame(columns=[
-        "provider_symbol", "source_timestamp", "source_timezone",
-        "session_date", "quote_close", "ingestion_batch_id",
-        "ingested_at_utc", "provider",
-    ])
+    empty_fx = pd.DataFrame(
+        columns=[
+            "provider_symbol",
+            "source_timestamp",
+            "source_timezone",
+            "session_date",
+            "quote_close",
+            "ingestion_batch_id",
+            "ingested_at_utc",
+            "provider",
+        ]
+    )
     return _save_batch(
-        destination=output, batch_id=batch_id,
-        tables={"source_ohlcv": pd.concat(frames, ignore_index=True),
-                "source_fx_quotes": pd.concat(fx_frames, ignore_index=True)
-                if fx_frames else empty_fx},
-        provenance=metas, bucket=bucket, upload=upload,
+        destination=output,
+        batch_id=batch_id,
+        tables={
+            "source_ohlcv": pd.concat(frames, ignore_index=True),
+            "source_fx_quotes": pd.concat(fx_frames, ignore_index=True) if fx_frames else empty_fx,
+        },
+        provenance=metas,
+        bucket=bucket,
+        upload=upload,
         market_root=market_root,
     )
 
@@ -360,17 +430,25 @@ def main() -> None:
         parser.error("--full-history requires explicit exclusive --end")
     universe = pd.read_csv(args.universe_csv)
     if "include" in universe:
-        universe = universe.loc[
-            pd.to_numeric(universe["include"], errors="coerce").fillna(0).eq(1)
-        ]
+        universe = universe.loc[pd.to_numeric(universe["include"], errors="coerce").fillna(0).eq(1)]
     batch = args.batch_id or f"{datetime.now(timezone.utc):%Y%m%dT%H%M%SZ}-{uuid.uuid4().hex[:8]}"
-    print(json.dumps(run_batch(
-        universe=universe,
-        fx_symbols=[s.strip() for s in args.fx_symbols.split(";") if s.strip()],
-        start=args.start, end=args.end, batch_id=batch,
-        output=args.output, bucket=args.bucket, upload=args.upload,
-        market_root=args.market_root, full_history=args.full_history,
-    ), indent=2))
+    print(
+        json.dumps(
+            run_batch(
+                universe=universe,
+                fx_symbols=[s.strip() for s in args.fx_symbols.split(";") if s.strip()],
+                start=args.start,
+                end=args.end,
+                batch_id=batch,
+                output=args.output,
+                bucket=args.bucket,
+                upload=args.upload,
+                market_root=args.market_root,
+                full_history=args.full_history,
+            ),
+            indent=2,
+        )
+    )
 
 
 if __name__ == "__main__":

@@ -4,6 +4,7 @@ Never fill missing currencies, exchange calendars or FX quote directions
 by guessing from ticker suffixes. Audit all included assets, preserving
 unresolved entries as explicit work items before broad acquisition.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -14,8 +15,9 @@ from pathlib import Path
 import pandas as pd
 
 
-def build(source: pd.DataFrame, exchange_map: pd.DataFrame,
-          fx: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+def build(
+    source: pd.DataFrame, exchange_map: pd.DataFrame, fx: pd.DataFrame
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     required = {"asset_id", "yahoo_ticker", "include", "currency", "exchange"}
     if missing := required - set(source.columns):
         raise ValueError(f"Canonical universe lacks {sorted(missing)}")
@@ -59,8 +61,7 @@ def build(source: pd.DataFrame, exchange_map: pd.DataFrame,
     return approved, unresolved, joined
 
 
-def generate(*, universe_csv: Path, exchange_map_csv: Path,
-             fx_csv: Path, output: Path) -> dict:
+def generate(*, universe_csv: Path, exchange_map_csv: Path, fx_csv: Path, output: Path) -> dict:
     if output.exists():
         raise FileExistsError(f"Refusing overwrite: {output}")
     canonical = pd.read_csv(universe_csv, low_memory=False)
@@ -69,9 +70,11 @@ def generate(*, universe_csv: Path, exchange_map_csv: Path,
     ready, unresolved, all_included = build(canonical, exchange_map, fx)
     output.mkdir(parents=True, exist_ok=False)
     checksums = {}
-    for name, frame in (("ready_registry.csv", ready),
-                        ("requires_review.csv", unresolved),
-                        ("all_included_audit.csv", all_included)):
+    for name, frame in (
+        ("ready_registry.csv", ready),
+        ("requires_review.csv", unresolved),
+        ("all_included_audit.csv", all_included),
+    ):
         p = output / name
         frame.to_csv(p, index=False)
         checksums[name] = hashlib.sha256(p.read_bytes()).hexdigest()
@@ -82,10 +85,13 @@ def generate(*, universe_csv: Path, exchange_map_csv: Path,
         "configuration_ready_assets": len(ready),
         "unresolved_assets": len(unresolved),
         "full_population_ready": len(unresolved) == 0,
-        "files_sha256": checksums, "s3_writes": 0,
-        "limitations": ("Ready means explicit metadata configuration, not validated source "
-                        "history, inception, completeness or provider reliability. "
-                        "Do not treat unresolved instruments as silently excluded."),
+        "files_sha256": checksums,
+        "s3_writes": 0,
+        "limitations": (
+            "Ready means explicit metadata configuration, not validated source "
+            "history, inception, completeness or provider reliability. "
+            "Do not treat unresolved instruments as silently excluded."
+        ),
     }
     (output / "manifest.json").write_text(json.dumps(report, indent=2) + "\n")
     return report
@@ -98,9 +104,14 @@ def main():
     p.add_argument("--fx-csv", type=Path, required=True)
     p.add_argument("--output", type=Path, required=True)
     a = p.parse_args()
-    print(json.dumps(generate(universe_csv=a.universe_csv,
-                              exchange_map_csv=a.exchange_map_csv,
-                              fx_csv=a.fx_csv, output=a.output), indent=2))
+    print(
+        json.dumps(
+            generate(
+                universe_csv=a.universe_csv, exchange_map_csv=a.exchange_map_csv, fx_csv=a.fx_csv, output=a.output
+            ),
+            indent=2,
+        )
+    )
 
 
 if __name__ == "__main__":

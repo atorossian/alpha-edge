@@ -113,7 +113,9 @@ def _health_grade_from_score(score: float | None) -> str | None:
     return "F"
 
 
-def _extract_current_regime(raw_hmm: dict[str, Any] | None, raw_rescale_state: dict[str, Any] | None) -> tuple[str | None, float | None]:
+def _extract_current_regime(
+    raw_hmm: dict[str, Any] | None, raw_rescale_state: dict[str, Any] | None
+) -> tuple[str | None, float | None]:
     """
     First use market_rescale_state.label if available because daily_report writes it
     as a compact regime state. Fall back to regimes/hmm payload.
@@ -138,11 +140,7 @@ def _extract_current_regime(raw_hmm: dict[str, Any] | None, raw_rescale_state: d
 
     hmm = raw_hmm.get("hmm")
     if isinstance(hmm, dict):
-        label = (
-            _safe_str(hmm.get("chosen_label"))
-            or _safe_str(hmm.get("label"))
-            or _safe_str(hmm.get("regime"))
-        )
+        label = _safe_str(hmm.get("chosen_label")) or _safe_str(hmm.get("label")) or _safe_str(hmm.get("regime"))
         confidence = _safe_float(hmm.get("confidence"))
         if label:
             return label, confidence
@@ -259,9 +257,7 @@ def build_current_portfolio_state(
     )
 
     regime_changed = (
-        previous_regime is not None
-        and current_regime is not None
-        and str(previous_regime) != str(current_regime)
+        previous_regime is not None and current_regime is not None and str(previous_regime) != str(current_regime)
     )
 
     health_score = _extract_health_score(raw_health)
@@ -415,9 +411,7 @@ def run_transition_assessment(
 
 
 def parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(
-        description="Run portfolio transition assessment for the Alpha Edge morning routine."
-    )
+    p = argparse.ArgumentParser(description="Run portfolio transition assessment for the Alpha Edge morning routine.")
 
     p.add_argument("--env", default=None, choices=["dev", "staging", "prod"])
     p.add_argument("--as-of", default=None, help="Assessment date YYYY-MM-DD. Default: today.")
@@ -494,7 +488,9 @@ def main() -> None:
                 source_mode="transition_assessment",
                 status=("dry_run" if is_dry_run else "success"),
                 input_args=vars(args),
-                output_keys=[] if is_dry_run else [
+                output_keys=[]
+                if is_dry_run
+                else [
                     f"{cfg_engine_root(cfg)}/{TRANSITION_ASSESSMENT_TABLE}/dt={payload.get('as_of')}/transition_assessment.json",
                     f"{cfg_engine_root(cfg)}/{TRANSITION_ASSESSMENT_TABLE}/latest.json",
                 ],

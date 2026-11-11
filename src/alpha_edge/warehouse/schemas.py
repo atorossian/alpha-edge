@@ -65,15 +65,15 @@ FCT_POSITIONS_DAILY_SCHEMA = pa.schema(
         pa.field("asset_id", pa.string(), nullable=True),
         pa.field("broker_ticker", pa.string(), nullable=True),
         pa.field("position_type", pa.string(), nullable=False),  # SPOT / NOTIONAL
-        pa.field("side", pa.string(), nullable=True),           # NOTIONAL: LONG/SHORT
-        pa.field("quantity", pa.float64(), nullable=True),      # SPOT
+        pa.field("side", pa.string(), nullable=True),  # NOTIONAL: LONG/SHORT
+        pa.field("quantity", pa.float64(), nullable=True),  # SPOT
         pa.field("avg_cost_usd", pa.float64(), nullable=True),  # SPOT
-        pa.field("last_price_usd", pa.float64(), nullable=True),# SPOT
-        pa.field("market_value_usd", pa.float64(), nullable=True),# SPOT
-        pa.field("cost_value_usd", pa.float64(), nullable=True),# SPOT
-        pa.field("unrealized_pnl_usd", pa.float64(), nullable=True),# SPOT
-        pa.field("open_notional_usd", pa.float64(), nullable=True), # NOTIONAL
-        pa.field("avg_entry_price_usd", pa.float64(), nullable=True),# NOTIONAL
+        pa.field("last_price_usd", pa.float64(), nullable=True),  # SPOT
+        pa.field("market_value_usd", pa.float64(), nullable=True),  # SPOT
+        pa.field("cost_value_usd", pa.float64(), nullable=True),  # SPOT
+        pa.field("unrealized_pnl_usd", pa.float64(), nullable=True),  # SPOT
+        pa.field("open_notional_usd", pa.float64(), nullable=True),  # NOTIONAL
+        pa.field("avg_entry_price_usd", pa.float64(), nullable=True),  # NOTIONAL
         pa.field("currency", pa.string(), nullable=True),
         pa.field("missing_price_flag", pa.bool_(), nullable=True),
         pa.field("source_key", pa.string(), nullable=False),
@@ -86,17 +86,13 @@ FCT_ACCOUNT_PNL_DAILY_SCHEMA = pa.schema(
     [
         pa.field("as_of_date", pa.date32(), nullable=False),
         pa.field("account_id", pa.string(), nullable=False),
-
         pa.field("realized_pnl_usd", pa.float64(), nullable=True),
         pa.field("unrealized_pnl_usd", pa.float64(), nullable=True),
-
         # NEW:
         pa.field("dividends_pnl_usd", pa.float64(), nullable=True),
         pa.field("net_cashflow_usd", pa.float64(), nullable=True),
-
         pa.field("total_pnl_usd", pa.float64(), nullable=True),
         pa.field("equity_usd", pa.float64(), nullable=True),
-
         pa.field("trade_count", pa.int64(), nullable=True),
         pa.field("tickers_spot", pa.int64(), nullable=True),
         pa.field("tickers_derivatives", pa.int64(), nullable=True),

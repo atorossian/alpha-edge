@@ -29,8 +29,18 @@ def load_ohlcv_usd_long(
     end: Optional[str] = None,
 ) -> pd.DataFrame:
     cols = [
-        "date", "ticker", "open", "high", "low", "close", "adj_close", "volume",
-        "currency", "fx_to_usd", "close_usd", "adj_close_usd"
+        "date",
+        "ticker",
+        "open",
+        "high",
+        "low",
+        "close",
+        "adj_close",
+        "volume",
+        "currency",
+        "fx_to_usd",
+        "close_usd",
+        "adj_close_usd",
     ]
     return store.read_ohlcv_usd(tickers=tickers, start=start, end=end, columns=cols)
 

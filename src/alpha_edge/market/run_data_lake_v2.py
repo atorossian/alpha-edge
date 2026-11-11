@@ -10,6 +10,7 @@ Usage:
     --bars ./bars.parquet --fx ./fx.parquet --bucket BUCKET \
     --market-root dev/market --write-s3
 """
+
 from __future__ import annotations
 
 import argparse
@@ -23,7 +24,10 @@ import boto3
 import pandas as pd
 
 from alpha_edge.market.data_lake_v2 import (
-    calculate_returns, quality_summary, standardize_bars, validate_raw_bars,
+    calculate_returns,
+    quality_summary,
+    standardize_bars,
+    validate_raw_bars,
 )
 
 
@@ -100,12 +104,15 @@ def build(args: argparse.Namespace) -> dict:
             raise FileExistsError(f"Run already exists: s3://{args.bucket}/{prefix}")
         for name, df in layers.items():
             s3.put_object(
-                Bucket=args.bucket, Key=f"{prefix}/{name}",
-                Body=_parquet_bytes(df), ContentType="application/octet-stream",
+                Bucket=args.bucket,
+                Key=f"{prefix}/{name}",
+                Body=_parquet_bytes(df),
+                ContentType="application/octet-stream",
             )
         # Manifest LAST. Readers should consider only complete manifest-bearing runs.
         s3.put_object(
-            Bucket=args.bucket, Key=manifest_key,
+            Bucket=args.bucket,
+            Key=manifest_key,
             Body=json.dumps(report, indent=2).encode("utf-8"),
             ContentType="application/json",
         )

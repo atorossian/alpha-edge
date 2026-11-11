@@ -17,6 +17,7 @@ from alpha_edge.portfolio.optimizer_engine import _spectral_profiles_df, evaluat
 # Fingerprint / archive / diversity diagnostics
 # ----------------------------
 
+
 def _weights_fingerprint(weights: Dict[str, float], decimals: int = 6) -> Tuple[Tuple[str, float], ...]:
     """
     Stable fingerprint for deduplication.
@@ -125,9 +126,7 @@ def _portfolio_diversity_summary(population: list[EvalMetrics]) -> dict:
         "avg_assets_per_candidate": float(np.mean(asset_counts_per_candidate)) if asset_counts_per_candidate else 0.0,
         "avg_pairwise_asset_overlap": float(np.mean(overlaps)) if overlaps else 0.0,
         "avg_pairwise_weight_l1_distance": float(np.mean(distances)) if distances else 0.0,
-        "top_asset_frequency": [
-            {"ticker": str(t), "count": int(c), "frequency": float(c / n)} for t, c in top_assets
-        ],
+        "top_asset_frequency": [{"ticker": str(t), "count": int(c), "frequency": float(c / n)} for t, c in top_assets],
         "avg_net_exposure": float(np.mean(net_exposures)) if net_exposures else 0.0,
         "avg_short_gross": float(np.mean(short_grosses)) if short_grosses else 0.0,
     }
@@ -188,6 +187,7 @@ def _archive_add(
 # Long/short normalization helpers (search-space constraints)
 # ----------------------------
 
+
 def normalize_gross_signed(
     w: dict[str, float],
     *,
@@ -235,6 +235,7 @@ LS_MAX_TRIES = 200
 # Weight sampling / crossover / mutation (mode-aware)
 # ----------------------------
 
+
 def sample_random_weights(
     universe: Dict[str, Asset],
     max_assets: int | None = None,
@@ -250,7 +251,6 @@ def sample_random_weights(
     """
     if rng is None:
         rng = np.random.default_rng()
-
 
     tickers = list(universe.keys())
     n_total = len(tickers)
@@ -318,7 +318,6 @@ def crossover_weights(
     *,
     weight_mode: str = "long_only",
 ) -> Dict[str, float]:
-
     if weight_mode == "long_only":
         tickers = list(set(w_a.keys()) | set(w_b.keys()))
         child: Dict[str, float] = {}
@@ -382,7 +381,6 @@ def mutate_weights(
     *,
     weight_mode: str = "long_only",
 ) -> Dict[str, float]:
-
     if weight_mode == "long_only":
         w = {t: float(x) for t, x in weights.items() if float(x) > 0}
 
@@ -485,6 +483,7 @@ def mutate_weights(
 # Worker eval
 # ----------------------------
 
+
 def _eval_candidate_sliced(args):
     try:
         (
@@ -518,15 +517,17 @@ def _eval_candidate_sliced(args):
             n_paths=int(n_paths),
             days=int(days),
             block_size=block_size,
-            weight_mode=weight_mode,   # <<<<<< pass-through
+            weight_mode=weight_mode,  # <<<<<< pass-through
         )
-    except Exception as e:
+    except Exception:
         # optional: print once in a while, but keep it light
         return None
+
 
 # ----------------------------
 # GA search
 # ----------------------------
+
 
 def evolve_portfolios_ga(
     returns: pd.DataFrame,
@@ -563,8 +564,9 @@ def evolve_portfolios_ga(
     exploration_power: float = 1.5,
     archive_diversity_min_l1: float = 0.15,
     archive_diversity_check_top_k: int = 250,
-) -> List[EvalMetrics] | Tuple[List[EvalMetrics], List[EvalMetrics]] | Tuple[List[EvalMetrics], List[EvalMetrics], dict]:
-
+) -> (
+    List[EvalMetrics] | Tuple[List[EvalMetrics], List[EvalMetrics]] | Tuple[List[EvalMetrics], List[EvalMetrics], dict]
+):
     if rng is None:
         rng = np.random.default_rng()
 
@@ -578,10 +580,7 @@ def evolve_portfolios_ga(
     returns_u = returns[list(universe.keys())]
     returns_clean = returns_u.dropna(how="all")
 
-    spec_df_full = _spectral_profiles_df(
-            returns_clean.fillna(0.0),
-            bands_days=score_config.fft_bands_days
-        )
+    spec_df_full = _spectral_profiles_df(returns_clean.fillna(0.0), bands_days=score_config.fft_bands_days)
 
     # >>> IMPORTANT: use threads on Windows to avoid ProcessPool pickling/spawn stalls
     max_workers = max(2, min(16, (os.cpu_count() or 4)))
@@ -614,28 +613,32 @@ def evolve_portfolios_ga(
             spec_rows = None
             if spec_df_full is not None:
                 try:
-                    spec_rows = spec_df_full.loc[tickers, ["hf", "mf", "lf", "entropy"]].to_numpy(dtype=np.float32, copy=False)
+                    spec_rows = spec_df_full.loc[tickers, ["hf", "mf", "lf", "entropy"]].to_numpy(
+                        dtype=np.float32, copy=False
+                    )
                 except Exception:
                     spec_rows = None
 
             seed_i = int(rng.integers(0, 2**31 - 1))
 
-            tasks.append((
-                rets_assets,
-                tickers,
-                w,
-                float(equity0),
-                float(notional),
-                goals,
-                float(main_goal),
-                score_config,
-                seed_i,
-                int(n_paths),
-                int(days),
-                block_size,
-                spec_rows,
-                weight_mode,
-            ))
+            tasks.append(
+                (
+                    rets_assets,
+                    tickers,
+                    w,
+                    float(equity0),
+                    float(notional),
+                    goals,
+                    float(main_goal),
+                    score_config,
+                    seed_i,
+                    int(n_paths),
+                    int(days),
+                    block_size,
+                    spec_rows,
+                    weight_mode,
+                )
+            )
         return tasks
 
     # helper: map tasks with threads and yield results
@@ -663,7 +666,6 @@ def evolve_portfolios_ga(
 
     with ThreadPoolExecutor(max_workers=max_workers) as ex:
         while len(population) < pop_size:
-
             batch = []
             need = pop_size - len(population)
 
@@ -722,8 +724,8 @@ def evolve_portfolios_ga(
                     f"tasks={tasks_total} ok={eval_ok} fail={eval_failed} "
                     f"acc={accepted} rej_ruin={rejected_ruin} "
                     f"ruin_cap_init={ruin_cap_init:.3f} "
-                    f"elapsed={now-t0:.1f}s",
-                    flush=True
+                    f"elapsed={now - t0:.1f}s",
+                    flush=True,
                 )
 
         # ---------- generations ----------
@@ -889,7 +891,7 @@ def evolve_portfolios_ga(
 
             g1, g2, g3 = goals
             print(
-                f"Gen {gen+1}/{generations} | best score={best.score:.4f} "
+                f"Gen {gen + 1}/{generations} | best score={best.score:.4f} "
                 f"P({g1:.0f})={best.p_hit_goal_1_1y:.2%} "
                 f"P({g2:.0f})={best.p_hit_goal_2_1y:.2%} "
                 f"P({g3:.0f})={best.p_hit_goal_3_1y:.2%} "
@@ -940,10 +942,10 @@ def evolve_portfolios_ga(
     return population, archive_sorted
 
 
-
 # ----------------------------
 # Annealing refinement (mode-aware)
 # ----------------------------
+
 
 def refine_portfolio_annealing(
     base_metrics: EvalMetrics,
@@ -967,7 +969,7 @@ def refine_portfolio_annealing(
     pca_k: int | None = 5,
     block_size: int | tuple[int, int] | None = (8, 12),
     *,
-    weight_mode: str = "long_only",   # <<<<<< NEW
+    weight_mode: str = "long_only",  # <<<<<< NEW
 ) -> EvalMetrics:
     if rng is None:
         rng = np.random.default_rng()
@@ -1032,7 +1034,7 @@ def refine_portfolio_annealing(
                 n_paths=int(n_paths_step),
                 days=252,
                 block_size=block_size,
-                weight_mode=weight_mode
+                weight_mode=weight_mode,
             )
 
         except Exception:

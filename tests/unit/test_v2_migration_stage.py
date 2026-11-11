@@ -58,6 +58,12 @@ def test_stage_executes_five_independent_recovery_selections(monkeypatch):
         lambda *args, **kwargs: {"status": "reprocessed_candidate_committed"},
     )
     monkeypatch.setattr(
+        stage, "retain_legacy",
+        lambda *args, **kwargs: {"results": [
+            {"asset_id": "excluded", "status": "historical_bytes_retained_in_v2"}
+        ]},
+    )
+    monkeypatch.setattr(
         stage, "release_inventory",
         lambda *args, **kwargs: {"status": "published_blocked_release_inventory",
                                 "production_eligible": False},

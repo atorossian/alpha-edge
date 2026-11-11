@@ -210,7 +210,12 @@ def audit_sessions_and_actions(
             expected = mcal.get_calendar(calendar_id).valid_days(start_date=first, end_date=last)
         except (KeyError, RuntimeError, ValueError, ImportError) as exc:
             raise AssetRecoveryError(f"Unverified exchange calendar: {calendar_id}") from exc
-    expected = {pd.Timestamp(day).tz_localize(None).normalize() if pd.Timestamp(day).tzinfo else pd.Timestamp(day).normalize() for day in expected}
+    expected = {
+        pd.Timestamp(day).tz_localize(None).normalize()
+        if pd.Timestamp(day).tzinfo
+        else pd.Timestamp(day).normalize()
+        for day in expected
+    }
     missing_sessions = sorted(expected - observed)
     unexpected = sorted(observed - expected)
     findings = [
@@ -230,11 +235,35 @@ def audit_sessions_and_actions(
             invalid = invalid | values.le(0)
         for session in selected.loc[invalid, "session_date"].tolist():
             findings.append({"asset_id": asset_id, "session_date": str(session)[:10], "issue": f"invalid_{field}"})
+    # Source-consistency checks supplement, but never replace, independent
+    # price and corporate-action verification.
+    prices = selected[["open", "high", "low", "close"]].apply(pd.to_numeric, errors="coerce")
+    malformed = (
+        prices["high"].lt(prices[["open", "close", "low"]].max(axis=1))
+        | prices["low"].gt(prices[["open", "close", "high"]].min(axis=1))
+    )
+    for session in selected.loc[malformed, "session_date"].tolist():
+        findings.append({"asset_id": asset_id, "session_date": str(session)[:10],
+                         "issue": "inconsistent_ohlc_envelope"})
+    if "adj_close" in selected:
+        adjusted = pd.to_numeric(selected["adj_close"], errors="coerce")
+        bad_adj = adjusted.isna() | ~adjusted.map(lambda x: pd.notna(x) and abs(x) != float("inf"))
+        bad_adj = bad_adj | adjusted.le(0)
+        for session in selected.loc[bad_adj, "session_date"].tolist():
+            findings.append({"asset_id": asset_id, "session_date": str(session)[:10],
+                             "issue": "invalid_adjusted_close"})
+    else:
+        findings.append({"asset_id": asset_id, "session_date": "",
+                         "issue": "missing_adjusted_close_provenance"})
     action_events = {}
     for field in ("dividends", "stock_splits"):
         if field in selected:
             value = pd.to_numeric(selected[field], errors="coerce")
             action_events[field] = int(value.fillna(0).ne(0).sum())
+            suspicious = value.lt(0) | value.map(lambda x: pd.notna(x) and abs(x) == float("inf"))
+            for session in selected.loc[suspicious, "session_date"].tolist():
+                findings.append({"asset_id": asset_id, "session_date": str(session)[:10],
+                                 "issue": f"implausible_{field}"})
         else:
             action_events[field] = None
             findings.append({"asset_id": asset_id, "session_date": "", "issue": f"missing_{field}_provenance"})

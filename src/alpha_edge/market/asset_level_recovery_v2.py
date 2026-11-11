@@ -10,6 +10,7 @@ import argparse
 import io
 import json
 import re
+from collections import Counter
 from datetime import date
 
 import boto3
@@ -393,6 +394,162 @@ def audit_recovered_asset(
         "status": "dry_run_no_writes"
     }
     return {**summary, "findings": len(findings), "evidence": location}
+
+
+
+def run_asset_batch(
+    s3, bucket: str, archive_id: str, plan_id: str, end: str, *,
+    mode: str, start_index: int = 0, max_assets: int = 10, execute: bool = False,
+) -> dict:
+    """Bounded, resumable execution of an immutable asset-level S3 queue.
+
+    Each asset is independent. No entire cohort is re-acquired, no legacy
+    prices are read, and no status grants production eligibility.
+    """
+    if mode not in {"recover", "audit"}:
+        raise AssetRecoveryError("Unknown asset batch mode")
+    if not re.fullmatch(r"[a-f0-9]{64}", plan_id):
+        raise AssetRecoveryError("Invalid planning manifest ID")
+    if not 0 <= start_index or not 1 <= max_assets <= 25:
+        raise AssetRecoveryError("Batch bounds must satisfy start>=0 and 1<=max_assets<=25")
+    date.fromisoformat(end)
+    plan_prefix = f"dev/market/lake_v2/asset_plans/run-{plan_id}"
+    planning = json.loads(_get(s3, bucket, plan_prefix + "/manifest.json"))
+    if planning.get("schema") != "aea87_asset_level_planning_v1" or planning.get("run_id") != plan_id:
+        raise AssetRecoveryError("Invalid asset-level plan manifest")
+    filename = (
+        "missing_cohort_asset_recovery.jsonl"
+        if mode == "recover"
+        else "historical_coverage_queue.jsonl"
+    )
+    queue_blob = _get(s3, bucket, f"{plan_prefix}/{filename}")
+    if _sha(queue_blob) != planning.get("artifact_sha256", {}).get(filename):
+        raise AssetRecoveryError("Published asset task queue checksum mismatch")
+    queue = [json.loads(line) for line in queue_blob.splitlines() if line.strip()]
+    ids = [task["asset_id"] for task in queue]
+    if len(set(ids)) != len(ids):
+        raise AssetRecoveryError("Duplicate asset IDs in published task queue")
+    if start_index >= len(queue):
+        raise AssetRecoveryError("Start index beyond published task queue")
+    selection = queue[start_index : start_index + max_assets]
+    if not execute:
+        return {
+            "status": "dry_run", "mode": mode, "total_tasks": len(queue),
+            "start_index": start_index, "selected_assets": len(selection),
+            "selected_asset_ids": [x["asset_id"] for x in selection],
+            "s3_writes": 0,
+        }
+    original, info = load_archived_plan(s3, bucket, archive_id)
+    states = cohort_commit_presence(s3, bucket, info["plan_sha256"], end, info["expected_cohorts"])
+    context = (original, info, states)
+    upstream_id = planning.get("source_fingerprints", {}).get("reconciliation_id")
+    if not upstream_id or not re.fullmatch(r"[a-f0-9]{64}", upstream_id):
+        raise AssetRecoveryError("Missing pinned reconciliation provenance")
+    upstream_manifest = json.loads(_get(
+        s3, bucket, f"dev/market/lake_v2/reconciliation/run-{upstream_id}/manifest.json"
+    ))
+    if upstream_manifest.get("source_fingerprints", {}).get("original_plan", {}).get(
+        "plan_sha256"
+    ) != info["plan_sha256"]:
+        raise AssetRecoveryError("Archived plan differs from published recovery task source")
+    original_by_id = original.set_index("asset_id")
+    source_cache = {}
+    results = []
+    for task in selection:
+        asset_id = task["asset_id"]
+        if asset_id not in original_by_id.index:
+            raise AssetRecoveryError(f"Published task absent from archived plan: {asset_id}")
+        row = original_by_id.loc[asset_id]
+        cohort = int(row["original_cohort"])
+        if int(task["original_cohort"]) != cohort:
+            raise AssetRecoveryError(f"Published task cohort mismatch: {asset_id}")
+        if mode == "recover" and task["original_provider_symbol"] != row["yahoo_ticker"]:
+            raise AssetRecoveryError(f"Published source symbol mismatch: {asset_id}")
+        try:
+            if mode == "recover":
+                if states[cohort] == "marker_present_unverified":
+                    item = {"status": "cohort_already_committed"}
+                elif states[cohort] == "missing":
+                    item = recover_asset(
+                        s3, bucket, archive_id, asset_id, end, execute=True, _context=context
+                    )
+                else:
+                    item = {"status": "invalid_original_commit_marker"}
+            elif states[cohort] == "marker_present_unverified":
+                item = audit_existing_asset(
+                    s3, bucket, archive_id, asset_id, end,
+                    publish=True, _context=context, _source_cache=source_cache,
+                )
+                item["status"] = "coverage_audited_not_approved"
+            elif states[cohort] == "missing":
+                base = {
+                    "asset_id": asset_id,
+                    "original_cohort": cohort,
+                    "original_plan_sha256": info["plan_sha256"],
+                    "provider_symbol": row["yahoo_ticker"],
+                    "currency": row["currency"],
+                    "calendar_id": row["calendar_id"],
+                    "end_exclusive": end,
+                }
+                recovery_id = _sha(_json_bytes({"schema": "aea87_recovery_identity_v1", **base}))
+                try:
+                    s3.get_object(
+                        Bucket=bucket,
+                        Key=f"{RECOVERY_ROOT}/run-{recovery_id}/manifest.json",
+                    )
+                except ClientError as exc:
+                    if exc.response.get("Error", {}).get("Code") not in {"NoSuchKey", "404", "NotFound"}:
+                        raise
+                    item = {"status": "awaiting_individual_source_recovery"}
+                else:
+                    item = audit_recovered_asset(
+                        s3, bucket, asset_id, recovery_id, publish=True
+                    )
+                    item["status"] = "recovered_coverage_audited_not_approved"
+            else:
+                item = {"status": "invalid_original_commit_marker"}
+        except AssetRecoveryError as exc:
+            item = {"status": "asset_validation_failed", "error": str(exc)[:500]}
+        results.append({
+            "asset_id": asset_id,
+            "original_cohort": cohort,
+            "status": item["status"],
+            "evidence_uri": item.get("evidence", {}).get("s3_uri", ""),
+            "error": item.get("error", ""),
+            "historical_prices_approved": False,
+        })
+    from alpha_edge.market.universe_registry_v2 import _records_bytes
+
+    payloads = {"batch_results.jsonl": _records_bytes(pd.DataFrame(results))}
+    metadata = {
+        "schema": "aea87_asset_batch_execution_v1",
+        "source_plan_id": plan_id,
+        "source_queue_sha256": _sha(queue_blob),
+        "source_archive_plan_sha256": info["plan_sha256"],
+        "mode": mode,
+        "start_index": start_index,
+        "selected_assets": len(selection),
+        "end_exclusive": end,
+    }
+    artifacts, manifest = _result_bytes(
+        payloads, metadata, schema="aea87_asset_batch_execution_v1"
+    )
+    location = publish_evidence(
+        s3, bucket, artifacts, manifest,
+        root="dev/market/lake_v2/asset_batch_reports",
+    )
+    states_summary = dict(sorted(Counter(item["status"] for item in results).items()))
+    has_failure = any(item["status"] in {
+        "acquisition_failed", "asset_validation_failed", "invalid_original_commit_marker"
+    } for item in results)
+    return {
+        "status": "batch_completed_with_failures" if has_failure else "batch_recorded",
+        "mode": mode, "source_plan_id": plan_id, "start_index": start_index,
+        "selected_assets": len(selection),
+        "outcome_counts": states_summary,
+        "evidence": location,
+        "production_eligible": False,
+    }
 
 
 def main() -> None:

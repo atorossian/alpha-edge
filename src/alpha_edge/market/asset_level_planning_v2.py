@@ -267,16 +267,11 @@ def run(
     artifacts, manifest = build_plan_bundle(
         registry, symbols, _read_csv(exchange_mapping_bytes), _read_csv(fx_bytes), fingerprints
     )
-    # Separate namespace from the reconciliation v2 manifest; never overwrite it.
+    # Explicit namespace; never mutate shared module state.
     if publish:
-        from alpha_edge.market import universe_registry_v2 as publisher
-
-        old_root = publisher.RECONCILIATION_ROOT
-        try:
-            publisher.RECONCILIATION_ROOT = "dev/market/lake_v2/asset_plans"
-            location = publish_evidence(s3, bucket, artifacts, manifest)
-        finally:
-            publisher.RECONCILIATION_ROOT = old_root
+        location = publish_evidence(
+            s3, bucket, artifacts, manifest, root="dev/market/lake_v2/asset_plans"
+        )
     else:
         location = {"status": "dry_run_no_writes"}
     return {**manifest["counts"], "run_id": manifest["run_id"], "publication": location}

@@ -43,13 +43,16 @@ def _check_params(asset_id: str, end: str) -> None:
     date.fromisoformat(end)
 
 
-def _original_asset(s3, bucket: str, archive_id: str, asset_id: str, end: str):
+def _original_asset(s3, bucket: str, archive_id: str, asset_id: str, end: str, *, context=None):
     _check_params(asset_id, end)
-    plan, info = load_archived_plan(s3, bucket, archive_id)
+    if context is None:
+        plan, info = load_archived_plan(s3, bucket, archive_id)
+        states = cohort_commit_presence(s3, bucket, info["plan_sha256"], end, info["expected_cohorts"])
+    else:
+        plan, info, states = context
     subset = plan.loc[plan["asset_id"].eq(asset_id)]
     if len(subset) != 1:
         raise AssetRecoveryError(f"Not exactly one asset in archived plan: {asset_id}")
-    states = cohort_commit_presence(s3, bucket, info["plan_sha256"], end, info["expected_cohorts"])
     return subset.iloc[0].to_dict(), info, states
 
 

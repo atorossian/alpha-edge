@@ -64,5 +64,5 @@ def test_retention_refuses_manifest_part_escape(tmp_path):
     payload = json.loads(s3.files[key])
     payload["parts"] = ["market/returns_usd/v1/asset_id=OTHER/year=2023/part.parquet"]
     s3.files[key] = json.dumps(payload).encode()
-    with pytest.raises(ValueError, match="Unexpected legacy part"):
+    with pytest.raises(ValueError, match="unexpected legacy part"):
         collect_one(s3, "bucket", aid, tmp_path)

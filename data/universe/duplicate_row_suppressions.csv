@@ -1,0 +1,3 @@
+duplicate_row_id,canonical_row_id,reason
+670A9138B424DB13,5E262727DC314688,Duplicate PPLI scrape of locked IAC Yahoo ticker transition
+DEA19FC8D266CFE2,C73EB54227724B75,Duplicate KMB entry with stale exclusion status

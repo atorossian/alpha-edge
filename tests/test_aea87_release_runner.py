@@ -20,7 +20,8 @@ def test_rollback_rejects_third_party_version():
 
 
 def test_release_build_rejects_invalid_plan(monkeypatch):
-    class Dummy: pass
+    class Dummy:
+        pass
     def invalid_plan(s3,bucket,key):
         if key == "plan":
             return {"reconciliation_id":"a","reconciliation_sha256":"bogus"}, "hash"

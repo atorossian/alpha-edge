@@ -128,11 +128,31 @@ def recover_asset(
         return {"status": "verified_existing_research_candidate", "asset_id": asset_id,
                 "run_id": recovery_id, "production_eligible": False,
                 "evidence": {"s3_uri": f"s3://{bucket}/{recovery_prefix}/manifest.json"}}
-    bars, provider_meta = acquire_yahoo_bars(
-        asset_id, symbol, start=None, end=end,
-        batch_id=f"aea87-recovery-{cohort:04d}", ticker_factory=ticker_factory,
-        currency_hint=currency, full_history=True,
-    )
+    try:
+        bars, provider_meta = acquire_yahoo_bars(
+            asset_id, symbol, start=None, end=end,
+            batch_id=f"aea87-recovery-{cohort:04d}", ticker_factory=ticker_factory,
+            currency_hint=currency, full_history=True,
+        )
+    except Exception as exc:
+        # A source-provider failure must remain visible as S3 evidence, without
+        # claiming a completed acquisition or blocking unrelated assets.
+        failure = {
+            **base, "state": "source_acquisition_failed",
+            "error_type": type(exc).__name__,
+            "error_detail": str(exc)[:500],
+            "historical_prices_approved": False,
+        }
+        artifacts, failure_manifest = _result_bytes(
+            {"failure.json": _json_bytes(failure)},
+            {"asset_id": asset_id, "original_plan_sha256": info["plan_sha256"],
+             "end_exclusive": end, "state": "source_acquisition_failed"},
+            schema="aea87_asset_recovery_failure_v1",
+        )
+        evidence = publish_evidence(s3, bucket, artifacts, failure_manifest, root=RECOVERY_ROOT)
+        return {"status": "acquisition_failed", "asset_id": asset_id,
+                "error_type": failure["error_type"], "evidence": evidence,
+                "production_eligible": False}
     if set(bars["asset_id"].astype(str)) != {asset_id}:
         raise AssetRecoveryError("Provider returned unexpected asset IDs")
     if set(bars["provider_symbol"].astype(str)) != {symbol}:
@@ -348,6 +368,8 @@ def main() -> None:
                 s3, args.bucket, args.archive_id, args.asset_id, args.end, publish=args.publish
             )
     print(json.dumps(result, indent=2, sort_keys=True))
+    if result.get("status") == "acquisition_failed":
+        raise SystemExit(2)
 
 
 if __name__ == "__main__":

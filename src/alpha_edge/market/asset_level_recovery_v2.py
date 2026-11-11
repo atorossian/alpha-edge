@@ -410,7 +410,7 @@ def run_asset_batch(
         raise AssetRecoveryError("Unknown asset batch mode")
     if not re.fullmatch(r"[a-f0-9]{64}", plan_id):
         raise AssetRecoveryError("Invalid planning manifest ID")
-    if not 0 <= start_index or not 1 <= max_assets <= 25:
+    if start_index < 0 or not 1 <= max_assets <= 25:
         raise AssetRecoveryError("Batch bounds must satisfy start>=0 and 1<=max_assets<=25")
     if not SAFE_DATE.fullmatch(end):
         raise AssetRecoveryError("Invalid end-exclusive date")
@@ -447,9 +447,12 @@ def run_asset_batch(
     upstream_id = planning.get("source_fingerprints", {}).get("reconciliation_id")
     if not upstream_id or not re.fullmatch(r"[a-f0-9]{64}", upstream_id):
         raise AssetRecoveryError("Missing pinned reconciliation provenance")
-    upstream_manifest = json.loads(_get(
+    upstream_raw = _get(
         s3, bucket, f"dev/market/lake_v2/reconciliation/run-{upstream_id}/manifest.json"
-    ))
+    )
+    if _sha(upstream_raw) != planning["source_fingerprints"].get("reconciliation_manifest_sha256"):
+        raise AssetRecoveryError("Pinned reconciliation manifest SHA mismatch")
+    upstream_manifest = json.loads(upstream_raw)
     if upstream_manifest.get("source_fingerprints", {}).get("original_plan", {}).get(
         "plan_sha256"
     ) != info["plan_sha256"]:

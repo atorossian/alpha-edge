@@ -49,13 +49,21 @@ def _manifest(s3, bucket: str, key: str):
 
 def make_inventory(
     s3, bucket: str, *, archive_id: str, universe_csv: Path,
-    original_end: str = ORIGINAL_END,
+    exclusions_csv: Path | None = None, original_end: str = ORIGINAL_END,
 ) -> tuple[list[dict], dict]:
     original, info = load_archived_plan(s3, bucket, archive_id)
     states = cohort_commit_presence(
         s3, bucket, info["plan_sha256"], original_end, info["expected_cohorts"]
     )
     current = pd.read_csv(universe_csv, dtype=str).fillna("")
+    if exclusions_csv is None:
+        exclusions_csv = universe_csv.parent / "asset_excluded.csv"
+    excluded = pd.read_csv(exclusions_csv, dtype=str).fillna("")
+    if "target_row_id" not in excluded or "row_id" not in current:
+        raise ValueError("Current universe/exclusion ledger lacks row identity")
+    if excluded["target_row_id"].duplicated().any():
+        raise ValueError("Duplicate target_row_id in existing exclusion ledger")
+    excluded_rows = set(excluded["target_row_id"])
     if current["asset_id"].duplicated().any():
         raise ValueError("Duplicate asset_id in current universe")
     configured = current.set_index("asset_id")
@@ -92,7 +100,13 @@ def make_inventory(
         now = configured.loc[aid] if aid in configured.index else None
         record = {
             "asset_id": aid,
-            "current_eligible": bool(now is not None and now["include"] == "1"),
+            "current_eligible": bool(
+                now is not None and now["include"] == "1"
+                and now["row_id"] not in excluded_rows
+            ),
+            "excluded_by_existing_ledger": bool(
+                now is not None and now["row_id"] in excluded_rows
+            ),
             "original_plan_present": old is not None,
             "original_cohort": int(old["original_cohort"]) if old is not None else None,
             "historical_retention_required": aid in HISTORICAL_RETAIN,
@@ -179,6 +193,7 @@ def make_inventory(
         "original_plan_sha256": info["plan_sha256"],
         "original_end_exclusive": original_end,
         "current_universe_sha256": hashlib.sha256(universe_csv.read_bytes()).hexdigest(),
+        "exclusions_sha256": hashlib.sha256(exclusions_csv.read_bytes()).hexdigest(),
         "production_eligible": False,
         "release_state": "blocked_pending_verified_candidates_and_external_evidence",
         "limitations": [
@@ -194,11 +209,12 @@ def make_inventory(
 
 def run(
     s3, bucket: str, *, archive_id: str, universe_csv: Path,
+    exclusions_csv: Path | None = None,
     original_end: str = ORIGINAL_END, execute: bool = False,
 ) -> dict:
     records, summary = make_inventory(
         s3, bucket, archive_id=archive_id, universe_csv=universe_csv,
-        original_end=original_end,
+        exclusions_csv=exclusions_csv, original_end=original_end,
     )
     payload = b"".join(
         (json.dumps(row, sort_keys=True) + "\n").encode()
@@ -208,6 +224,7 @@ def run(
         "schema": summary["schema"],
         "original_plan_sha256": summary["original_plan_sha256"],
         "current_universe_sha256": summary["current_universe_sha256"],
+        "exclusions_sha256": summary["exclusions_sha256"],
         "inventory_sha256": _sha(payload),
     })
     release_sha = _sha(material)

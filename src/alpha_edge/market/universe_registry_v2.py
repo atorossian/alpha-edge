@@ -394,6 +394,7 @@ def publish_evidence(
         "dev/market/lake_v2/asset_plans",
         "dev/market/lake_v2/asset_recovery",
         "dev/market/lake_v2/asset_audits",
+        "dev/market/lake_v2/asset_batch_reports",
     }:
         raise UniverseRegistryError("Unapproved S3 evidence namespace")
     prefix = f"{root}/run-{run_id}"

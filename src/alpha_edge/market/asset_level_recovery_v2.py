@@ -20,6 +20,7 @@ from alpha_edge.market.ingest_bronze_yahoo_v2 import acquire_yahoo_bars
 from alpha_edge.market.universe_registry_v2 import (
     _get,
     _json_bytes,
+    _records_bytes,
     _sha,
     cohort_commit_presence,
     load_archived_plan,
@@ -136,6 +137,8 @@ def recover_asset(
         raise AssetRecoveryError("Provider returned unexpected asset IDs")
     if set(bars["provider_symbol"].astype(str)) != {symbol}:
         raise AssetRecoveryError("Provider returned unexpected symbols")
+    if not pd.to_datetime(bars["session_date"], errors="coerce").lt(pd.Timestamp(end)).all():
+        raise AssetRecoveryError("Acquisition returned invalid or out-of-window sessions")
     buffer = io.BytesIO()
     bars.to_parquet(buffer, index=False)
     files, manifest = _result_bytes(
@@ -269,7 +272,7 @@ def audit_existing_asset(
         bars, asset_id=asset_id, calendar_id=str(row["calendar_id"])
     )
     artifacts, manifest = _result_bytes(
-        {"findings.jsonl": b"".join(_json_bytes(record) for record in findings.to_dict("records")),
+        {"findings.jsonl": _records_bytes(findings),
          "coverage.json": _json_bytes(summary)},
         {"asset_id": asset_id, "original_plan_sha256": info["plan_sha256"],
          "original_cohort": cohort, "source_sha256": _sha(original),
@@ -302,7 +305,7 @@ def audit_recovered_asset(
     )
     artifacts, manifest = _result_bytes(
         {
-            "findings.jsonl": b"".join(_json_bytes(record) for record in findings.to_dict("records")),
+            "findings.jsonl": _records_bytes(findings),
             "coverage.json": _json_bytes(summary),
         },
         {"asset_id": asset_id, "recovery_run_id": recovery_id, "source_sha256": _sha(source_raw)},

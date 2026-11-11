@@ -518,8 +518,6 @@ def run_asset_batch(
             "error": item.get("error", ""),
             "historical_prices_approved": False,
         })
-    from alpha_edge.market.universe_registry_v2 import _records_bytes
-
     payloads = {"batch_results.jsonl": _records_bytes(pd.DataFrame(results))}
     metadata = {
         "schema": "aea87_asset_batch_execution_v1",
@@ -556,34 +554,50 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--bucket", required=True)
     parser.add_argument("--archive-id", default="old-outputs-20261110")
-    parser.add_argument("--asset-id", required=True)
+    parser.add_argument("--asset-id", help="Individual asset ID (single-asset modes)")
+    parser.add_argument("--plan-id", help="Immutable S3 asset-level plan ID (batch modes)")
+    parser.add_argument("--start-index", type=int, default=0, help="Zero-based batch queue offset")
+    parser.add_argument("--max-assets", type=int, default=10, help="Maximum 25 assets per batch")
     parser.add_argument("--end", default="2026-11-10")
-    parser.add_argument("--mode", choices=("recover", "audit"), required=True)
+    parser.add_argument(
+        "--mode", choices=("recover", "audit", "recover-batch", "audit-batch"), required=True
+    )
     parser.add_argument("--execute", action="store_true", help="Explicit single-asset provider acquisition")
     parser.add_argument("--recovery-run-id", help="Audit existing individual recovery candidate instead of cohort")
     parser.add_argument("--publish", action="store_true", help="Publish immutable audit evidence")
     parser.add_argument("--region", default="eu-west-1")
     args = parser.parse_args()
     s3 = boto3.client("s3", region_name=args.region)
-    if args.mode == "recover":
-        if args.publish:
-            parser.error("Recovery uses --execute; --publish is for the audit mode")
-        result = recover_asset(
-            s3, args.bucket, args.archive_id, args.asset_id, args.end, execute=args.execute
+    if args.mode.endswith("-batch"):
+        if not args.plan_id or args.asset_id or args.recovery_run_id or args.publish:
+            parser.error("Batch mode requires --plan-id, without --asset-id or --publish")
+        result = run_asset_batch(
+            s3, args.bucket, args.archive_id, args.plan_id, args.end,
+            mode=args.mode.removesuffix("-batch"),
+            start_index=args.start_index, max_assets=args.max_assets, execute=args.execute,
         )
     else:
-        if args.execute:
-            parser.error("Audit does not acquire prices; use --publish only")
-        if args.recovery_run_id:
-            result = audit_recovered_asset(
-                s3, args.bucket, args.asset_id, args.recovery_run_id, publish=args.publish
+        if not args.asset_id or args.plan_id:
+            parser.error("Single-asset mode requires --asset-id and no --plan-id")
+        if args.mode == "recover":
+            if args.publish or args.recovery_run_id:
+                parser.error("Recovery uses --execute, without --publish or --recovery-run-id")
+            result = recover_asset(
+                s3, args.bucket, args.archive_id, args.asset_id, args.end, execute=args.execute
             )
         else:
-            result = audit_existing_asset(
-                s3, args.bucket, args.archive_id, args.asset_id, args.end, publish=args.publish
-            )
+            if args.execute:
+                parser.error("Audit does not acquire prices; use --publish only")
+            if args.recovery_run_id:
+                result = audit_recovered_asset(
+                    s3, args.bucket, args.asset_id, args.recovery_run_id, publish=args.publish
+                )
+            else:
+                result = audit_existing_asset(
+                    s3, args.bucket, args.archive_id, args.asset_id, args.end, publish=args.publish
+                )
     print(json.dumps(result, indent=2, sort_keys=True))
-    if result.get("status") == "acquisition_failed":
+    if result.get("status") in {"acquisition_failed", "batch_completed_with_failures"}:
         raise SystemExit(2)
 
 

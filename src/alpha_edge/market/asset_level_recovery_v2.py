@@ -412,6 +412,8 @@ def run_asset_batch(
         raise AssetRecoveryError("Invalid planning manifest ID")
     if not 0 <= start_index or not 1 <= max_assets <= 25:
         raise AssetRecoveryError("Batch bounds must satisfy start>=0 and 1<=max_assets<=25")
+    if not SAFE_DATE.fullmatch(end):
+        raise AssetRecoveryError("Invalid end-exclusive date")
     date.fromisoformat(end)
     plan_prefix = f"dev/market/lake_v2/asset_plans/run-{plan_id}"
     planning = json.loads(_get(s3, bucket, plan_prefix + "/manifest.json"))
@@ -508,8 +510,14 @@ def run_asset_batch(
                     item["status"] = "recovered_coverage_audited_not_approved"
             else:
                 item = {"status": "invalid_original_commit_marker"}
-        except AssetRecoveryError as exc:
-            item = {"status": "asset_validation_failed", "error": str(exc)[:500]}
+        except ClientError:
+            # Infrastructure/permissions failures abort the bounded batch.
+            raise
+        except Exception as exc:
+            # Asset-level failures are explicit, never accepted or silently
+            # dropped; the next task remains eligible for processing.
+            item = {"status": "asset_validation_failed",
+                    "error": f"{type(exc).__name__}: {exc}"[:500]}
         results.append({
             "asset_id": asset_id,
             "original_cohort": cohort,
@@ -540,8 +548,12 @@ def run_asset_batch(
     has_failure = any(item["status"] in {
         "acquisition_failed", "asset_validation_failed", "invalid_original_commit_marker"
     } for item in results)
+    has_pending = any(item["status"] == "awaiting_individual_source_recovery" for item in results)
     return {
-        "status": "batch_completed_with_failures" if has_failure else "batch_recorded",
+        "status": (
+            "batch_completed_with_failures" if has_failure else
+            "batch_pending_recovery" if has_pending else "batch_recorded"
+        ),
         "mode": mode, "source_plan_id": plan_id, "start_index": start_index,
         "selected_assets": len(selection),
         "outcome_counts": states_summary,

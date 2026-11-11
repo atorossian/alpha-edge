@@ -383,7 +383,7 @@ def publish_evidence(s3, bucket: str, artifacts: dict[str, bytes], manifest: dic
     run_id = manifest["run_id"]
     if not re.fullmatch(r"[a-f0-9]{64}", run_id):
         raise UniverseRegistryError("Invalid evidence run identity")
-    if root not in {RECONCILIATION_ROOT, "dev/market/lake_v2/asset_plans"}:
+    if root not in {RECONCILIATION_ROOT, "dev/market/lake_v2/asset_plans", "dev/market/lake_v2/asset_recovery", "dev/market/lake_v2/asset_audits"}:
         raise UniverseRegistryError("Unapproved S3 evidence namespace")
     prefix = f"{root}/run-{run_id}"
     for name in sorted(name for name in artifacts if name != "manifest.json") + ["manifest.json"]:

@@ -32,9 +32,28 @@ def test_no_approved_gold_baseline_fails_without_any_writes():
     assert not s3.objects
 
 
-def test_invalid_date_does_not_initiate_ingestion():
+def test_invalid_date_does_not_initiate_ingestion(monkeypatch):
+    """An invalid date must be rejected before any S3 read or write."""
+    from unittest.mock import Mock
+
+    s3 = S3()
+    get_object = Mock(side_effect=AssertionError("S3 read before date validation"))
+    put_object = Mock(side_effect=AssertionError("S3 write before date validation"))
+    monkeypatch.setattr(s3, "get_object", get_object)
+    monkeypatch.setattr(s3, "put_object", put_object)
+
     with pytest.raises(daily.IncrementalError, match="Invalid as_of"):
-        daily._day("2026-02-30")
+        daily.run(
+            s3=s3,
+            bucket="alpha-edge-algo",
+            as_of="2026-02-30",
+            execute=False,
+            run_id="invalid_date_test",
+        )
+
+    get_object.assert_not_called()
+    put_object.assert_not_called()
+    assert s3.objects == {}
 
 
 def test_merge_preserves_pre_overlap_history_and_detects_revisions():

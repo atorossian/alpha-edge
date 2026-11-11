@@ -53,10 +53,11 @@ def _original_asset(s3, bucket: str, archive_id: str, asset_id: str, end: str):
 
 
 def _result_bytes(
-    payloads: dict[str, bytes], metadata: dict, *, run_id: str | None = None
+    payloads: dict[str, bytes], metadata: dict, *, run_id: str | None = None,
+    schema: str = "aea87_asset_recovery_candidate_v1",
 ) -> tuple[dict[str, bytes], dict]:
     fingerprint = {
-        "schema": "aea87_asset_recovery_candidate_v1",
+        "schema": schema,
         "source": metadata,
         "sha256": {name: _sha(blob) for name, blob in sorted(payloads.items())},
     }
@@ -273,6 +274,7 @@ def audit_existing_asset(
         {"asset_id": asset_id, "original_plan_sha256": info["plan_sha256"],
          "original_cohort": cohort, "source_sha256": _sha(original),
          "original_bronze_key": f"{prefix}/files/{relative}"},
+        schema="aea87_asset_coverage_audit_v1",
     )
     location = publish_evidence(s3, bucket, artifacts, manifest, root=AUDIT_ROOT) if publish else {
         "status": "dry_run_no_writes"
@@ -304,6 +306,7 @@ def audit_recovered_asset(
             "coverage.json": _json_bytes(summary),
         },
         {"asset_id": asset_id, "recovery_run_id": recovery_id, "source_sha256": _sha(source_raw)},
+        schema="aea87_asset_coverage_audit_v1",
     )
     location = publish_evidence(s3, bucket, artifacts, manifest, root=AUDIT_ROOT) if publish else {
         "status": "dry_run_no_writes"

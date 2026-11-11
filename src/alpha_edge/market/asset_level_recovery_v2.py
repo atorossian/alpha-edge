@@ -107,7 +107,9 @@ def recover_asset(
     recovery_id = _sha(_json_bytes({"schema": "aea87_recovery_identity_v1", **base}))
     recovery_prefix = f"{RECOVERY_ROOT}/run-{recovery_id}"
     try:
-        existing = json.loads(_get(s3, bucket, recovery_prefix + "/manifest.json"))
+        existing = json.loads(
+            s3.get_object(Bucket=bucket, Key=recovery_prefix + "/manifest.json")["Body"].read()
+        )
     except ClientError as exc:
         if exc.response.get("Error", {}).get("Code") not in {"NoSuchKey", "404", "NotFound"}:
             raise

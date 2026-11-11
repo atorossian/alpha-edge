@@ -33,7 +33,6 @@ def test_no_approved_gold_baseline_fails_without_any_writes():
 
 
 def test_invalid_date_does_not_initiate_ingestion():
-    s3 = S3()
     with pytest.raises(daily.IncrementalError, match="Invalid as_of"):
         daily._day("2026-02-30")
 

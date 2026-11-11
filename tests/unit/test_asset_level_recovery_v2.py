@@ -1,6 +1,7 @@
 """Single-asset acquisition is immutable, isolated and never auto-approved."""
 
 import io
+import json
 
 import pandas as pd
 import pytest
@@ -165,3 +166,106 @@ def test_unverified_corporate_action_observations_cannot_approve_prices():
     assert not summary["listing_dates_independently_verified"]
     assert not summary["corporate_actions_independently_verified"]
     assert not summary["historical_coverage_approved"]
+
+
+def _seed_batch_queue(store, *, mode, plan_id="a" * 64, reconciliation_id="b" * 64):
+    from alpha_edge.market.universe_registry_v2 import _sha
+
+    filename = "missing_cohort_asset_recovery.jsonl" if mode == "recover" else "historical_coverage_queue.jsonl"
+    task = {"asset_id": "A", "original_cohort": 3, "original_provider_symbol": "A"}
+    payload = (json.dumps(task, sort_keys=True) + "\n").encode("utf-8")
+    store.objects[f"dev/market/lake_v2/asset_plans/run-{plan_id}/{filename}"] = payload
+    store.objects[f"dev/market/lake_v2/asset_plans/run-{plan_id}/manifest.json"] = json.dumps(
+        {
+            "schema": "aea87_asset_level_planning_v1",
+            "run_id": plan_id,
+            "artifact_sha256": {filename: _sha(payload)},
+            "source_fingerprints": {"reconciliation_id": reconciliation_id},
+        }
+    ).encode()
+    store.objects[
+        f"dev/market/lake_v2/reconciliation/run-{reconciliation_id}/manifest.json"
+    ] = json.dumps(
+        {"source_fingerprints": {"original_plan": {"plan_sha256": "f" * 64}}}
+    ).encode()
+    return plan_id
+
+
+def test_bounded_batch_dry_run_has_no_s3_writes():
+    store = FakeS3()
+    plan_id = _seed_batch_queue(store, mode="recover")
+    before = set(store.objects)
+    result = recovery.run_asset_batch(
+        store, "bucket", "archive", plan_id, "2026-11-10",
+        mode="recover", start_index=0, max_assets=1, execute=False,
+    )
+    assert result["selected_asset_ids"] == ["A"]
+    assert result["s3_writes"] == 0
+    assert set(store.objects) == before
+
+
+def test_bounded_batch_reuses_plan_once_and_publishes_results(monkeypatch):
+    store = FakeS3()
+    plan_id = _seed_batch_queue(store, mode="recover")
+    seen = []
+
+    def load_plan(*args):
+        seen.append("plan")
+        return pd.DataFrame([{
+            "asset_id": "A", "original_cohort": 3, "yahoo_ticker": "A",
+            "currency": "USD", "calendar_id": "24/7",
+        }]), {"plan_sha256": "f" * 64, "expected_cohorts": 3}
+
+    monkeypatch.setattr(recovery, "load_archived_plan", load_plan)
+    monkeypatch.setattr(recovery, "cohort_commit_presence", lambda *args: {3: "missing"})
+
+    def fake_recover(*args, **kwargs):
+        assert kwargs["_context"] is not None
+        return {"status": "verified_existing_research_candidate",
+                "evidence": {"s3_uri": "s3://bucket/verified"}}
+
+    monkeypatch.setattr(recovery, "recover_asset", fake_recover)
+    result = recovery.run_asset_batch(
+        store, "bucket", "archive", plan_id, "2026-11-10",
+        mode="recover", start_index=0, max_assets=1, execute=True,
+    )
+    assert seen == ["plan"]
+    assert result["status"] == "batch_recorded"
+    assert result["outcome_counts"] == {"verified_existing_research_candidate": 1}
+    assert any(k.endswith("/batch_results.jsonl") for k in store.objects)
+    assert result["production_eligible"] is False
+
+
+def test_bounded_audit_identifies_unrecovered_cohort(monkeypatch):
+    store = FakeS3()
+    plan_id = _seed_batch_queue(store, mode="audit")
+    monkeypatch.setattr(
+        recovery, "load_archived_plan",
+        lambda *args: (
+            pd.DataFrame([{
+                "asset_id": "A", "original_cohort": 3, "yahoo_ticker": "A",
+                "currency": "USD", "calendar_id": "24/7",
+            }]),
+            {"plan_sha256": "f" * 64, "expected_cohorts": 3},
+        ),
+    )
+    monkeypatch.setattr(recovery, "cohort_commit_presence", lambda *args: {3: "missing"})
+    result = recovery.run_asset_batch(
+        store, "bucket", "archive", plan_id, "2026-11-10",
+        mode="audit", start_index=0, max_assets=1, execute=True,
+    )
+    assert result["status"] == "batch_pending_recovery"
+    assert result["outcome_counts"] == {"awaiting_individual_source_recovery": 1}
+    assert result["production_eligible"] is False
+
+
+def test_bounded_batch_refuses_tampered_queue():
+    store = FakeS3()
+    plan_id = _seed_batch_queue(store, mode="recover")
+    key = next(k for k in store.objects if k.endswith("missing_cohort_asset_recovery.jsonl"))
+    store.objects[key] = b'{"asset_id": "UNKNOWN"}\n'
+    with pytest.raises(recovery.AssetRecoveryError, match="checksum mismatch"):
+        recovery.run_asset_batch(
+            store, "bucket", "archive", plan_id, "2026-11-10",
+            mode="recover", start_index=0, max_assets=1, execute=False,
+        )

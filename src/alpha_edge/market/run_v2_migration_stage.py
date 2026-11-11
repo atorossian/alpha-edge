@@ -51,15 +51,24 @@ def run(
             s3, bucket, archive_id, original_end=end,
             start_index=0, max_assets=25, execute=False,
         )
-    stages["eurusd"] = reprocess_committed(
-        s3, bucket, universe_csv=universe_csv,
-        fx_csv=fx_config, execute=execute,
-    )
-    stages["historical_retention"] = retain_legacy(s3, bucket, execute=execute)
-    stages["release_inventory"] = release_inventory(
-        s3, bucket, archive_id=archive_id,
-        universe_csv=universe_csv, original_end=end, execute=execute,
-    )
+    for name, action in (
+        ("eurusd", lambda: reprocess_committed(
+            s3, bucket, universe_csv=universe_csv,
+            fx_csv=fx_config, execute=execute,
+        )),
+        ("historical_retention", lambda: retain_legacy(s3, bucket, execute=execute)),
+        ("release_inventory", lambda: release_inventory(
+            s3, bucket, archive_id=archive_id,
+            universe_csv=universe_csv, original_end=end, execute=execute,
+        )),
+    ):
+        try:
+            stages[name] = action()
+        except Exception as exc:
+            stages[name] = {
+                "status": "stage_failed",
+                "error": f"{type(exc).__name__}: {exc}"[:500],
+            }
     stages["production_pointer_changed"] = False
     stages["legacy_v1_modified"] = False
     stages["yahoo_downloads"] = 0
@@ -85,7 +94,14 @@ def main() -> None:
     print(json.dumps(result, indent=2))
     if args.execute and (
         result["recovered_assets"]["outcomes"].get("processing_failed", 0)
-        or any(x["status"] == "retention_failed" for x in result["historical_retention"]["results"])
+        or any(
+            result[name].get("status") == "stage_failed"
+            for name in ("eurusd", "historical_retention", "release_inventory")
+        )
+        or any(
+            x["status"] == "retention_failed"
+            for x in result["historical_retention"].get("results", [])
+        )
     ):
         raise SystemExit(2)
 

@@ -125,3 +125,44 @@ def test_acquisition_is_idempotent_and_recovered_bronze_can_be_audited(monkeypat
     assert result["historical_coverage_approved"] is False
     assert result["evidence"]["status"] == "verified_immutable_s3"
     assert any(k.endswith("/coverage.json") for k in store.objects)
+
+
+
+def test_failed_provider_acquisition_is_recorded_but_not_approved(monkeypatch):
+    monkeypatch.setattr(
+        recovery, "_original_asset",
+        lambda *args: (
+            {"original_cohort": 3, "asset_id": "A", "yahoo_ticker": "A",
+             "currency": "USD", "calendar_id": "24/7"},
+            {"plan_sha256": "f" * 64},
+            {3: "missing"},
+        ),
+    )
+
+    def fail(*args, **kwargs):
+        raise RuntimeError("provider history unavailable")
+
+    monkeypatch.setattr(recovery, "acquire_yahoo_bars", fail)
+    store = FakeS3()
+    result = recovery.recover_asset(store, "bucket", "archive", "A", "2026-11-10", execute=True)
+    assert result["status"] == "acquisition_failed"
+    assert result["production_eligible"] is False
+    assert any(key.endswith("/failure.json") for key in store.objects)
+    assert all(not key.endswith("/source_ohlcv.parquet") for key in store.objects)
+
+
+def test_unverified_corporate_action_observations_cannot_approve_prices():
+    bars = pd.DataFrame(
+        [{"asset_id": "A", "provider_symbol": "A", "session_date": "2026-11-01",
+          "open": 10, "high": 10, "low": 10, "close": 10, "volume": 100,
+          "dividends": 0.5, "stock_splits": 2}]
+    )
+    findings, summary = recovery.audit_sessions_and_actions(
+        bars, asset_id="A", calendar_id="24/7",
+        declared_listing_start="2026-11-01", declared_listing_end="2026-11-01",
+    )
+    assert summary["action_observation_counts"] == {"dividends": 1, "stock_splits": 1}
+    assert summary["listed_history_endpoints_declared"]
+    assert not summary["listing_dates_independently_verified"]
+    assert not summary["corporate_actions_independently_verified"]
+    assert not summary["historical_coverage_approved"]

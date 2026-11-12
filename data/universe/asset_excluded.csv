@@ -126,3 +126,21 @@ B198E1A2E42F3E41,KVUE,equity,Asset not publicly traded anymore,Acquired by Kimbe
 C2030DA0D3808CDA,CSAN,equity,Not tradable in Quantfury app,Asset delisted from NYSE
 670A9138B424DB13,PPLI,equity,Duplicate of IAC row 5E262727DC314688,Original IAC record carries locked Yahoo symbol PPLI
 DEA19FC8D266CFE2,KMB,equity,Historical NYSE row replaced by current Nasdaq row,Listing transferred NYSE to Nasdaq 2025-05-30 while ticker KMB remained unchanged
+0936DD96A220D561,ABEV3,equity,Duplicate active instrument identity (reviewed 2026-11-12),Keep historical data and asset_id; suppress from active universe and v2 acquisition
+293045D3D45E00B3,BBDC4,equity,Duplicate active instrument identity (reviewed 2026-11-12),Keep historical data and asset_id; suppress from active universe and v2 acquisition
+10BD436E766A2AF0,BRKM5,equity,Duplicate active instrument identity (reviewed 2026-11-12),Keep historical data and asset_id; suppress from active universe and v2 acquisition
+9DE214A6A0D0AE5F,CCL,equity,Duplicate active instrument identity (reviewed 2026-11-12),Keep historical data and asset_id; suppress from active universe and v2 acquisition
+CD34CE1ED7AFE649,CMCSA,equity,Duplicate active instrument identity (reviewed 2026-11-12),Keep historical data and asset_id; suppress from active universe and v2 acquisition
+C421CFDF86A913F4,CMIG4,equity,Duplicate active instrument identity (reviewed 2026-11-12),Keep historical data and asset_id; suppress from active universe and v2 acquisition
+4531F8537826244C,CSAN3,equity,Duplicate active instrument identity (reviewed 2026-11-12),Keep historical data and asset_id; suppress from active universe and v2 acquisition
+8BE3614FD204934A,CSNA3,equity,Duplicate active instrument identity (reviewed 2026-11-12),Keep historical data and asset_id; suppress from active universe and v2 acquisition
+263E0549D057543C,GGBR4,equity,Duplicate active instrument identity (reviewed 2026-11-12),Keep historical data and asset_id; suppress from active universe and v2 acquisition
+6F5BE757BDF4A359,ITUB4,equity,Duplicate active instrument identity (reviewed 2026-11-12),Keep historical data and asset_id; suppress from active universe and v2 acquisition
+8051CE766713A499,QUBT,equity,Duplicate active instrument identity (reviewed 2026-11-12),Keep historical data and asset_id; suppress from active universe and v2 acquisition
+9EEB4CD6F8AC3F26,SUZB3,equity,Duplicate active instrument identity (reviewed 2026-11-12),Keep historical data and asset_id; suppress from active universe and v2 acquisition
+50E62C8C12BA65AB,TIMS3,equity,Duplicate active instrument identity (reviewed 2026-11-12),Keep historical data and asset_id; suppress from active universe and v2 acquisition
+749E4C6AC348B3C6,UGPA3,equity,Duplicate active instrument identity (reviewed 2026-11-12),Keep historical data and asset_id; suppress from active universe and v2 acquisition
+7EC8F2ADABE1848F,VALE3,equity,Duplicate active instrument identity (reviewed 2026-11-12),Keep historical data and asset_id; suppress from active universe and v2 acquisition
+0141AEF9649C0496,AMX,equity,Duplicate active instrument identity (reviewed 2026-11-12),Keep historical data and asset_id; suppress from active universe and v2 acquisition
+BF362EF7573A7240,ASR,equity,Duplicate active instrument identity (reviewed 2026-11-12),Keep historical data and asset_id; suppress from active universe and v2 acquisition
+B966F5C590FBABF8,BRSL,equity,Duplicate current BRSL row; preserve historic broker IGT identity,Keep historical data and asset_id; suppress from active universe and v2 acquisition

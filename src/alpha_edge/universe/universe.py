@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Dict, Optional
 import time
 import re
+import unicodedata
 import pandas as pd
 import yfinance as yf
 from alpha_edge import paths
@@ -72,7 +73,8 @@ _GOOD_QUOTETYPES = {"EQUITY", "ETF", "ADR"}
 
 
 def _tokenize(s: str) -> set[str]:
-    s = (s or "").lower()
+    # Yahoo and broker names may differ only by diacritics (Aéroports/Aeroports).
+    s = unicodedata.normalize("NFKD", s or "").encode("ascii", "ignore").decode("ascii").lower()
     s = re.sub(r"[^a-z0-9]+", " ", s)
     toks = {t for t in s.split() if len(t) >= 3}
     toks -= {"sa", "ag", "se", "plc", "inc", "corp", "ltd", "sme", "nv", "spa", "holdings"}

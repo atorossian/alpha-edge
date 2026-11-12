@@ -305,6 +305,24 @@ EU_SUFFIXES = [
     ".HE",
 ]
 
+# Issuer domicile is a preference for selecting a provider listing, NOT proof
+# of the primary exchange or an identifier of the traded security. This map
+# only covers unambiguous domicile-to-Yahoo venue hints.
+HOME_MARKET_SUFFIX = {
+    "FRANCE": ".PA",
+    "GERMANY": ".DE",
+    "SPAIN": ".MC",
+    "ITALY": ".MI",
+    "NETHERLANDS": ".AS",
+    "BELGIUM": ".BR",
+    "SWITZERLAND": ".SW",
+    "SWEDEN": ".ST",
+    "UNITED KINGDOM": ".L",
+    "FINLAND": ".HE",
+    "BRAZIL": ".SA",
+}
+
+
 PREF_SUFFIX_ORDER = [
     ".DE",
     ".MC",
@@ -418,6 +436,7 @@ def resolve_ticker_strict(
     expected_region: str,
     asset_class: str,
     role: str,
+    preferred_country: str | None = None,
 ) -> tuple[Optional[str], dict]:
     best = None
     best_score = -1.0
@@ -425,7 +444,18 @@ def resolve_ticker_strict(
     best_meta = None
     best_reason = None
 
-    for cand in _candidate_symbols(raw, expected_region):
+    candidates = _candidate_symbols(raw, expected_region)
+    preferred_suffix = HOME_MARKET_SUFFIX.get(str(preferred_country or "").strip().upper())
+    if preferred_suffix:
+        # Keep the raw symbol first, but prefer the verified home-market
+        # listing to arbitrary European cross-listings when names validate.
+        candidates.sort(
+            key=lambda symbol: (
+                0 if symbol.upper().endswith(preferred_suffix) else 1,
+                _venue_rank(symbol),
+            )
+        )
+    for cand in candidates:
         meta = fetch_yahoo_meta(cand)
 
         ok, reason, score = validate_yahoo_meta_for_row(

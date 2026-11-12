@@ -443,21 +443,21 @@ def resolve_ticker_strict(
     best_rank = 999
     best_meta = None
     best_reason = None
+    best_home = False
 
     candidates = _candidate_symbols(raw, expected_region)
-    preferred_suffix = HOME_MARKET_SUFFIX.get(str(preferred_country or "").strip().upper())
+    declared_country = str(preferred_country or "").strip().upper()
+    preferred_suffix = HOME_MARKET_SUFFIX.get(declared_country)
     if preferred_suffix:
-        # Keep the raw symbol first, but prefer the verified home-market
-        # listing to arbitrary European cross-listings when names validate.
         candidates.sort(
             key=lambda symbol: (
                 0 if symbol.upper().endswith(preferred_suffix) else 1,
                 _venue_rank(symbol),
             )
         )
+
     for cand in candidates:
         meta = fetch_yahoo_meta(cand)
-
         ok, reason, score = validate_yahoo_meta_for_row(
             meta,
             expected_name=expected_name,
@@ -465,23 +465,41 @@ def resolve_ticker_strict(
             asset_class=asset_class,
             role=role,
         )
+        if not ok:
+            continue
+        if not _has_price_history(cand):
+            continue
 
-        px_ok = _has_price_history(cand)
-        if not px_ok:
-            ok = False
-            reason = f"{reason}; no_price_history"
+        # Yahoo 'country' is company location, not a definitive primary
+        # exchange. A suffix match is only a *preference* among validated
+        # listings of the same company, never proof of the instrument.
+        company_country = str(meta.get("country") or "").strip().upper()
+        home_suffix = preferred_suffix or HOME_MARKET_SUFFIX.get(company_country)
+        is_home_listing = bool(home_suffix and cand.upper().endswith(home_suffix))
+        rank = _venue_rank(cand)
 
-        if ok:
-            r = _venue_rank(cand)
-            if (score > best_score) or (abs(score - best_score) < 1e-12 and r < best_rank):
-                best = cand
-                best_score = score
-                best_rank = r
-                best_meta = meta
-                best_reason = reason
+        # Strong matching identity is required before a home-market preference
+        # can outrank a cross-listing with a slightly different name score.
+        if best is None or (
+            score >= 0.75 and best_score >= 0.75
+            and is_home_listing and not best_home
+        ) or (
+            is_home_listing == best_home
+            and (score > best_score or (abs(score - best_score) < 1e-12 and rank < best_rank))
+        ):
+            best = cand
+            best_score = score
+            best_rank = rank
+            best_meta = meta
+            best_reason = reason
+            best_home = is_home_listing
 
-            if score >= 0.75:
-                break
+        if best_home and score >= 0.75:
+            break
+        # US and other unmapped domiciles retain the existing early-exit
+        # behavior after a strong provider-name validation.
+        if home_suffix is None and score >= 0.75:
+            break
 
     debug = {
         "resolved": best,
@@ -490,6 +508,13 @@ def resolve_ticker_strict(
         "best_reason": best_reason,
         "best_meta_quoteType": None if best_meta is None else best_meta.get("quoteType"),
         "best_meta_exchange": None if best_meta is None else best_meta.get("exchange"),
+        "best_meta_full_exchange": None if best_meta is None else best_meta.get("fullExchangeName"),
         "best_meta_country": None if best_meta is None else best_meta.get("country"),
+        "best_meta_currency": None if best_meta is None else best_meta.get("currency"),
+        "home_market_suffix_hint": HOME_MARKET_SUFFIX.get(
+            declared_country or str((best_meta or {}).get("country") or "").strip().upper()
+        ),
+        "candidate_matches_home_market_hint": best_home,
+        "country_hint_source": "curated" if preferred_suffix else "provider_headquarters",
     }
     return best, debug

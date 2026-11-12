@@ -81,6 +81,7 @@ def identify_collisions(
     exclusions: pd.DataFrame | None = None,
     provider_resolver=None,
     provider_metadata_fetcher=None,
+    symbols: set[str] | None = None,
 ) -> pd.DataFrame:
     """One decision record per shared active Yahoo symbol.
 
@@ -99,7 +100,10 @@ def identify_collisions(
     u["_symbol"] = u["yahoo_ticker"].map(lambda x: _txt(x).upper())
     u = u.loc[u["_active"] & u["_symbol"].ne("")].copy()
     proposals = []
+    selected_symbols = {value.upper().strip() for value in symbols} if symbols is not None else None
     for symbol, group in u.groupby("_symbol", sort=True):
+        if selected_symbols is not None and symbol not in selected_symbols:
+            continue
         if len(group) < 2:
             continue
         # Handle non-pair collisions conservatively; never assume a single
@@ -216,6 +220,7 @@ def identify_collisions(
 def report_collisions(
     universe: pd.DataFrame, *, exclusions: pd.DataFrame | None = None,
     output_csv: Path | None = None, resolve_online: bool = False,
+    symbols: set[str] | None = None,
 ) -> dict:
     resolver = resolve_ticker_strict if resolve_online else None
     fetcher = fetch_yahoo_meta if resolve_online else None
@@ -223,6 +228,7 @@ def report_collisions(
         universe, exclusions=exclusions,
         provider_resolver=resolver,
         provider_metadata_fetcher=fetcher,
+        symbols=symbols,
     )
     if output_csv is not None:
         output_csv.parent.mkdir(parents=True, exist_ok=True)
@@ -248,12 +254,17 @@ def main() -> None:
         "--resolve-online", action="store_true",
         help="Use existing strict Yahoo resolver for different-company pairs",
     )
+    p.add_argument(
+        "--symbol", action="append", default=None,
+        help="Limit the report and optional Yahoo lookups to selected conflicting Yahoo symbols",
+    )
     args = p.parse_args()
     u = pd.read_csv(args.universe)
     e = pd.read_csv(args.exclusions) if args.exclusions.exists() else None
     print(json.dumps(report_collisions(
         u, exclusions=e, output_csv=args.output,
         resolve_online=args.resolve_online,
+        symbols=set(args.symbol) if args.symbol else None,
     ), indent=2))
 
 

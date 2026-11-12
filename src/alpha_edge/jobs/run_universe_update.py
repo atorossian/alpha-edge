@@ -17,6 +17,7 @@ from bs4 import BeautifulSoup
 from alpha_edge import paths
 from alpha_edge.core.runtime import RuntimeConfig, load_runtime_config, require_prod_confirmation
 from alpha_edge.universe.universe import enrich_universe_csv, resolve_ticker_strict
+from alpha_edge.jobs.universe_identity_decisions import report_collisions
 
 
 DEFAULT_BUCKET = "alpha-edge-algo"
@@ -751,6 +752,7 @@ def parse_args() -> argparse.Namespace:
     ap.add_argument("--assert-paths", "--assert_paths", dest="assert_paths", action="store_true")
     ap.add_argument("--debug-row-id", "--debug_row_id", dest="debug_row_id", type=str, default="")
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--identity-resolve-online", action="store_true", help="Use existing strict Yahoo resolver when proposing identity-collision mappings (report only)")
 
     ap.add_argument("--bucket", default=None)
     ap.add_argument("--region", default=None)
@@ -797,6 +799,23 @@ def _main_impl() -> None:
     debug_row_id = (args.debug_row_id or "").strip().upper()
 
     existing = load_existing_universe(UNIVERSE_CSV)
+
+    # Identity decisions are advisory. Never change eligibility or mappings
+    # without a separately reviewed row-scoped ledger update.
+    def _identity_report(source: pd.DataFrame, suffix: str) -> None:
+        if source.empty:
+            return
+        location = paths.local_outputs_dir() / "universe_audit" / f"identity_decisions_{suffix}.csv"
+        summary = report_collisions(
+            source,
+            exclusions=load_exclusions(ASSET_EXCLUDED_CSV),
+            output_csv=location,
+            resolve_online=bool(args.identity_resolve_online),
+        )
+        print(f"[identity] {suffix}: {json.dumps(summary, sort_keys=True)}")
+
+    _identity_report(existing, "before")
+
 
     existing_asset_id_map: dict[str, str] = {}
     if not existing.empty and "asset_id" in existing.columns:
@@ -1080,6 +1099,10 @@ def _main_impl() -> None:
             print("[patch][ok] universe patched + enriched by row_id + asset_id preserved.")
 
     if not args.dry_run:
+        # Analyze the fully written universe after scraper/enrichment and
+        # overrides. This check has no authority to mutate its inputs.
+        _identity_report(load_existing_universe(UNIVERSE_CSV), "after")
+
         try:
             if OVERRIDES_CSV.exists():
                 pd.read_csv(OVERRIDES_CSV).to_csv(_snapshot_path("universe_overrides.prev.csv"), index=False)

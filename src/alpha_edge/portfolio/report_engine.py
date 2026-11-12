@@ -1,7 +1,7 @@
 # report_engine.py
 from __future__ import annotations
 
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Mapping
 
 import numpy as np
 import pandas as pd
@@ -106,12 +106,16 @@ def build_portfolio_report(
     pca_k: int | None = 5,
     prices_usd: pd.Series | None = None,  # valuation prices at report time
     asset_returns: pd.DataFrame | None = None,  # canonical returns_wide subset, optionally live-augmented
+    asset_id_by_ticker: Mapping[str, str] | None = None,
 ) -> PortfolioReport:
     """
     Long/short aware report:
 
     - Historical risk/returns are estimated from `asset_returns` when provided,
       otherwise from `closes` (legacy fallback).
+    - Daily-report canonical mode is asset_id-first: pass `asset_id_by_ticker`
+      and asset_id-keyed `asset_returns` so evaluate_portfolio receives weights
+      keyed by asset_id instead of display/broker tickers.
     - Valuation uses `prices_usd` if provided (spot at report time), else last close.
     - Notional is GROSS: sum(abs(exposure)).
     - Weights passed to evaluator are SIGNED weights scaled by gross notional:
@@ -120,6 +124,12 @@ def build_portfolio_report(
     """
     if closes is None or closes.empty:
         raise ValueError("closes is empty")
+
+    asset_id_by_ticker_norm = {
+        str(k).upper().strip(): str(v).strip()
+        for k, v in dict(asset_id_by_ticker or {}).items()
+        if str(k).strip() and str(v).strip()
+    }
 
     # --- last close for fallback valuation ---
     last_close = closes.iloc[-1].copy()
@@ -168,9 +178,15 @@ def build_portfolio_report(
         w_signed = exp / gross_notional
         w_abs = abs(exp) / gross_notional
 
+        asset_id = asset_id_by_ticker_norm.get(str(ticker).upper().strip())
+        eval_key = asset_id or ticker
+
         pos_rows.append(
             dict(
+                asset_id=asset_id,
                 ticker=ticker,
+                display_ticker=ticker,
+                evaluation_key=eval_key,
                 quantity=float(pos.quantity),
                 price=float(px),
                 value=float(exp),          # signed
@@ -179,7 +195,7 @@ def build_portfolio_report(
                 currency=pos.currency,
             )
         )
-        weights[ticker] = float(w_signed)
+        weights[eval_key] = float(w_signed)
 
     report_as_of = pd.Timestamp(asset_returns.index[-1]) if asset_returns is not None and not asset_returns.empty else pd.Timestamp(closes.index[-1])
 
@@ -191,24 +207,33 @@ def build_portfolio_report(
         positions_table=pos_rows,
     )
 
-    # --- build returns matrix for held tickers (history-based) ---
-    tickers = [t for t in weights.keys() if t in closes.columns]
-    if not tickers:
+    # --- build returns matrix for held assets (history-based) ---
+    display_tickers = [t for t in positions.keys() if t in closes.columns]
+    if not display_tickers:
         raise ValueError("No tickers overlap between positions and closes")
 
     if asset_returns is None:
-        closes_sub = closes[tickers].dropna(how="any")
+        closes_sub = closes[display_tickers].dropna(how="any")
         asset_returns_eval = compute_daily_returns(closes_sub)
+        weights_eval = {t: weights[t] for t in display_tickers if t in weights}
     else:
-        cols = [t for t in tickers if t in asset_returns.columns]
+        eval_keys = list(weights.keys())
+        cols = [k for k in eval_keys if k in asset_returns.columns]
         if not cols:
-            raise ValueError("No tickers overlap between positions and asset_returns")
+            raise ValueError("No evaluation keys overlap between positions and asset_returns")
+        missing_cols = [k for k in eval_keys if k not in asset_returns.columns]
+        if missing_cols:
+            raise ValueError(
+                "Missing asset_returns columns for evaluation key(s): "
+                + ", ".join([str(x) for x in missing_cols[:20]])
+            )
         asset_returns_eval = asset_returns[cols].dropna(how="any")
+        weights_eval = {k: weights[k] for k in cols}
 
     # --- canonical evaluation ---
     eval_metrics = evaluate_portfolio(
         returns=asset_returns_eval,
-        weights=weights,                    # SIGNED weights (gross-scaled)
+        weights=weights_eval,               # SIGNED weights keyed by asset_id when available
         equity0=float(equity),
         notional=float(gross_notional),     # GROSS notional
         goals=goals,
@@ -406,6 +431,7 @@ def print_decision_addendum(
     top_n: int = 8,
     show_full_alpha_blob: bool = False,
     take_profit: dict | None = None,
+    execution_signals: dict | None = None,
 ) -> None:
     # decision: RebalanceDecision
     # health: PortfolioHealth
@@ -430,13 +456,20 @@ def print_decision_addendum(
         return f"{float(x):,.2f} USD"
 
     print("\n" + "─" * 44)
-    print("Decision Addendum")
+    print("Daily Report Execution Diagnostics")
     print("─" * 44)
+    print("Authority: diagnostic signals only; transition assessment owns final execution decisions when available.")
+    if execution_signals:
+        print(f"decision_authority: {execution_signals.get('decision_authority')}")
+        _final = execution_signals.get('final_execution_decision') or {}
+        if _final.get('recommendation'):
+            print(f"transition_decision: {_final.get('recommendation')}")
 
-    # --- REBALANCE ---
+
+    # --- RESCALE SIGNAL ---
     should_rb = bool(getattr(decision, "should_rebalance", False))
-    print("\nRebalance")
-    print(f"▶ should_rebalance: {should_rb}")
+    print("\nRescale signal")
+    print(f"▶ rescale_triggered: {should_rb}")
 
     drift_ratio = getattr(decision, "drift_ratio", None)
     drift = None
@@ -479,8 +512,8 @@ def print_decision_addendum(
             print(f"  reasons: {', '.join(tp_reasons)}")
 
     # --- HEALTH ---
-    print("\nHealth")
-    print(f"▶ should_reoptimize: {bool(reopt)}")
+    print("\nReoptimization pressure")
+    print(f"▶ pressure_triggered: {bool(reopt)}")
     print(
         f"  score={num(getattr(health, 'score', None), 4)}  "
         f"sharpe={num(getattr(health, 'sharpe', None), 2)}"

@@ -54,6 +54,13 @@ from alpha_edge.portfolio.portfolio_health import (
     build_portfolio_health,
     should_reoptimize,
 )
+from alpha_edge.portfolio.evaluation_service import (
+    build_evaluation_metadata,
+    build_plausibility_guards,
+    build_portfolio_behavior_regime,
+    build_daily_report_execution_signals,
+    compute_portfolio_health_score as canonical_compute_portfolio_health_score,
+)
 from alpha_edge.portfolio.alpha_report import format_alpha_report
 from alpha_edge.core.market_store import MarketStore
 from alpha_edge.core.data_loader import (
@@ -68,6 +75,7 @@ from alpha_edge.core.data_loader import (
     s3_get_json,
     s3_load_latest_json_asof,
 )
+from alpha_edge.portfolio.equity_valuation import compute_live_equity_from_ledger_and_prices as _canonical_compute_live_equity_from_ledger_and_prices
 from alpha_edge.portfolio.rebalance_engine import (
     RebalanceState,
     should_rebalance,
@@ -89,6 +97,7 @@ TAKE_PROFIT_ASSETS_STATE_TABLE = "take_profit/assets_state"
 TAKE_PROFIT_ASSETS_PLAN_TABLE = "take_profit/assets_plan"
 
 MARKET_RESCALE_STATE_TABLE = "regimes/market_rescale_state"
+TRANSITION_ASSESSMENT_TABLE = "portfolio_transition/assessment"
 
 
 def _resolve_root_prefix(*, engine_root: str, backtest_run_id: str | None) -> str:
@@ -117,32 +126,21 @@ def _load_returns_wide_cache(
 
 
 def _compute_live_equity_from_ledger_and_prices(*, pnl_summary: dict, spot_rows: list[dict], prices_for_valuation: pd.Series) -> float:
+    # Backward-compatible wrapper. Canonical implementation lives in
+    # alpha_edge.portfolio.equity_valuation so all jobs can resolve equity
+    # consistently instead of duplicating daily-report-specific logic.
+    equity = _canonical_compute_live_equity_from_ledger_and_prices(
+        pnl_summary=pnl_summary,
+        spot_rows=spot_rows,
+        prices_for_valuation=prices_for_valuation,
+    )
     net_cashflow = float(pnl_summary.get("net_cashflow_usd", 0.0) or 0.0)
-    realized = float(pnl_summary.get("realized_pnl", 0.0) or 0.0)
+    realized = float(pnl_summary.get("realized_pnl", pnl_summary.get("realized_pnl_usd", 0.0)) or 0.0)
     dividends = float(pnl_summary.get("dividends_pnl_usd", 0.0) or 0.0)
-    unrealized = 0.0
-    missing = []
-    for r in spot_rows:
-        t = str(r.get("ticker") or "").upper().strip()
-        if not t:
-            continue
-        qty = float(r.get("quantity") or 0.0)
-        if abs(qty) <= 0.0:
-            continue
-        avg_cost = r.get("avg_cost")
-        if avg_cost is None:
-            raise RuntimeError(f"Cannot compute live equity: missing avg_cost for {t}")
-        px = prices_for_valuation.get(t, np.nan)
-        if not np.isfinite(float(px)):
-            missing.append(t)
-            continue
-        unrealized += (float(px) - float(avg_cost)) * qty if qty > 0 else (float(avg_cost) - float(px)) * abs(qty)
-    if missing:
-        raise RuntimeError("Cannot compute live equity: missing valuation prices for " + ", ".join(sorted(set(missing))))
-    equity = net_cashflow + realized + dividends + unrealized
-    print("[equity] source=ledger_cashflows_realized_dividends_plus_live_marks "
+    live_unrealized = float(equity) - net_cashflow - realized - dividends
+    print("[equity] source=canonical_equity_valuation "
           f"net_cashflow={net_cashflow:.2f} realized={realized:.2f} dividends={dividends:.2f} "
-          f"live_unrealized={unrealized:.2f} equity={equity:.2f}")
+          f"live_unrealized={live_unrealized:.2f} equity={equity:.2f}")
     return float(equity)
 
 
@@ -164,26 +162,39 @@ def _build_live_augmented_returns_for_portfolio(
     *, returns_wide: pd.DataFrame, spot_rows: list[dict], deriv_rows: list[dict],
     latest_close_prices: pd.Series, prices_for_valuation: pd.Series, as_of_run_date: str,
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
+    """Build the canonical daily-report return matrix.
+
+    The returned DataFrame is asset_id-keyed. Tickers are retained only as
+    display/provider aliases in metadata and for live price lookup. This keeps
+    daily-report evaluation aligned with portfolio search, where asset_id is the
+    canonical identity and ticker/yahoo_ticker are not trusted as unique keys.
+    """
     asset_to_ticker, ticker_to_asset = _asset_id_ticker_maps_from_ledger_rows(spot_rows=spot_rows, deriv_rows=deriv_rows)
     if not asset_to_ticker:
         raise RuntimeError("No asset_id/ticker pairs in ledger positions for returns_wide evaluation.")
-    missing = [aid for aid in asset_to_ticker if aid not in returns_wide.columns]
+
+    requested_asset_ids = list(asset_to_ticker.keys())
+    missing = [aid for aid in requested_asset_ids if aid not in returns_wide.columns]
     if missing:
         raise RuntimeError("Portfolio asset_ids missing from returns_wide: " + ", ".join(missing[:20]))
-    df = returns_wide[list(asset_to_ticker.keys())].copy().rename(columns=asset_to_ticker)
-    df.columns = [str(c).upper().strip() for c in df.columns]
+
+    df = returns_wide[requested_asset_ids].copy()
+    df.columns = [str(c).strip() for c in df.columns]
     df = df.dropna(how="any")
-    live = {}
-    missing_live = []
-    for t in df.columns:
+
+    live: dict[str, float] = {}
+    missing_live: list[str] = []
+    for aid in df.columns:
+        t = asset_to_ticker.get(str(aid), str(aid))
         last_close = latest_close_prices.get(t, np.nan)
         live_px = prices_for_valuation.get(t, np.nan)
         if not np.isfinite(float(last_close)) or float(last_close) <= 0 or not np.isfinite(float(live_px)):
-            missing_live.append(t)
+            missing_live.append(f"{aid} ({t})")
             continue
-        live[t] = float(live_px) / float(last_close) - 1.0
+        live[str(aid)] = float(live_px) / float(last_close) - 1.0
     if missing_live:
         raise RuntimeError("Cannot append live returns row; missing prices for " + ", ".join(sorted(set(missing_live))))
+
     live_idx = pd.Timestamp(as_of_run_date).tz_localize(None).normalize()
     if not df.empty:
         last_idx = pd.Timestamp(df.index.max()).tz_localize(None).normalize()
@@ -191,17 +202,22 @@ def _build_live_augmented_returns_for_portfolio(
             live_idx = last_idx + pd.Timedelta(days=1)
     df = pd.concat([df, pd.DataFrame([live], index=[live_idx])], axis=0).sort_index()
     df = df[~df.index.duplicated(keep="last")].dropna(how="any")
+
     meta = {
         "source": "returns_wide_plus_live_mark_row",
         "key_type_internal": "asset_id",
-        "display_columns": list(df.columns),
+        "display_key_type": "ticker",
+        "columns": list(df.columns),
+        "asset_id_columns": list(df.columns),
+        "asset_id_to_ticker": asset_to_ticker,
         "asset_id_by_ticker": ticker_to_asset,
         "last_historical_return_date": None if len(df.index) <= 1 else str(pd.Timestamp(df.index[-2]).date()),
         "live_return_date": str(pd.Timestamp(live_idx).date()),
-        "live_returns": {k: float(v) for k, v in live.items()},
+        "live_returns_by_asset_id": {k: float(v) for k, v in live.items()},
+        "live_returns_by_ticker": {asset_to_ticker.get(k, k): float(v) for k, v in live.items()},
         "rows": int(len(df)),
     }
-    print(f"[returns_eval] source=returns_wide_plus_live_row assets={len(df.columns)} rows={len(df)} live_date={meta['live_return_date']}")
+    print(f"[returns_eval] source=returns_wide_plus_live_row key_type=asset_id assets={len(df.columns)} rows={len(df)} live_date={meta['live_return_date']}")
     return df, meta
 
 
@@ -231,6 +247,8 @@ _HEALTH_LATEST_EXTRA_KEYS = {
     "health_score_payload",
     "legacy_portfolio_health",
     "meta",
+    "evaluation_metadata",
+    "plausibility",
 }
 
 
@@ -277,6 +295,8 @@ def _build_health_latest_payload(
     as_of_run_date: str,
     pricing_as_of_utc: str,
     returns_eval_meta: dict[str, Any],
+    evaluation_metadata: dict[str, Any] | None = None,
+    plausibility: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """
     Build the canonical health/latest.json payload.
@@ -316,12 +336,15 @@ def _build_health_latest_payload(
 
         # Full explainability payload.
         "health_score_payload": dict(health_score_payload),
+        "evaluation_metadata": dict(evaluation_metadata or {}),
+        "plausibility": dict(plausibility or {}),
         "legacy_portfolio_health": legacy,
         "meta": {
             "as_of_market_date": as_of_market_date,
             "as_of_run_date": as_of_run_date,
             "pricing_as_of_utc": pricing_as_of_utc,
             "returns_eval": dict(returns_eval_meta or {}),
+            "evaluation_metadata": dict(evaluation_metadata or {}),
             "producer": "run_daily_report.py",
         },
     }
@@ -330,27 +353,38 @@ def _build_health_latest_payload(
 
 
 def _compute_daily_health_score(*, metrics, score_cfg: ScoreConfig, goals: list[float], main_goal: float) -> dict[str, Any]:
-    p_map = {float(goals[0]): float(getattr(metrics, "p_hit_goal_1_1y", 0.0)), float(goals[1]): float(getattr(metrics, "p_hit_goal_2_1y", 0.0)), float(goals[2]): float(getattr(metrics, "p_hit_goal_3_1y", 0.0))}
-    p_main = float(p_map.get(float(main_goal), 0.0))
-    comp = {
-        "goal_probability": _clamp01(p_main),
-        "ruin": _safe_ratio_good(getattr(metrics, "ruin_prob_1y", np.nan), getattr(score_cfg, "ruin_cap", 0.10)),
-        "max_drawdown": _safe_ratio_good(abs(float(getattr(metrics, "max_drawdown", np.nan))), 0.40),
-        "cvar_95": _safe_ratio_good(abs(float(getattr(metrics, "cvar_95", np.nan))), getattr(score_cfg, "cvar_cap", 0.03)),
-        "stability_energy": _safe_ratio_good(getattr(metrics, "stability_energy", np.nan), 2.00),
-        "path_mdd_mean": _safe_ratio_good(getattr(metrics, "path_mdd_mean", np.nan), getattr(score_cfg, "path_mdd_mean_cap", 0.30)),
-        "cdar_95": _safe_ratio_good(getattr(metrics, "cdar_95", np.nan), 0.60),
-        "p_dd_breach": _safe_ratio_good(getattr(metrics, "p_dd_breach", np.nan), getattr(score_cfg, "p_dd_breach_cap", 0.25)),
-        "underwater_mean": _safe_ratio_good(getattr(metrics, "underwater_mean", np.nan), getattr(score_cfg, "underwater_mean_cap", 1.0)),
-        "ttr_mean_days": _safe_ratio_good(getattr(metrics, "ttr_mean_days", np.nan), getattr(score_cfg, "ttr_cap_days", 252.0)),
-        "deployment": 1.0, "cash": 1.0, "weight_drift": 1.0, "dropped_weight": 1.0,
-    }
-    risk = float(np.mean([comp["ruin"], comp["max_drawdown"], comp["cvar_95"]]))
-    stability = float(np.mean([comp["stability_energy"], comp["path_mdd_mean"], comp["cdar_95"], comp["p_dd_breach"], comp["underwater_mean"], comp["ttr_mean_days"]]))
-    execution = float(np.mean([comp["deployment"], comp["cash"], comp["weight_drift"], comp["dropped_weight"]]))
-    health_score = 100.0 * (0.30 * comp["goal_probability"] + 0.30 * risk + 0.30 * stability + 0.10 * execution)
-    grade = "A" if health_score >= 80 else "B" if health_score >= 70 else "C" if health_score >= 60 else "D" if health_score >= 50 else "F"
-    return {"schema_version": "portfolio_health_score_v1_daily_report", "health_score": float(health_score), "health_grade": grade, "raw_optimizer_score": float(getattr(metrics, "score", np.nan)), "components": {"goal_probability": float(comp["goal_probability"]), "risk": risk, "stability": stability, "execution": execution}, "component_details": {k: float(v) for k, v in comp.items()}, "note": "health_score is normalized 0-100; raw_optimizer_score may be negative."}
+    """Daily-report compatibility wrapper around the canonical health scorer.
+
+    Daily report does not have executable-allocation drift diagnostics at this
+    stage, so execution-quality components are set to neutral/pass values.
+    Portfolio-search executable validation still passes the actual execution
+    quality values into the same canonical scorer.
+    """
+    return canonical_compute_portfolio_health_score(
+        final_metrics=metrics,
+        execution_quality={
+            "deployment_ratio": 1.0,
+            "cash_weight": 0.0,
+            "weight_drift_l1": 0.0,
+            "dropped_theoretical_weight": 0.0,
+        },
+        score_cfg=score_cfg,
+        goals=tuple(float(g) for g in goals),
+        main_goal=float(main_goal),
+        max_cash_weight=0.20,
+        min_deployment_ratio=1.0,
+        max_executable_mdd=float(getattr(score_cfg, "mdd_cap", 0.40) or 0.40),
+        max_executable_cdar_95=float(getattr(score_cfg, "cdar_95_cap", 0.60) or 0.60),
+        max_stability_energy=float(getattr(score_cfg, "stability_energy_cap", 2.00) or 2.00),
+        max_dropped_weight=0.0 + 1e-12,
+        max_weight_drift_l1=0.0 + 1e-12,
+        metadata={
+            "producer": "run_daily_report.py",
+            "consumer": "daily_report",
+            "execution_quality_mode": "neutral_current_holdings_report",
+        },
+    )
+
 
 def s3_load_ledger_positions_dt(s3, *, bucket: str, root_prefix: str, as_of: str) -> dict | None:
     key = f"{str(root_prefix).strip('/')}/ledger/dt={as_of}/positions.json"
@@ -1064,8 +1098,13 @@ def run_daily_cycle_asof(
     as_of_ts = pd.Timestamp(as_of).tz_localize(None).normalize()
     as_of_date = as_of_ts.strftime("%Y-%m-%d")
 
-    run_dt = pd.Timestamp(dt.date.today()).normalize() if mode == "live" else as_of_ts
+    # The report's logical run/as-of date must follow the explicit --as-of input.
+    # Current wall-clock time is still stored separately in run_id/pricing metadata.
+    # This prevents a no-write historical validation such as --as-of 2026-08-10
+    # from silently appending a 2026-08-11 live-return row.
+    run_dt = as_of_ts
     as_of_run_date = run_dt.strftime("%Y-%m-%d")
+    requested_as_of_date = as_of_date
 
     # --- RETURNS_WIDE (asset_id-keyed canonical return source) ---
     returns_wide = _load_returns_wide_cache(
@@ -1207,6 +1246,13 @@ def run_daily_cycle_asof(
         prices_for_valuation=prices_for_valuation,
         as_of_run_date=as_of_run_date,
     )
+    returns_eval_meta = {
+        **dict(returns_eval_meta or {}),
+        "requested_as_of_date": requested_as_of_date,
+        "logical_run_date": as_of_run_date,
+        "latest_close_date": str(pd.Timestamp(closes_all.index[-1]).date()),
+        "pricing_as_of_utc": pricing_as_of_utc,
+    }
 
     # ---------- Build Position objects ----------
     positions: dict[str, Position] = {}
@@ -1245,7 +1291,27 @@ def run_daily_cycle_asof(
         raise RuntimeError("No usable tickers after building positions.")
 
     closes = closes_all[tickers].copy()
-    returns_for_eval = returns_for_eval[[t for t in tickers if t in returns_for_eval.columns]].dropna(how="any")
+
+    asset_to_ticker, ticker_to_asset = _asset_id_ticker_maps_from_ledger_rows(
+        spot_rows=spot_rows,
+        deriv_rows=deriv_rows,
+    )
+    missing_asset_ids = [t for t in tickers if t not in ticker_to_asset]
+    if missing_asset_ids:
+        raise RuntimeError(
+            "Daily report is asset_id-first, but these live tickers have no asset_id in ledger positions: "
+            + ", ".join(missing_asset_ids[:20])
+        )
+
+    asset_ids = [ticker_to_asset[t] for t in tickers]
+    missing_return_assets = [aid for aid in asset_ids if aid not in returns_for_eval.columns]
+    if missing_return_assets:
+        raise RuntimeError(
+            "Daily report asset_id-first evaluation missing return columns for asset_id(s): "
+            + ", ".join(missing_return_assets[:20])
+        )
+
+    returns_for_eval = returns_for_eval[asset_ids].dropna(how="any")
     rets_assets = returns_for_eval.copy()
 
     _diagnose_hmm_history(closes=closes, tickers=tickers, as_of_date=as_of_date)
@@ -1256,10 +1322,18 @@ def run_daily_cycle_asof(
         raise ValueError("Gross exposure == 0 (or non-finite) from positions/prices")
     w_vec = values / gross
 
-    port_rets = (rets_assets[tickers] * w_vec).sum(axis=1).dropna()
+    port_rets = (rets_assets[asset_ids] * w_vec).sum(axis=1).dropna()
     as_of_market_dt = pd.Timestamp(port_rets.index[-1]).normalize()
     as_of_market_date = as_of_market_dt.strftime("%Y-%m-%d")
-    print(f"[dates] as_of_market_date={as_of_market_date} | as_of_run_date={as_of_run_date}")
+    returns_eval_meta = {
+        **dict(returns_eval_meta or {}),
+        "returns_eval_end_date": as_of_market_date,
+        "valuation_market_date": as_of_market_date,
+    }
+    print(
+        f"[dates] requested_as_of_date={requested_as_of_date} | "
+        f"as_of_market_date={as_of_market_date} | as_of_run_date={as_of_run_date}"
+    )
 
     # ---------- Market regime ----------
     # Single source of truth: morning routine payload under regimes/market_hmm.
@@ -1316,6 +1390,22 @@ def run_daily_cycle_asof(
         f"prev_label={prev_label} cur_label={cur_label} prev_lev={prev_lev} cur_lev={cur_lev:.2f}"
     )
 
+    # ---------- Portfolio behavior regime ----------
+    # This is intentionally separate from the canonical market regime.
+    # It is a local diagnostic of how the current portfolio return path is behaving.
+    portfolio_behavior_regime = build_portfolio_behavior_regime(
+        portfolio_returns=port_rets,
+        market_regime_payload=market_hmm_payload if isinstance(market_hmm_payload, dict) else {},
+        min_observations=252,
+        commit_threshold=0.65,
+    )
+    print(
+        "[portfolio behavior regime] "
+        f"label={portfolio_behavior_regime.get('label')} "
+        f"confidence={portfolio_behavior_regime.get('confidence')} "
+        f"alignment={(portfolio_behavior_regime.get('regime_alignment') or {}).get('status')}"
+    )
+
     # ---------- Report ----------
     report = build_portfolio_report(
         closes=closes,
@@ -1326,6 +1416,7 @@ def run_daily_cycle_asof(
         score_config=score_cfg,
         prices_usd=prices_for_valuation,
         asset_returns=returns_for_eval,
+        asset_id_by_ticker=ticker_to_asset,
     )
     health_score_payload = _compute_daily_health_score(
         metrics=report.eval,
@@ -1333,6 +1424,37 @@ def run_daily_cycle_asof(
         goals=list(GOALS),
         main_goal=float(MAIN_GOAL),
     )
+    evaluation_metadata = build_evaluation_metadata(
+        returns_eval_meta=returns_eval_meta,
+        price_source="spot_prices_usd_with_latest_close_fallback" if mode == "live" else "latest_close_prices",
+        market_regime_source=f"{engine_root.strip('/')}/regimes/market_hmm/latest.json",
+        score_config_version="score_config_latest",
+        run_id=f"daily_report_{as_of_run_date}_{as_of_market_date}",
+        as_of=as_of_market_date,
+    )
+    evaluation_metadata = {
+        **dict(evaluation_metadata or {}),
+        "requested_as_of_date": requested_as_of_date,
+        "as_of_run_date": as_of_run_date,
+        "as_of_market_date": as_of_market_date,
+        "valuation_market_date": as_of_market_date,
+        "latest_close_date": returns_eval_meta.get("latest_close_date"),
+        "returns_eval_end_date": returns_eval_meta.get("returns_eval_end_date"),
+        "live_return_date": returns_eval_meta.get("live_return_date"),
+        "pricing_as_of_utc": pricing_as_of_utc,
+    }
+    health_score_payload["metadata"] = {**dict(health_score_payload.get("metadata") or {}), **evaluation_metadata}
+    metric_plausibility = build_plausibility_guards(
+        metrics=report.eval,
+        returns_rows=int(len(returns_for_eval)),
+        returns_assets=int(len(returns_for_eval.columns)),
+        health_score_payload=health_score_payload,
+        evaluation_metadata=evaluation_metadata,
+        asset_ids=asset_ids,
+    )
+    health_score_payload["plausibility"] = metric_plausibility
+    if not metric_plausibility.get("ok", False):
+        print(f"[metrics][warn] plausibility flags: {metric_plausibility.get('flags')}")
     print(summarize_report(report))
     print(f"Health Score: {health_score_payload['health_score']:.1f} / 100 ({health_score_payload['health_grade']})")
     print(f"Raw optimizer score: {health_score_payload['raw_optimizer_score']:.4f}")
@@ -1361,11 +1483,16 @@ def run_daily_cycle_asof(
                 path_source="bootstrap",
                 pca_k=5,
                 block_size=(8, 12),
+                asset_returns=returns_for_eval,
                 metadata={
                     "mode": mode,
+                    "requested_as_of_date": requested_as_of_date,
                     "as_of_market_date": as_of_market_date,
                     "as_of_run_date": as_of_run_date,
+                    "returns_eval_end_date": returns_eval_meta.get("returns_eval_end_date"),
+                    "asset_identity_mode": "asset_id_first",
                     "root_prefix": root_prefix,
+                    "tolerance_policy": evaluation_metadata.get("tolerance_policy"),
                 },
             )
         )
@@ -1436,6 +1563,8 @@ def run_daily_cycle_asof(
         as_of_run_date=as_of_run_date,
         pricing_as_of_utc=pricing_as_of_utc,
         returns_eval_meta=returns_eval_meta,
+        evaluation_metadata=evaluation_metadata,
+        plausibility=metric_plausibility,
     )
 
     if getattr(current_health, "alpha_report_json", None):
@@ -1809,6 +1938,7 @@ def run_daily_cycle_asof(
                 "reasons": tp_res.reasons,
                 "cooldown_days": int(tp_cfg.cooldown_days),
             },
+            execution_signals=None,
         )
 
         plan_df = plan.targets.copy()
@@ -1888,7 +2018,33 @@ def run_daily_cycle_asof(
                 "reasons": tp_res.reasons,
                 "cooldown_days": int(tp_cfg.cooldown_days),
             },
+            execution_signals=None,
         )
+
+    transition_assessment_payload = s3_load_latest_json(
+        s3, bucket=bucket, root_prefix=root_prefix, table=TRANSITION_ASSESSMENT_TABLE
+    ) or {}
+
+    execution_signals = build_daily_report_execution_signals(
+        rescale_decision=decision,
+        reoptimization_pressure=bool(reopt),
+        take_profit={
+            "do_harvest": bool(tp_res.do_harvest),
+            "m_star": float(tp_res.m_star),
+            "r_anchor": tp_res.r_anchor,
+            "dd": tp_res.dd,
+            "sharpe": tp_res.sharpe,
+            "reasons": tp_res.reasons,
+        },
+        transition_assessment=transition_assessment_payload,
+        current_health=current_health,
+    )
+
+    print("\n[execution_signals]")
+    print(f"  decision_authority: {execution_signals.get('decision_authority')}")
+    print(f"  final_decision:     {(execution_signals.get('final_execution_decision') or {}).get('recommendation')}")
+    for _name, _sig in (execution_signals.get("signals") or {}).items():
+        print(f"  {_name}: triggered={bool(_sig.get('triggered'))} severity={_sig.get('severity')} reason={_sig.get('reason')}")
 
     # ---------- Persist outputs ----------
     if write_outputs:
@@ -1896,18 +2052,20 @@ def run_daily_cycle_asof(
             s3,
             bucket=bucket,
             root_prefix=root_prefix,
-            table="regimes/hmm",
+            table="portfolio_behavior_regime",
             dt=run_dt,
-            filename="hmm.json",
+            filename="regime.json",
             payload={
                 "as_of": as_of_market_date,
                 "tickers": list(tickers),
-                "hmm": hmm_payload_for_output,
-                "leverage_recommendation": market_hmm_payload.get("leverage_recommendation") if isinstance(market_hmm_payload, dict) else None,
+                "asset_ids": list(asset_ids),
+                "portfolio_behavior_regime": portfolio_behavior_regime,
+                "market_regime_source": "regimes/market_hmm/latest.json",
                 "meta": {
                     "as_of_market_date": as_of_market_date,
                     "as_of_run_date": as_of_run_date,
                     "pricing_as_of_utc": pricing_as_of_utc,
+                    "note": "Portfolio behavior regime is a diagnostic; market regime remains the source of truth.",
                 },
             },
             update_latest=update_latest,
@@ -1931,6 +2089,8 @@ def run_daily_cycle_asof(
                 "actuarial_diagnostics": actuarial_diagnostics,
                 "inputs": {
                     "equity": equity,
+                    "evaluation_metadata": evaluation_metadata,
+                    "metric_plausibility": metric_plausibility,
                     "goals": GOALS,
                     "main_goal": MAIN_GOAL,
                     "returns_eval": returns_eval_meta,
@@ -1943,16 +2103,28 @@ def run_daily_cycle_asof(
                         "meta": bench_meta,
                     },
                     "tickers": tickers,
+                    "asset_ids": asset_ids,
+                    "asset_id_by_ticker": ticker_to_asset,
+                    "asset_id_to_ticker": asset_to_ticker,
+                    "asset_identity_mode": "asset_id_first",
                     "start_history": START_HISTORY,
                     "spot_prices_usd": {
                         k: (None if not np.isfinite(v) else float(v))
                         for k, v in prices_for_valuation.items()
                     },
-                    "market_regime": {"target_leverage": float(market_lev), "source_table": "regimes/market_hmm"},
+                    "market_regime": {
+                        "target_leverage": float(market_lev),
+                        "source_table": "regimes/market_hmm",
+                        "label": cur_label,
+                    },
+                    "portfolio_behavior_regime": portfolio_behavior_regime,
+                    "execution_signals": execution_signals,
+                    "transition_assessment_ref": execution_signals.get("transition_assessment_ref"),
                 },
                 "flags": {
                     "should_reoptimize": bool(reopt),
                     "baseline_exists": bool(baseline is not None),
+                    "daily_report_execution_authority": execution_signals.get("decision_authority"),
                 },
             },
             update_latest=update_latest,
@@ -2035,21 +2207,30 @@ def run_daily_cycle_asof(
             update_latest=update_latest,
         )
 
-        print("\n[S3] Saved daily report + holdings + health + score_config + positions + regimes + take_profit_state (+ asset_tp if triggered).")
+        print("\n[S3] Saved daily report + holdings + health + score_config + positions + portfolio_behavior_regime + take_profit_state (+ asset_tp if triggered).")
 
     return {
         "mode": mode,
         "root_prefix": root_prefix,
         "run_dt": run_dt.strftime("%Y-%m-%d"),
+        "requested_as_of_date": requested_as_of_date,
         "as_of_market_date": as_of_market_date,
         "as_of_run_date": as_of_run_date,
         "equity": float(equity),
         "market_target_leverage": float(market_lev),
-        "rebalance": asdict(decision),
+        "rebalance": asdict(decision),  # legacy field; use execution_signals.signals.rescale for new consumers
+        "execution_signals": execution_signals,
+        "transition_assessment_ref": execution_signals.get("transition_assessment_ref"),
         "should_reoptimize": bool(reopt),
         "health": asdict(current_health),
         "health_latest": health_latest_payload,
         "health_score": health_score_payload,
+        "evaluation_metadata": evaluation_metadata,
+        "metric_plausibility": metric_plausibility,
+        "portfolio_behavior_regime": portfolio_behavior_regime,
+        "asset_ids": asset_ids,
+        "asset_id_by_ticker": ticker_to_asset,
+        "asset_identity_mode": "asset_id_first",
         "actuarial_diagnostics": actuarial_diagnostics,
         "bench_ann_return": None if bench_ann_ret is None else float(bench_ann_ret),
         "take_profit": {

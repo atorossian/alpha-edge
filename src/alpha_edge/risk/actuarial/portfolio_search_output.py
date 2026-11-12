@@ -107,6 +107,7 @@ def build_actuarial_diagnostic_from_portfolio_report(
     path_source: str = "bootstrap",
     pca_k: int = 5,
     block_size: int | tuple[int, int] | None = (8, 12),
+    asset_returns: Optional[pd.DataFrame] = None,
     metadata: Optional[dict[str, Any]] = None,
 ) -> tuple[ActuarialDiagnosticReport, str, dict[str, Any]]:
     """
@@ -134,15 +135,39 @@ def build_actuarial_diagnostic_from_portfolio_report(
     if not isinstance(weights, dict) or not weights:
         raise ValueError("report.eval.weights must be a non-empty dict")
 
-    tickers = [str(t).upper().strip() for t in weights.keys() if str(t).upper().strip() in closes.columns]
-    if not tickers:
-        raise ValueError("No report tickers overlap with closes columns")
+    weight_keys = [str(k).strip() for k in weights.keys() if str(k).strip()]
 
-    closes_sub = closes[tickers].dropna(how="any")
-    if closes_sub.shape[0] < 50:
-        raise ValueError("Not enough close history to run actuarial diagnostic")
+    if asset_returns is not None:
+        if asset_returns.empty:
+            raise ValueError("asset_returns is empty")
+        asset_returns_norm = asset_returns.copy()
+        asset_returns_norm.columns = [str(c).strip() for c in asset_returns_norm.columns]
+        cols = [k for k in weight_keys if k in asset_returns_norm.columns]
+        if not cols:
+            raise ValueError("No report evaluation keys overlap with asset_returns columns")
+        missing = [k for k in weight_keys if k not in asset_returns_norm.columns]
+        if missing:
+            raise ValueError("Missing asset_returns columns for report evaluation key(s): " + ", ".join(missing[:20]))
+        returns = asset_returns_norm[cols].dropna(how="any")
+        weights_for_eval = {str(k).strip(): float(weights[k]) for k in cols}
+        return_key_mode = "asset_returns_columns"
+    else:
+        if closes is None or closes.empty:
+            raise ValueError("closes is empty")
+        closes_norm = closes.copy()
+        closes_norm.columns = [str(c).upper().strip() for c in closes_norm.columns]
+        tickers = [str(t).upper().strip() for t in weight_keys if str(t).upper().strip() in closes_norm.columns]
+        if not tickers:
+            raise ValueError("No report tickers overlap with closes columns")
+        closes_sub = closes_norm[tickers].dropna(how="any")
+        if closes_sub.shape[0] < 50:
+            raise ValueError("Not enough close history to run actuarial diagnostic")
+        returns = compute_daily_returns(closes_sub)
+        weights_for_eval = {str(k).upper().strip(): float(weights[k]) for k in tickers}
+        return_key_mode = "closes_ticker_columns"
 
-    returns = compute_daily_returns(closes_sub)
+    if returns.shape[0] < 50:
+        raise ValueError("Not enough return history to run actuarial diagnostic")
 
     equity0 = float(getattr(snapshot, "equity"))
     notional = float(getattr(snapshot, "total_notional"))
@@ -154,7 +179,7 @@ def build_actuarial_diagnostic_from_portfolio_report(
 
     eval_with_paths = evaluate_portfolio_candidate_with_paths(
         returns=returns,
-        weights={str(k).upper().strip(): float(v) for k, v in weights.items()},
+        weights=weights_for_eval,
         equity0=equity0,
         notional=notional,
         goals=[float(g) for g in goals],
@@ -188,6 +213,8 @@ def build_actuarial_diagnostic_from_portfolio_report(
             "Actuarial diagnostics are informational only and do not affect "
             "portfolio scoring, quarantine status, or daily-report decisions."
         ),
+        "return_key_mode": return_key_mode,
+        "return_columns": list(returns.columns),
     }
     if metadata:
         config_metadata.update(metadata)

@@ -9,6 +9,9 @@ import numpy as np
 from alpha_edge.core.schemas import SurvivalCurvePoint
 
 
+DEFAULT_INITIAL_VALUE_TOLERANCE_USD = 0.01
+
+
 @dataclass(frozen=True)
 class EventTimeSummary:
     """
@@ -77,7 +80,7 @@ def validate_equity_paths(
     *,
     horizon_days: Optional[int] = None,
     initial_value: Optional[float] = None,
-    initial_value_tolerance: float = 1e-6,
+    initial_value_tolerance: float = DEFAULT_INITIAL_VALUE_TOLERANCE_USD,
 ) -> np.ndarray:
     """
     Validate and normalize equity paths.
@@ -111,10 +114,16 @@ def validate_equity_paths(
             raise ValueError("initial_value must be > 0")
 
         starts = arr[:, 0]
-        if not np.allclose(starts, iv, atol=initial_value_tolerance, rtol=0.0):
+        tol = float(initial_value_tolerance)
+        if tol < 0.0:
+            raise ValueError("initial_value_tolerance must be >= 0")
+
+        if not np.allclose(starts, iv, atol=tol, rtol=0.0):
+            max_abs_diff = float(np.max(np.abs(starts - iv)))
             raise ValueError(
                 "equity_paths column 0 must match config.initial_value for all paths. "
-                f"Expected {iv}, got min={starts.min()}, max={starts.max()}"
+                f"Expected {iv}, got min={starts.min()}, max={starts.max()}, "
+                f"max_abs_diff={max_abs_diff}, tolerance={tol}"
             )
 
     return arr

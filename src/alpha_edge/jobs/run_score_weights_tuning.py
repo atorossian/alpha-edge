@@ -22,6 +22,7 @@ from alpha_edge.core.data_loader import (
     s3_write_json_event,
 )
 from alpha_edge.core.runtime import load_runtime_config, require_prod_confirmation
+from alpha_edge.portfolio.equity_valuation import resolve_current_equity, print_equity_valuation_result
 from alpha_edge.core.schemas import RuntimeConfig
 from alpha_edge.core.market_store import MarketStore
 from alpha_edge.market.regime_leverage import leverage_from_hmm
@@ -677,7 +678,7 @@ def parse_args() -> argparse.Namespace:
     ap.add_argument("--as-of", default=None, help="Run/as-of date YYYY-MM-DD. Default: today.")
     ap.add_argument("--universe-csv", default=None)
 
-    ap.add_argument("--equity0", type=float, default=934.13)
+    ap.add_argument("--equity0", "--equity-override", dest="equity0", type=float, default=None, help="Initial/current equity. If omitted, resolved from ledger + latest prices.")
     ap.add_argument(
         "--goals",
         default="800,1200,2000",
@@ -792,12 +793,14 @@ def _main_impl() -> None:
         require_prod_confirmation(cfg, bool(args.confirm_prod_write))
 
     override_target_leverage = None if bool(args.use_regime_leverage) else float(args.target_leverage)
+    equity_result = resolve_current_equity(cfg=cfg, as_of=args.as_of, equity_override=args.equity0)
+    print_equity_valuation_result(equity_result)
 
     run_score_weights_tuning(
         cfg=cfg,
         as_of=args.as_of,
         universe_csv=args.universe_csv,
-        equity0=float(args.equity0),
+        equity0=float(equity_result.equity),
         goals=_parse_goals(args.goals),
         main_goal=float(args.main_goal),
         override_target_leverage=override_target_leverage,

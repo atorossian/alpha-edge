@@ -26,6 +26,7 @@ from alpha_edge.core.runtime import (
     load_runtime_config,
     require_prod_confirmation,
 )
+from alpha_edge.portfolio.equity_valuation import resolve_current_equity, print_equity_valuation_result
 from alpha_edge.core.schemas import (
     ShadowPortfolioConfig,
     ShadowPortfolioState,
@@ -1282,7 +1283,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--confirm-prod-write", action="store_true")
 
-    p.add_argument("--equity0", type=float, required=True)
+    p.add_argument("--equity0", "--equity-override", dest="equity0", type=float, default=None, help="Equity used as MC initial equity. If omitted, resolved from ledger + latest prices.")
     p.add_argument("--notional", type=float, default=None)
     p.add_argument("--goals", default="7500,10000,12500")
     p.add_argument("--main-goal", type=float, default=10000.0)
@@ -1322,13 +1323,16 @@ def main() -> None:
         dry_run=is_dry_run,
     ) as run_id:
         try:
+            equity_result = resolve_current_equity(cfg=cfg, as_of=args.as_of, equity_override=args.equity0)
+            print_equity_valuation_result(equity_result)
+
             payload = run_shadow_portfolio_assessment_job(
                 cfg=cfg,
                 as_of=args.as_of,
                 write_outputs=not is_dry_run,
                 update_latest=True,
                 confirm_prod_write=bool(args.confirm_prod_write),
-                equity0=float(args.equity0),
+                equity0=float(equity_result.equity),
                 notional=args.notional,
                 goals=_parse_goals(args.goals),
                 main_goal=float(args.main_goal),

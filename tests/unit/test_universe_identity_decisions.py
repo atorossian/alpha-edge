@@ -4,7 +4,7 @@ from __future__ import annotations
 import pandas as pd
 
 from alpha_edge.jobs.universe_identity_decisions import identify_collisions, report_collisions
-from alpha_edge.universe.universe import name_match_score
+from alpha_edge.universe.universe import name_match_score, resolve_ticker_strict
 
 
 def _row(*, rid, aid, ticker, name, region, yahoo, include=1, role="stock"):
@@ -194,3 +194,55 @@ def test_symbol_filter_limits_online_checks_to_selected_pair():
     result = identify_collisions(rows, symbols={"ADP"})
     assert result["shared_yahoo_symbol"].tolist() == ["ADP"]
     assert result.iloc[0]["proposed_action"] == "REVIEW_PROVIDER_MAPPING"
+
+
+def test_french_home_listing_preferred_over_verified_german_cross_listing(monkeypatch):
+    from alpha_edge.universe import universe as provider
+
+    candidates = ["ADP", "ADP.DE", "ADP.PA"]
+    monkeypatch.setattr(provider, "_candidate_symbols", lambda raw, region: candidates)
+    fetched = []
+
+    def get_meta(symbol):
+        fetched.append(symbol)
+        if symbol == "ADP":
+            return {
+                "yahoo_ok": True, "longName": "Automatic Data Processing Inc.",
+                "country": "United States", "quoteType": "EQUITY", "exchange": "NMS",
+            }
+        return {
+            "yahoo_ok": True, "longName": "Aéroports de Paris SA",
+            "country": "France", "currency": "EUR", "quoteType": "EQUITY",
+            "exchange": "PAR" if symbol.endswith(".PA") else "FRA",
+            "fullExchangeName": "Paris" if symbol.endswith(".PA") else "Frankfurt",
+        }
+
+    monkeypatch.setattr(provider, "fetch_yahoo_meta", get_meta)
+    monkeypatch.setattr(provider, "_has_price_history", lambda symbol: True)
+    ticker, debug = resolve_ticker_strict(
+        "ADP", expected_name="Aeroports de Paris SA",
+        expected_region="Cboe Europe", asset_class="equity", role="stock",
+    )
+    assert ticker == "ADP.PA"
+    assert debug["best_meta_country"] == "France"
+    assert debug["best_meta_currency"] == "EUR"
+    assert debug["candidate_matches_home_market_hint"] is True
+    assert "ADP.DE" in fetched
+
+
+def test_country_hint_does_not_override_wrong_company(monkeypatch):
+    from alpha_edge.universe import universe as provider
+
+    monkeypatch.setattr(provider, "_candidate_symbols", lambda raw, region: ["ADP.PA", "ADP.F"])
+    monkeypatch.setattr(provider, "fetch_yahoo_meta", lambda symbol: {
+        "yahoo_ok": True, "longName": "Automatic Data Processing Inc.",
+        "country": "United States", "quoteType": "EQUITY", "exchange": "FRA",
+    })
+    monkeypatch.setattr(provider, "_has_price_history", lambda symbol: True)
+    ticker, debug = resolve_ticker_strict(
+        "ADP", expected_name="Aeroports de Paris SA",
+        expected_region="Cboe Europe", asset_class="equity", role="stock",
+        preferred_country="France",
+    )
+    assert ticker is None
+    assert debug["resolved"] is None

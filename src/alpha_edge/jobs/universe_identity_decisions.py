@@ -15,14 +15,17 @@ from pathlib import Path
 
 import pandas as pd
 
-from alpha_edge.universe.universe import name_match_score, resolve_ticker_strict
+from alpha_edge.universe.universe import resolve_ticker_strict
 
 _CORPORATE_WORDS = {
     "inc", "incorporated", "corp", "corporation", "company", "co",
     "ltd", "limited", "plc", "sa", "s", "a", "ag", "nv", "se",
     "holdings", "holding", "group", "the",
 }
-_REQUIRED = {"row_id", "asset_id", "ticker", "yahoo_ticker", "name", "asset_class", "role", "region", "include"}
+_REQUIRED = {
+    "row_id", "asset_id", "ticker", "yahoo_ticker", "name",
+    "asset_class", "role", "region", "include",
+}
 
 
 def _txt(value: object) -> str:
@@ -111,7 +114,11 @@ def identify_collisions(
                 len(ordered) == 2 and broker_equal and market_equal and type_equal
                 and bool(_name_tokens(first["name"])) and similar >= 0.90
             )
-            different = similar <= 0.20 and bool(_name_tokens(first["name"])) and bool(_name_tokens(later["name"]))
+            different = (
+                similar <= 0.20
+                and bool(_name_tokens(first["name"]))
+                and bool(_name_tokens(later["name"]))
+            )
             action = (
                 "PROPOSE_EXCLUSION" if duplicate else
                 "PROPOSE_OVERRIDE" if different else "REVIEW_IDENTITY"
@@ -209,7 +216,10 @@ def main() -> None:
     p.add_argument("--universe", type=Path, default=Path("data/universe/universe.csv"))
     p.add_argument("--exclusions", type=Path, default=Path("data/universe/asset_excluded.csv"))
     p.add_argument("--output", type=Path, default=Path("outputs/universe_audit/identity_decisions.csv"))
-    p.add_argument("--resolve-online", action="store_true", help="Use existing strict Yahoo resolver for different-company pairs")
+    p.add_argument(
+        "--resolve-online", action="store_true",
+        help="Use existing strict Yahoo resolver for different-company pairs",
+    )
     args = p.parse_args()
     u = pd.read_csv(args.universe)
     e = pd.read_csv(args.exclusions) if args.exclusions.exists() else None

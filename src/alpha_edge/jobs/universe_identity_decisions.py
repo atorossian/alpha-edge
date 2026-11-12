@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import unicodedata
 from collections import Counter
 from pathlib import Path
 
@@ -40,8 +41,10 @@ def _txt(value: object) -> str:
 
 
 def _name_tokens(value: object) -> set[str]:
+    normalized = unicodedata.normalize("NFKD", _txt(value))
+    ascii_name = normalized.encode("ascii", "ignore").decode("ascii").casefold()
     return {
-        token for token in re.findall(r"[a-z0-9]+", _txt(value).casefold())
+        token for token in re.findall(r"[a-z0-9]+", ascii_name)
         if token not in _CORPORATE_WORDS
     }
 

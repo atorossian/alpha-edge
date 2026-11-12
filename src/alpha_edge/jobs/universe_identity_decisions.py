@@ -15,7 +15,11 @@ from pathlib import Path
 
 import pandas as pd
 
-from alpha_edge.universe.universe import resolve_ticker_strict
+from alpha_edge.universe.universe import (
+    fetch_yahoo_meta,
+    resolve_ticker_strict,
+    validate_yahoo_meta_for_row,
+)
 
 _CORPORATE_WORDS = {
     "inc", "incorporated", "corp", "corporation", "company", "co",
@@ -76,6 +80,7 @@ def identify_collisions(
     *,
     exclusions: pd.DataFrame | None = None,
     provider_resolver=None,
+    provider_metadata_fetcher=None,
 ) -> pd.DataFrame:
     """One decision record per shared active Yahoo symbol.
 
@@ -131,25 +136,45 @@ def identify_collisions(
                 "name, instrument, or venue evidence insufficient for automatic identity decision"
             )
             suggested_symbol, source = "", ""
-            if different and provider_resolver is not None:
-                # Existing resolver validates provider metadata + daily price
-                # availability. Never accept the colliding symbol as an override.
-                candidate, evidence = provider_resolver(
-                    _txt(later["ticker"]),
-                    expected_name=_txt(later["name"]),
-                    expected_region=_txt(later["region"]),
-                    asset_class=_txt(later["asset_class"]),
-                    role=_txt(later["role"]),
-                )
-                if candidate and candidate.upper() != symbol:
-                    suggested_symbol = candidate
-                    source = json.dumps(evidence, sort_keys=True, default=str)
+            mapped_row = later
+            if different and provider_resolver is not None and provider_metadata_fetcher is not None:
+                # Validate which company the *current* Yahoo symbol describes.
+                # Never infer the mismatched row from its order alone.
+                meta = provider_metadata_fetcher(symbol)
+                matches = []
+                for target in (first, later):
+                    ok, validation_reason, name_score = validate_yahoo_meta_for_row(
+                        meta,
+                        expected_name=_txt(target["name"]),
+                        expected_region=_txt(target["region"]),
+                        asset_class=_txt(target["asset_class"]),
+                        role=_txt(target["role"]),
+                    )
+                    matches.append((bool(ok), validation_reason, name_score))
+                if sum(ok for ok, _, _ in matches) == 1:
+                    mapped_row = later if matches[0][0] else first
+                    candidate, evidence = provider_resolver(
+                        _txt(mapped_row["ticker"]),
+                        expected_name=_txt(mapped_row["name"]),
+                        expected_region=_txt(mapped_row["region"]),
+                        asset_class=_txt(mapped_row["asset_class"]),
+                        role=_txt(mapped_row["role"]),
+                    )
+                    if candidate and candidate.upper() != symbol:
+                        suggested_symbol = candidate
+                        source = json.dumps(
+                            {"shared_symbol_validation": matches, "resolved_candidate": evidence},
+                            sort_keys=True, default=str,
+                        )
+                    else:
+                        action = "REVIEW_PROVIDER_MAPPING"
+                        reason += "; no distinct alternative symbol verified"
                 else:
                     action = "REVIEW_PROVIDER_MAPPING"
-                    reason += "; no distinct provider symbol verified"
+                    reason += "; shared Yahoo symbol did not uniquely identify either company"
             elif different:
                 action = "REVIEW_PROVIDER_MAPPING"
-                reason += "; optional online verification not yet run"
+                reason += "; independent shared-symbol verification not yet run"
             proposals.append({
                 "shared_yahoo_symbol": symbol,
                 "group_size": len(ordered),
@@ -169,7 +194,7 @@ def identify_collisions(
                 "proposed_action": action,
                 "retain_asset_id": _txt(first["asset_id"]) if duplicate else "",
                 "exclude_row_id": _txt(later["row_id"]) if duplicate else "",
-                "override_row_id": _txt(later["row_id"]) if suggested_symbol else "",
+                "override_row_id": _txt(mapped_row["row_id"]) if suggested_symbol else "",
                 "suggested_yahoo_ticker": suggested_symbol,
                 "evidence": source,
                 "rationale": reason,
@@ -193,8 +218,11 @@ def report_collisions(
     output_csv: Path | None = None, resolve_online: bool = False,
 ) -> dict:
     resolver = resolve_ticker_strict if resolve_online else None
+    fetcher = fetch_yahoo_meta if resolve_online else None
     report = identify_collisions(
-        universe, exclusions=exclusions, provider_resolver=resolver,
+        universe, exclusions=exclusions,
+        provider_resolver=resolver,
+        provider_metadata_fetcher=fetcher,
     )
     if output_csv is not None:
         output_csv.parent.mkdir(parents=True, exist_ok=True)

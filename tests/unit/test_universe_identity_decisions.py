@@ -4,6 +4,7 @@ from __future__ import annotations
 import pandas as pd
 
 from alpha_edge.jobs.universe_identity_decisions import identify_collisions, report_collisions
+from alpha_edge.universe.universe import name_match_score
 
 
 def _row(*, rid, aid, ticker, name, region, yahoo, include=1, role="stock"):
@@ -173,3 +174,23 @@ def test_provider_ambiguity_does_not_propose_override():
     )
     assert result.iloc[0]["proposed_action"] == "REVIEW_PROVIDER_MAPPING"
     assert result.iloc[0]["override_row_id"] == ""
+
+
+def test_provider_name_normalization_handles_accents():
+    assert name_match_score("Aeroports de Paris SA", "Aéroports de Paris S.A.") >= 0.75
+
+
+def test_symbol_filter_limits_online_checks_to_selected_pair():
+    rows = pd.DataFrame([
+        _row(rid="US", aid="A", ticker="ADP", name="Automatic Data Processing Inc.",
+             region="NASDAQ", yahoo="ADP"),
+        _row(rid="FR", aid="B", ticker="ADP", name="Aeroports de Paris SA",
+             region="Cboe Europe", yahoo="ADP"),
+        _row(rid="X1", aid="C", ticker="ABEV3", name="Ambev SA",
+             region="B3", yahoo="ABEV3.SA"),
+        _row(rid="X2", aid="D", ticker="ABEV3", name="Ambev S.A.",
+             region="B3", yahoo="ABEV3.SA"),
+    ])
+    result = identify_collisions(rows, symbols={"ADP"})
+    assert result["shared_yahoo_symbol"].tolist() == ["ADP"]
+    assert result.iloc[0]["proposed_action"] == "REVIEW_PROVIDER_MAPPING"

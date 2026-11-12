@@ -59,7 +59,16 @@ def test_adp_provider_verified_distinct_mapping_is_a_proposal_only():
         seen.append((raw, kwargs["expected_name"], kwargs["expected_region"]))
         return "ADP.PA", {"verified": True}
 
-    result = identify_collisions(rows, provider_resolver=resolver)
+    result = identify_collisions(
+        rows, provider_resolver=resolver,
+        provider_metadata_fetcher=lambda symbol: {
+            "yahoo_ok": True,
+            "longName": "Automatic Data Processing Inc.",
+            "quoteType": "EQUITY",
+            "exchange": "NMS",
+            "country": "United States",
+        },
+    )
     assert seen == [("ADP", "Aeroports de Paris SA", "Cboe Europe")]
     assert result.iloc[0]["proposed_action"] == "PROPOSE_OVERRIDE"
     assert result.iloc[0]["suggested_yahoo_ticker"] == "ADP.PA"
@@ -117,3 +126,50 @@ def test_report_writes_only_audit_csv(tmp_path):
     assert report["universe_mutations"] == 0
     assert report["ledger_mutations"] == 0
     assert set(tmp_path.iterdir()) == {tmp_path / "decision.csv"}
+
+def test_earlier_row_can_be_wrong_provider_mapping():
+    rows = pd.DataFrame([
+        _row(rid="FR", aid="FRID", ticker="ORA", name="Orange SA",
+             region="Cboe Europe", yahoo="ORA"),
+        _row(rid="US", aid="USID", ticker="ORA", name="Ormat Technologies Inc.",
+             region="NYSE", yahoo="ORA"),
+    ])
+    called = []
+
+    def resolver(raw, **kwargs):
+        called.append((raw, kwargs["expected_name"], kwargs["expected_region"]))
+        return "ORA.PA", {"verified": True}
+
+    result = identify_collisions(
+        rows, provider_resolver=resolver,
+        provider_metadata_fetcher=lambda symbol: {
+            "yahoo_ok": True,
+            "longName": "Ormat Technologies Inc.",
+            "quoteType": "EQUITY",
+            "exchange": "NYQ",
+            "country": "United States",
+        },
+    )
+    assert called == [("ORA", "Orange SA", "Cboe Europe")]
+    assert result.iloc[0]["proposed_action"] == "PROPOSE_OVERRIDE"
+    assert result.iloc[0]["override_row_id"] == "FR"
+    assert result.iloc[0]["suggested_yahoo_ticker"] == "ORA.PA"
+
+
+def test_provider_ambiguity_does_not_propose_override():
+    rows = pd.DataFrame([
+        _row(rid="FR", aid="FRID", ticker="ORA", name="Orange SA",
+             region="Cboe Europe", yahoo="ORA"),
+        _row(rid="US", aid="USID", ticker="ORA", name="Ormat Technologies Inc.",
+             region="NYSE", yahoo="ORA"),
+    ])
+
+    def fail_resolver(*args, **kwargs):
+        raise AssertionError("Ambiguous metadata must prevent resolver attempts")
+
+    result = identify_collisions(
+        rows, provider_resolver=fail_resolver,
+        provider_metadata_fetcher=lambda symbol: {"yahoo_ok": False},
+    )
+    assert result.iloc[0]["proposed_action"] == "REVIEW_PROVIDER_MAPPING"
+    assert result.iloc[0]["override_row_id"] == ""

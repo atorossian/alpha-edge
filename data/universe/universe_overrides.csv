@@ -52,9 +52,9 @@ DF503B401813E565,AXIA3,AXIA3.SA,1,Centrais Elétricas Brasileiras S.A. - Eletrob
 F18483BDA5EF9F64,BNP,BNP.PA,1,BNP Paribas S.A.,triage:add_suffix_by_region_hint;conf=HIGH
 C8253241F2504805,SUI-USD,SUI20947-USD,1,SUI,Quantfury SUI is SUI; Yahoo SUI-USD is other ticker
 86BFA0B4F407F52A,DIA,DIA,1,SPDR Dow Jones Industrial Average ETF Trust,Manual addition (Quantfury has separate asset vs DIA)
-8F6A445B7568FF88,DIA.MI,DIA.MI,1,DiaSorin S.p.A,Manual addition (Quantfury has separate asset vs DIA)
+8F6A445B7568FF88,DIA,DIA.MI,1,DiaSorin S.p.A.,2026-11-12 verified identity review; preserve broker ticker and original asset_id
 5D62BE9DD1375966,ORA,ORA,1,Ormat Technologies Inc.,Manual addition (Quantfury has separate asset vs ORA)
-883E83CB5A0FEBAA,ORA.PA,ORA.PA,1,Orange SA,Manual addition (Quantfury has separate asset vs ORA)
+883E83CB5A0FEBAA,ORA,ORA.PA,1,Orange SA,2026-11-12 verified identity review; preserve broker ticker and original asset_id
 E8A1AF93E2E281F0,AC,AC.PA,1,Accor SA,Manual addition (Quantfury has separate asset vs AC)
 4094E750DF928AC9,AC,AC.MX,1,Arca Continental S.A.B. de C.V.,Manual addition (Quantfury has separate asset vs AC)
 782650EC7DB6C2A8,ACA,ACA,1,Arcosa Inc.,Manual addition (Quantfury has separate asset vs ACA)
@@ -148,3 +148,7 @@ A17CD4A39DA129F8,CA,CA.PA,1,Carrefour S.A.,triage:add_suffix_by_region_hint;conf
 A4FD41DC5078668D,EQR,VMRK,1,Vivmark Residential,Asset changed ticker and name
 2E7800C32FE1BF6C,PSTG,P,1,Everpure Inc.,Asset changed ticker and name
 F2D913BE93641079,EUR-USD,EURUSD=X,1,Euro US Dollar,Use Yahoo FX instrument symbol rather than broker-style EUR-USD
+BD9D686E9238158B,ADP,ADP.PA,1,Aeroports de Paris SA,2026-11-12 verified identity review; preserve broker ticker and original asset_id
+E8CF4A6C0C43E0CE,AMP,AMP.MI,1,Amplifon S.p.A.,2026-11-12 verified identity review; preserve broker ticker and original asset_id
+5BA2A53B86ED9411,BB,BB.PA,1,Societe BIC SA,2026-11-12 verified identity review; preserve broker ticker and original asset_id
+78D0D5C2400AADC3,COP,COP.HM,1,CompuGroup Medical SE & Co. KGaA,2026-11-12 verified identity review; preserve broker ticker and original asset_id

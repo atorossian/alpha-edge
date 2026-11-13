@@ -13,7 +13,14 @@ import re
 import time
 
 from alpha_edge.market.lakehouse_v3.storage import (
-    ROOT, LakehouseError, check_id, digest, put_json, read_bytes, read_json, verified_frame,
+    ROOT,
+    LakehouseError,
+    check_id,
+    digest,
+    put_json,
+    read_bytes,
+    read_json,
+    verified_frame,
     verified_bytes,
 )
 
@@ -54,8 +61,12 @@ COLUMNS = {
     "total_return_basis": "string",
 }
 _APPROVED_GATES = (
-    "identity", "exchange_calendar", "source_prices",
-    "corporate_actions", "fx_timing", "provider_revisions",
+    "identity",
+    "exchange_calendar",
+    "source_prices",
+    "corporate_actions",
+    "fx_timing",
+    "provider_revisions",
     "warehouse_contract",
 )
 
@@ -109,10 +120,7 @@ def warehouse_sql(bucket: str, run_id: str) -> dict:
             f"SELECT count(*) FROM (SELECT asset_id, session_date, count(*) AS n "
             f"FROM {DATABASE}.{release} GROUP BY 1, 2 HAVING count(*) > 1)"
         ),
-        "view": (
-            f"CREATE OR REPLACE VIEW {DATABASE}.{VIEW} AS "
-            f"SELECT {select_columns} FROM {DATABASE}.{release}"
-        ),
+        "view": (f"CREATE OR REPLACE VIEW {DATABASE}.{VIEW} AS SELECT {select_columns} FROM {DATABASE}.{release}"),
     }
 
 
@@ -129,12 +137,14 @@ def approved_candidate(s3, bucket: str, run_id: str, approval_key: str) -> tuple
     if not approval_key.startswith(f"{ROOT}/approvals/{run_id}/"):
         raise LakehouseError("Approval must be a dedicated immutable S3 record")
     approval = read_json(s3, bucket, approval_key)
-    if (approval.get("schema") != "alpha_edge_gold_approval_v3_1"
-            or approval.get("run_id") != run_id
-            or approval.get("candidate_sha256") != digest(manifest_bytes)
-            or not approval.get("reviewer")
-            or not approval.get("approved_at_utc")
-            or approval.get("decision") != "approved"):
+    if (
+        approval.get("schema") != "alpha_edge_gold_approval_v3_1"
+        or approval.get("run_id") != run_id
+        or approval.get("candidate_sha256") != digest(manifest_bytes)
+        or not approval.get("reviewer")
+        or not approval.get("approved_at_utc")
+        or approval.get("decision") != "approved"
+    ):
         raise LakehouseError("Missing independent, candidate-pinned approval")
     if any(approval.get("gates", {}).get(name) != "passed" for name in _APPROVED_GATES):
         raise LakehouseError("One or more required independent review gates remain open")
@@ -186,8 +196,14 @@ def _scalar(athena, query_id: str) -> int:
 
 
 def publish(
-    s3, athena, *, bucket: str, run_id: str, approval_key: str,
-    workgroup: str, execute: bool = False,
+    s3,
+    athena,
+    *,
+    bucket: str,
+    run_id: str,
+    approval_key: str,
+    workgroup: str,
+    execute: bool = False,
 ) -> dict:
     candidate, approval = approved_candidate(s3, bucket, run_id, approval_key)
     sql = warehouse_sql(bucket, run_id)
@@ -216,11 +232,14 @@ def publish(
     ids["view"] = _query(athena, sql["view"], bucket=bucket, workgroup=workgroup)
     receipt = {
         "schema": "alpha_edge_gold_warehouse_release_v3_1",
-        "run_id": run_id, "candidate_manifest_sha256": approval["candidate_sha256"],
+        "run_id": run_id,
+        "candidate_manifest_sha256": approval["candidate_sha256"],
         "approval_key": approval_key,
         "iceberg_table": f"{DATABASE}.{release_table_name(run_id)}",
         "consumer_view": f"{DATABASE}.{VIEW}",
-        "accepted_rows": actual, "athena_query_ids": ids, "status": "published",
+        "accepted_rows": actual,
+        "athena_query_ids": ids,
+        "status": "published",
     }
     put_json(s3, bucket, receipt_key, receipt)
     return receipt
@@ -235,12 +254,21 @@ def main() -> None:
     p.add_argument("--execute", action="store_true")
     a = p.parse_args()
     import boto3
-    print(json.dumps(publish(
-        boto3.client("s3", region_name="eu-west-1"),
-        boto3.client("athena", region_name="eu-west-1"),
-        bucket=a.bucket, run_id=a.run_id, approval_key=a.approval_key,
-        workgroup=a.workgroup, execute=a.execute,
-    ), indent=2))
+
+    print(
+        json.dumps(
+            publish(
+                boto3.client("s3", region_name="eu-west-1"),
+                boto3.client("athena", region_name="eu-west-1"),
+                bucket=a.bucket,
+                run_id=a.run_id,
+                approval_key=a.approval_key,
+                workgroup=a.workgroup,
+                execute=a.execute,
+            ),
+            indent=2,
+        )
+    )
 
 
 if __name__ == "__main__":

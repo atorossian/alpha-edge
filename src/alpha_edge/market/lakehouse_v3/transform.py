@@ -17,13 +17,29 @@ from alpha_edge.market.indicator_calculations import compute_market_indicators_f
 from alpha_edge.market.standardize_bronze_v2 import build_silver_gold_from_bronze
 from alpha_edge.market.lakehouse_v3.ingest import registry_from_s3
 from alpha_edge.market.lakehouse_v3.storage import (
-    ROOT, LakehouseError, check_id, put_json, put_parquet, read_json, verified_frame,
+    ROOT,
+    LakehouseError,
+    check_id,
+    put_json,
+    put_parquet,
+    read_json,
+    verified_frame,
 )
 
 INDICATORS = (
-    "sma_20", "sma_50", "sma_200", "rsi_14", "atr_14",
-    "macd", "macd_signal", "macd_hist", "annualized_vol_20",
-    "annualized_vol_60", "drawdown_20", "drawdown_60", "drawdown_252",
+    "sma_20",
+    "sma_50",
+    "sma_200",
+    "rsi_14",
+    "atr_14",
+    "macd",
+    "macd_signal",
+    "macd_hist",
+    "annualized_vol_20",
+    "annualized_vol_60",
+    "drawdown_20",
+    "drawdown_60",
+    "drawdown_252",
 )
 
 
@@ -47,11 +63,13 @@ def validate_events(bars: pd.DataFrame, actions: pd.DataFrame) -> dict:
             bars[["asset_id", "session_date", field]],
             left_on=["asset_id", "effective_date"],
             right_on=["asset_id", "session_date"],
-            how="left", validate="one_to_one",
+            how="left",
+            validate="one_to_one",
         )
-        if joined[field].isna().any() or not np.isclose(
-            joined["value"].astype(float), joined[field].astype(float), rtol=1e-10, atol=1e-10
-        ).all():
+        if (
+            joined[field].isna().any()
+            or not np.isclose(joined["value"].astype(float), joined[field].astype(float), rtol=1e-10, atol=1e-10).all()
+        ):
             raise LakehouseError(f"{kind} evidence differs from original provider bars")
     if not actions["action_type"].isin(["DIVIDEND", "SPLIT"]).all():
         raise LakehouseError("Unknown corporate action type")
@@ -64,18 +82,24 @@ def validate_events(bars: pd.DataFrame, actions: pd.DataFrame) -> dict:
 
 def build_tables(
     *,
-    bars: pd.DataFrame, fx: pd.DataFrame, actions: pd.DataFrame,
-    assets: pd.DataFrame, fx_registry: pd.DataFrame,
+    bars: pd.DataFrame,
+    fx: pd.DataFrame,
+    actions: pd.DataFrame,
+    assets: pd.DataFrame,
+    fx_registry: pd.DataFrame,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, dict]:
     """Compute a complete cohort in memory. No S3 operation occurs here."""
     validate_events(bars, actions)
     # The v2 indicator engine falls back to close when OHLC is missing.
     # For a certified lakehouse we must never manufacture OHLC observations.
     ohlc = bars[["open", "high", "low", "close"]].apply(pd.to_numeric, errors="coerce")
-    if (ohlc.isna().any().any() or not np.isfinite(ohlc.to_numpy()).all()
-            or (ohlc <= 0).any().any()
-            or (ohlc["high"] < ohlc[["open", "low", "close"]].max(axis=1)).any()
-            or (ohlc["low"] > ohlc[["open", "high", "close"]].min(axis=1)).any()):
+    if (
+        ohlc.isna().any().any()
+        or not np.isfinite(ohlc.to_numpy()).all()
+        or (ohlc <= 0).any().any()
+        or (ohlc["high"] < ohlc[["open", "low", "close"]].max(axis=1)).any()
+        or (ohlc["low"] > ohlc[["open", "high", "close"]].min(axis=1)).any()
+    ):
         raise LakehouseError("Invalid OHLC bars; refusing synthetic indicator inputs")
     calendars = dict(zip(assets["yahoo_ticker"], assets["calendar_id"]))
     if "calendar_id" not in assets or assets["calendar_id"].isna().any():
@@ -90,7 +114,11 @@ def build_tables(
     # The v2 processor provides split-safe source dates, calendar gap detection,
     # explicit FX rates, source-quality and adjusted-close return diagnostics.
     transformed = build_silver_gold_from_bronze(
-        bars, fx, policy=QualityPolicy(), calendars=calendars, pairs=pairs,
+        bars,
+        fx,
+        policy=QualityPolicy(),
+        calendars=calendars,
+        pairs=pairs,
     )
     silver = transformed["silver"].copy()
     gold = transformed["gold"].copy()
@@ -106,10 +134,7 @@ def build_tables(
     # Yahoo Close from auto_adjust=False is normally already split-adjusted.
     # The adjustment ratio Adj Close / Close represents provider total-return
     # adjustment, not a second split operation.
-    gold["ret_price_usd"] = (
-        gold["close_price_usd"] /
-        gold.groupby("asset_id")["close_price_usd"].shift(1) - 1
-    )
+    gold["ret_price_usd"] = gold["close_price_usd"] / gold.groupby("asset_id")["close_price_usd"].shift(1) - 1
     gold["ret_total_usd"] = gold["ret_simple_close_adjusted_usd"]
     gold["ret_log_total_usd"] = gold["ret_log_close_adjusted_usd"]
     unavailable = gold["return_quality_status"].ne("accepted")
@@ -127,8 +152,9 @@ def build_tables(
         # Reset indicator state across invalid prices and unavailable/review returns
         # so no momentum or volatility calculation spans a missing observation.
         accepted = asset["quality_status"].eq("accepted")
-        blocks = (accepted.ne(accepted.shift(fill_value=False))
-                  | asset["return_quality_status"].ne("accepted")).cumsum()
+        blocks = (
+            accepted.ne(accepted.shift(fill_value=False)) | asset["return_quality_status"].ne("accepted")
+        ).cumsum()
         for _, segment in asset.groupby(blocks, sort=False):
             if not segment["quality_status"].eq("accepted").all():
                 continue
@@ -159,8 +185,10 @@ def build_tables(
     status = gold["quality_status"].value_counts().to_dict()
     returns_status = gold["return_quality_status"].value_counts().to_dict()
     evidence = {
-        "assets": int(gold["asset_id"].nunique()), "bronze_rows": len(bars),
-        "silver_rows": len(silver), "gold_rows": len(gold),
+        "assets": int(gold["asset_id"].nunique()),
+        "bronze_rows": len(bars),
+        "silver_rows": len(silver),
+        "gold_rows": len(gold),
         "price_quality": {str(k): int(v) for k, v in status.items()},
         "return_quality": {str(k): int(v) for k, v in returns_status.items()},
         "exchange_session_issues": int(len(transformed["session_issues"])),
@@ -184,12 +212,14 @@ def process(s3, bucket: str, *, bronze_run_id: str, execute: bool = False) -> di
     bars = verified_frame(s3, bucket, bronze["artifacts"]["bars"])
     actions = verified_frame(s3, bucket, bronze["artifacts"]["actions"])
     fx = verified_frame(s3, bucket, bronze["artifacts"]["fx"])
-    if any(len(frame) != bronze["rows"][key] for key, frame in (
-        ("bars", bars), ("actions", actions), ("fx", fx)
-    )):
+    if any(len(frame) != bronze["rows"][key] for key, frame in (("bars", bars), ("actions", actions), ("fx", fx))):
         raise LakehouseError("Bronze row count differs from checksum-pinned manifest")
     silver, gold, sessions, quality = build_tables(
-        bars=bars, fx=fx, actions=actions, assets=assets, fx_registry=fx_registry,
+        bars=bars,
+        fx=fx,
+        actions=actions,
+        assets=assets,
+        fx_registry=fx_registry,
     )
     prefix = f"{ROOT}/candidates/{bronze_run_id}"
     artifacts = {
@@ -202,8 +232,10 @@ def process(s3, bucket: str, *, bronze_run_id: str, execute: bool = False) -> di
         "schema": "alpha_edge_gold_candidate_v3_1",
         "run_id": bronze_run_id,
         "bronze_manifest_key": f"{ROOT}/bronze/runs/{bronze_run_id}/manifest.json",
-        "bronze_registry_sha256": sha, "artifacts": artifacts,
-        "quality": quality, "status": "review_required",
+        "bronze_registry_sha256": sha,
+        "artifacts": artifacts,
+        "quality": quality,
+        "status": "review_required",
         "approved": False,
     }
     receipt = put_json(s3, bucket, prefix + "/manifest.json", manifest)
@@ -217,10 +249,18 @@ def main() -> None:
     p.add_argument("--execute", action="store_true")
     a = p.parse_args()
     import boto3
-    print(json.dumps(process(
-        boto3.client("s3", region_name="eu-west-1"), a.bucket,
-        bronze_run_id=a.bronze_run_id, execute=a.execute,
-    ), indent=2))
+
+    print(
+        json.dumps(
+            process(
+                boto3.client("s3", region_name="eu-west-1"),
+                a.bucket,
+                bronze_run_id=a.bronze_run_id,
+                execute=a.execute,
+            ),
+            indent=2,
+        )
+    )
 
 
 if __name__ == "__main__":

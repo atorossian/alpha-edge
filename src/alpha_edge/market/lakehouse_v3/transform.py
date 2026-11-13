@@ -103,6 +103,8 @@ def build_tables(
     gold["ret_log_total_usd"] = gold["ret_log_close_adjusted_usd"]
     unavailable = gold["return_quality_status"].ne("accepted")
     gold.loc[unavailable, ["ret_price_usd", "ret_total_usd", "ret_log_total_usd"]] = np.nan
+    gold["dividend_per_share_local"] = pd.to_numeric(gold["dividends"], errors="coerce").fillna(0.0)
+    gold["split_new_shares_per_old_share"] = pd.to_numeric(gold["stock_splits"], errors="coerce").fillna(0.0)
     gold["price_basis"] = "yahoo_close_provider_split_adjusted"
     gold["total_return_basis"] = "yahoo_adj_close_dividend_and_split_adjusted"
     gold["corporate_action_independently_verified"] = False
@@ -180,10 +182,10 @@ def process(s3, bucket: str, *, bronze_run_id: str, execute: bool = False) -> di
     )
     prefix = f"{ROOT}/candidates/{bronze_run_id}"
     artifacts = {
-        "silver": put_parquet(s3, bucket, prefix + "/silver.parquet", silver),
-        "gold": put_parquet(s3, bucket, prefix + "/gold.parquet", gold),
-        "session_issues": put_parquet(s3, bucket, prefix + "/session_issues.parquet", sessions),
-        "quality": put_json(s3, bucket, prefix + "/quality.json", quality),
+        "silver": put_parquet(s3, bucket, prefix + "/silver/data.parquet", silver),
+        "gold": put_parquet(s3, bucket, prefix + "/gold/data.parquet", gold),
+        "session_issues": put_parquet(s3, bucket, prefix + "/quality/session_issues.parquet", sessions),
+        "quality": put_json(s3, bucket, prefix + "/quality/report.json", quality),
     }
     manifest = {
         "schema": "alpha_edge_gold_candidate_v3_1",

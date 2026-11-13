@@ -34,10 +34,13 @@ def validate_events(bars: pd.DataFrame, actions: pd.DataFrame) -> dict:
         raise LakehouseError("Corporate-action evidence contract incomplete")
     if actions.duplicated(["asset_id", "effective_date", "action_type"]).any():
         raise LakehouseError("Duplicate corporate action event")
-    if actions.empty:
-        return {"events": 0, "dividends": 0, "splits": 0}
     for field, kind in (("dividends", "DIVIDEND"), ("stock_splits", "SPLIT")):
         subset = actions.loc[actions["action_type"].eq(kind)]
+        observed = pd.to_numeric(bars[field], errors="coerce")
+        if observed.isna().any() or observed.lt(0).any():
+            raise LakehouseError(f"Invalid {field} observations in source")
+        if len(subset) != int(observed.gt(0).sum()):
+            raise LakehouseError(f"{kind} event count differs from source bars")
         if subset.empty:
             continue
         joined = subset.merge(

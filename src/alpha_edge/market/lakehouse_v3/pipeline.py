@@ -30,10 +30,13 @@ def main() -> None:
     parser.add_argument("--execute", action="store_true")
     args = parser.parse_args()
     import boto3
+
     s3 = boto3.client("s3", region_name="eu-west-1")
     if args.action == "bootstrap":
         result = build_registry(
-            s3, args.bucket, archive_id=args.archive_id,
+            s3,
+            args.bucket,
+            archive_id=args.archive_id,
             selected_asset_ids=[x.strip() for x in args.asset_ids.split(",") if x.strip()] or None,
             execute=args.execute,
         )
@@ -41,20 +44,35 @@ def main() -> None:
         if not (args.registry_key and args.run_id and args.start and args.end):
             parser.error("build requires --registry-key --run-id --start --end")
         source = acquire(
-            s3=s3, bucket=args.bucket, registry_key=args.registry_key,
-            run_id=args.run_id, start=args.start, end=args.end, execute=args.execute,
+            s3=s3,
+            bucket=args.bucket,
+            registry_key=args.registry_key,
+            run_id=args.run_id,
+            start=args.start,
+            end=args.end,
+            execute=args.execute,
         )
-        candidate = process(
-            s3, args.bucket, bronze_run_id=args.run_id, execute=args.execute,
-        ) if args.execute else {"state": "not_executed", "reason": "dry_run"}
+        candidate = (
+            process(
+                s3,
+                args.bucket,
+                bronze_run_id=args.run_id,
+                execute=args.execute,
+            )
+            if args.execute
+            else {"state": "not_executed", "reason": "dry_run"}
+        )
         result = {"bronze": source, "gold_candidate": candidate}
     else:
         if not (args.run_id and args.approval_key):
             parser.error("publish requires --run-id and --approval-key")
         result = publish(
-            s3, boto3.client("athena", region_name="eu-west-1"),
-            bucket=args.bucket, run_id=args.run_id,
-            approval_key=args.approval_key, workgroup=args.athena_workgroup,
+            s3,
+            boto3.client("athena", region_name="eu-west-1"),
+            bucket=args.bucket,
+            run_id=args.run_id,
+            approval_key=args.approval_key,
+            workgroup=args.athena_workgroup,
             execute=args.execute,
         )
     print(json.dumps(result, indent=2))

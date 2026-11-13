@@ -66,6 +66,14 @@ def build_tables(
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, dict]:
     """Compute a complete cohort in memory. No S3 operation occurs here."""
     validate_events(bars, actions)
+    # The v2 indicator engine falls back to close when OHLC is missing.
+    # For a certified lakehouse we must never manufacture OHLC observations.
+    ohlc = bars[["open", "high", "low", "close"]].apply(pd.to_numeric, errors="coerce")
+    if (ohlc.isna().any().any() or not np.isfinite(ohlc.to_numpy()).all()
+            or (ohlc <= 0).any().any()
+            or (ohlc["high"] < ohlc[["open", "low", "close"]].max(axis=1)).any()
+            or (ohlc["low"] > ohlc[["open", "high", "close"]].min(axis=1)).any()):
+        raise LakehouseError("Invalid OHLC bars; refusing synthetic indicator inputs")
     calendars = dict(zip(assets["yahoo_ticker"], assets["calendar_id"]))
     if "calendar_id" not in assets or assets["calendar_id"].isna().any():
         raise LakehouseError("Exchange calendar required for all assets")

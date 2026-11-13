@@ -34,10 +34,10 @@ jobs:
         run: python -m pip install poetry==2.1.2
       - name: Install dependencies
         run: poetry install --no-interaction --no-ansi
+      - name: Run in-memory S3 contract tests
+        run: poetry run pytest -q tests/unit/test_market_lakehouse_v3.py
       - name: Format and lint only the new implementation
         run: |
           poetry run ruff check --no-fix src/alpha_edge/market/lakehouse_v3 tests/unit/test_market_lakehouse_v3.py
           poetry run ruff format --diff src/alpha_edge/market/lakehouse_v3 tests/unit/test_market_lakehouse_v3.py
           poetry run ruff format --check src/alpha_edge/market/lakehouse_v3 tests/unit/test_market_lakehouse_v3.py
-      - name: Run in-memory S3 contract tests
-        run: poetry run pytest -q tests/unit/test_market_lakehouse_v3.py

@@ -55,11 +55,20 @@ def put_immutable(s3, bucket: str, key: str, data: bytes, *, content_type: str) 
     sha = digest(data)
     try:
         s3.put_object(
-            Bucket=bucket, Key=key, Body=data, ContentType=content_type,
-            Metadata={"sha256": sha}, IfNoneMatch="*",
+            Bucket=bucket,
+            Key=key,
+            Body=data,
+            ContentType=content_type,
+            Metadata={"sha256": sha},
+            IfNoneMatch="*",
         )
     except ClientError as exc:
-        if exc.response.get("Error", {}).get("Code") not in {"PreconditionFailed", "412", "ConditionalRequestConflict", "409"}:
+        if exc.response.get("Error", {}).get("Code") not in {
+            "PreconditionFailed",
+            "412",
+            "ConditionalRequestConflict",
+            "409",
+        }:
             raise
         if digest(read_bytes(s3, bucket, key)) != sha:
             raise LakehouseError(f"Immutable S3 collision: {key}") from exc
@@ -84,9 +93,14 @@ def put_parquet(s3, bucket: str, key: str, frame: pd.DataFrame) -> dict:
 
 def verified_bytes(s3, bucket: str, ref: dict) -> bytes:
     key, sha = ref.get("key"), ref.get("sha256")
-    if (not isinstance(key, str) or not key.startswith(ROOT + "/")
-            or "/../" in key or "/./" in key or not isinstance(sha, str)
-            or not re.fullmatch(r"[0-9a-f]{64}", sha)):
+    if (
+        not isinstance(key, str)
+        or not key.startswith(ROOT + "/")
+        or "/../" in key
+        or "/./" in key
+        or not isinstance(sha, str)
+        or not re.fullmatch(r"[0-9a-f]{64}", sha)
+    ):
         raise LakehouseError("Malformed S3 artifact reference")
     blob = read_bytes(s3, bucket, key)
     if digest(blob) != sha:

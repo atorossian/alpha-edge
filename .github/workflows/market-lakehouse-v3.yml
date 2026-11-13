@@ -37,6 +37,7 @@ jobs:
       - name: Format and lint only the new implementation
         run: |
           poetry run ruff check --no-fix src/alpha_edge/market/lakehouse_v3 tests/unit/test_market_lakehouse_v3.py
-          poetry run ruff format --diff\n          poetry run ruff format --check src/alpha_edge/market/lakehouse_v3 tests/unit/test_market_lakehouse_v3.py
+          poetry run ruff format --diff src/alpha_edge/market/lakehouse_v3 tests/unit/test_market_lakehouse_v3.py
+          poetry run ruff format --check src/alpha_edge/market/lakehouse_v3 tests/unit/test_market_lakehouse_v3.py
       - name: Run in-memory S3 contract tests
         run: poetry run pytest -q tests/unit/test_market_lakehouse_v3.py

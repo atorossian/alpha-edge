@@ -20,7 +20,11 @@ from alpha_edge.market.lakehouse_v3.storage import ROOT, LakehouseError, json_by
 
 
 def build_registry(
-    s3, bucket: str, *, archive_id: str, selected_asset_ids: list[str] | None = None,
+    s3,
+    bucket: str,
+    *,
+    archive_id: str,
+    selected_asset_ids: list[str] | None = None,
     execute: bool = False,
 ) -> dict:
     frame, info = load_archived_plan(s3, bucket, archive_id)
@@ -49,8 +53,10 @@ def build_registry(
         raise LakehouseError("Missing FX mappings in archived plan")
     assets = frame[["asset_id", "yahoo_ticker", "currency", "calendar_id"]].sort_values("asset_id")
     doc = {
-        "schema": "alpha_edge_registry_v3_1", "source": "verified_v2_archived_plan",
-        "archive_id": archive_id, "source_plan_sha256": info["plan_sha256"],
+        "schema": "alpha_edge_registry_v3_1",
+        "source": "verified_v2_archived_plan",
+        "archive_id": archive_id,
+        "source_plan_sha256": info["plan_sha256"],
         "review_state": "historical_snapshot_unapproved",
         "assets": assets.to_dict("records"),
         "fx_pairs": fx[["currency", "provider_symbol", "direction"]].sort_values("currency").to_dict("records"),
@@ -67,15 +73,25 @@ def main() -> None:
     p = argparse.ArgumentParser(description="S3-only historical registry bootstrapping")
     p.add_argument("--bucket", required=True)
     p.add_argument("--archive-id", default="old-outputs-20261110")
-    p.add_argument("--asset-ids", default="", help="Comma-separated canonical asset IDs; empty selects archived universe")
+    p.add_argument(
+        "--asset-ids", default="", help="Comma-separated canonical asset IDs; empty selects archived universe"
+    )
     p.add_argument("--execute", action="store_true")
     a = p.parse_args()
     import boto3
-    print(json.dumps(build_registry(
-        boto3.client("s3", region_name="eu-west-1"), a.bucket, archive_id=a.archive_id,
-        selected_asset_ids=[x.strip() for x in a.asset_ids.split(",") if x.strip()] or None,
-        execute=a.execute,
-    ), indent=2))
+
+    print(
+        json.dumps(
+            build_registry(
+                boto3.client("s3", region_name="eu-west-1"),
+                a.bucket,
+                archive_id=a.archive_id,
+                selected_asset_ids=[x.strip() for x in a.asset_ids.split(",") if x.strip()] or None,
+                execute=a.execute,
+            ),
+            indent=2,
+        )
+    )
 
 
 if __name__ == "__main__":

@@ -138,7 +138,6 @@ def test_planning_bundle_contains_five_reconciled_artifacts_and_zero_approvals()
     assert manifest["acquisitions_executed"] == 0
 
 
-
 def test_supplementary_symbol_already_in_original_plan_is_blocked():
     data = registry()
     data.loc[data["asset_id"].eq("CURRENT-B"), "current_yahoo_ticker"] = "A"

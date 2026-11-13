@@ -25,9 +25,7 @@ def config():
                 {"row_id": "R4", "asset_id": "D", "ticker": "WHY", "yahoo_ticker": "WHY", "include": "0"},
             ]
         ),
-        "asset_excluded.csv": pd.DataFrame(
-            [{"target_row_id": "R2", "ticker": "OLD", "reason": "Not broker tradable"}]
-        ),
+        "asset_excluded.csv": pd.DataFrame([{"target_row_id": "R2", "ticker": "OLD", "reason": "Not broker tradable"}]),
         "universe_overrides.csv": pd.DataFrame(
             [{"target_row_id": "R3", "ticker": "MAN", "yahoo_ticker": "MAN.N", "lock_yahoo_ticker": "1"}]
         ),
@@ -109,9 +107,7 @@ def test_archived_plan_requires_hashes_and_unique_ids():
     values = {f"{prefix}/files/{root}/{k}": v for k, v in names.items()}
     inventory = {
         "schema": "alpha_edge_local_output_archive_v2_1",
-        "files": [
-            {"path": f"{root}/{k}", "sha256": hashlib.sha256(v).hexdigest()} for k, v in names.items()
-        ],
+        "files": [{"path": f"{root}/{k}", "sha256": hashlib.sha256(v).hexdigest()} for k, v in names.items()],
     }
     values[f"{prefix}/_verified_inventory.json"] = json.dumps(inventory).encode()
     df, meta = load_archived_plan(S3(values), "bucket", "archive-a")
@@ -135,9 +131,7 @@ def test_recovery_plan_contains_every_historical_candidate():
     from alpha_edge.market.universe_registry_v2 import build_evidence
 
     cfg = config()
-    rows, report = reconcile(
-        cfg, plan(), {1: "marker_present_unverified", 2: "missing"}, legacy_asset_ids={"Z"}
-    )
+    rows, report = reconcile(cfg, plan(), {1: "marker_present_unverified", 2: "missing"}, legacy_asset_ids={"Z"})
     report.update(
         inputs_sha256={"universe.csv": "0" * 64},
         original_plan={"plan_sha256": "1" * 64, "expected_cohorts": 2},

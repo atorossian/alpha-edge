@@ -6,7 +6,6 @@ immutable S3 commit functions. Per-asset S3 candidates are resumable.
 from __future__ import annotations
 
 import argparse
-import hashlib
 import io
 import json
 import tempfile

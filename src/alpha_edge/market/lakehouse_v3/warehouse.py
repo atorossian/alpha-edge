@@ -29,7 +29,7 @@ COLUMNS = {
     "close_adjusted_usd": "double",
     "close_price_usd": "double",
     "close_total_return_index_usd": "double",
-    "fx_to_usd": "double",
+    "fx_to_usd": "double",\n    "dividend_per_share_local": "double",\n    "split_new_shares_per_old_share": "double",
     "ret_price_usd": "double",
     "ret_total_usd": "double",
     "ret_log_total_usd": "double",
@@ -91,7 +91,7 @@ def warehouse_sql(bucket: str, run_id: str) -> dict:
         "stage": (
             f"CREATE EXTERNAL TABLE {DATABASE}.{stage} (\n  {columns}\n)"
             " STORED AS PARQUET "
-            f"LOCATION {_quote(f'{base}/candidates/{run_id}/')}"
+            f"LOCATION {_quote(f'{base}/candidates/{run_id}/gold/')}"
             " TBLPROPERTIES ('classification'='parquet')"
         ),
         "iceberg": (

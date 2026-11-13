@@ -1,0 +1,24 @@
+{
+  "bucket": "alpha-edge-algo",
+  "canonical_ids_retained": 879,
+  "end_exclusive": "2026-11-10",
+  "exception_assets_failed": {},
+  "exception_assets_processed": 7,
+  "exception_outcomes": {
+    "hold_price_or_structure_discrepancies": 7
+  },
+  "initial_coverage_classification": {
+    "current_strict_superset": 872,
+    "non_nested_coverage_review": 7
+  },
+  "note": "Only 7 exceptional histories undergo price comparison; 872 supersets remain unverified at observation level.",
+  "overall_status": "read_only_evidence; no merges or production mutations",
+  "remaining_gates": [
+    "independent instrument identity",
+    "exchange calendar / valid unique sessions",
+    "corporate-action and FX verification",
+    "accepted source values",
+    "returns recalculation for accepted candidates",
+    "immutable S3 candidate publication"
+  ]
+}

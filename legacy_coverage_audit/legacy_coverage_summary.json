@@ -1,0 +1,182 @@
+{
+  "reconciliation_run_id": "3b37aa4db63b6f54a30b7b4c4147ef55754e1b31447c16b9b16a396ab130905e",
+  "bucket": "alpha-edge-algo",
+  "end_exclusive": "2026-11-10",
+  "legacy_only_ids_in_registry": 911,
+  "candidate_pairs": 879,
+  "unmatched_legacy_ids": 32,
+  "pairs_audited": 879,
+  "coverage_status_counts": {
+    "current_strict_superset": 872,
+    "non_nested_coverage_review": 7
+  },
+  "read_errors": {},
+  "unmatched": [
+    {
+      "legacy_asset_id": "EQH265e8e5855d5c2d9",
+      "legacy_symbol": "OLPX",
+      "current_match_count": 0
+    },
+    {
+      "legacy_asset_id": "EQH5ec2f467f34961bf",
+      "legacy_symbol": "JHG",
+      "current_match_count": 0
+    },
+    {
+      "legacy_asset_id": "EQH6173d2435b1860f4",
+      "legacy_symbol": "CTRA",
+      "current_match_count": 0
+    },
+    {
+      "legacy_asset_id": "EQH6860be8c246aded1",
+      "legacy_symbol": "CYBR",
+      "current_match_count": 0
+    },
+    {
+      "legacy_asset_id": "EQH76fd6fcbeb7f6e49",
+      "legacy_symbol": "HOLX",
+      "current_match_count": 0
+    },
+    {
+      "legacy_asset_id": "EQH7af0d96f7c733344",
+      "legacy_symbol": "MASI",
+      "current_match_count": 0
+    },
+    {
+      "legacy_asset_id": "EQH88509d749d8d9c77",
+      "legacy_symbol": "SAF",
+      "current_match_count": 0
+    },
+    {
+      "legacy_asset_id": "EQH924cab0f049c30b2",
+      "legacy_symbol": "VSCO",
+      "current_match_count": 0
+    },
+    {
+      "legacy_asset_id": "EQH9c6779f31dc21cc7",
+      "legacy_symbol": "IPN",
+      "current_match_count": 0
+    },
+    {
+      "legacy_asset_id": "EQH9eb4c1076003e4bc",
+      "legacy_symbol": "FOLD",
+      "current_match_count": 0
+    },
+    {
+      "legacy_asset_id": "EQH9f917743717478a0",
+      "legacy_symbol": "AVB",
+      "current_match_count": 0
+    },
+    {
+      "legacy_asset_id": "EQHa3a1c99d199cf5da",
+      "legacy_symbol": "CIVI",
+      "current_match_count": 0
+    },
+    {
+      "legacy_asset_id": "EQHa489a9f107625af4",
+      "legacy_symbol": "MCW",
+      "current_match_count": 0
+    },
+    {
+      "legacy_asset_id": "EQHa4f8e373b4b3367d",
+      "legacy_symbol": "SAB",
+      "current_match_count": 0
+    },
+    {
+      "legacy_asset_id": "EQHac9afcfcd7bee070",
+      "legacy_symbol": "LEG",
+      "current_match_count": 0
+    },
+    {
+      "legacy_asset_id": "EQHaf680993ce3b8fc1",
+      "legacy_symbol": "FDP",
+      "current_match_count": 0
+    },
+    {
+      "legacy_asset_id": "EQHb4a630dd1003b616",
+      "legacy_symbol": "BLD",
+      "current_match_count": 0
+    },
+    {
+      "legacy_asset_id": "EQHb97d0edfad038769",
+      "legacy_symbol": "GTLS",
+      "current_match_count": 0
+    },
+    {
+      "legacy_asset_id": "EQHb9b87fa10aed44ef",
+      "legacy_symbol": "JDEP.AS",
+      "current_match_count": 0
+    },
+    {
+      "legacy_asset_id": "EQHbe6c7070e64a5007",
+      "legacy_symbol": "EA",
+      "current_match_count": 0
+    },
+    {
+      "legacy_asset_id": "EQHc5920c397dd7999f",
+      "legacy_symbol": "VTLE",
+      "current_match_count": 0
+    },
+    {
+      "legacy_asset_id": "EQHc64a6a2eb3b6fc14",
+      "legacy_symbol": "ALV",
+      "current_match_count": 0
+    },
+    {
+      "legacy_asset_id": "EQHc9f72678854d6b81",
+      "legacy_symbol": "QRVO",
+      "current_match_count": 0
+    },
+    {
+      "legacy_asset_id": "EQHcb57b5839ec4367b",
+      "legacy_symbol": "WBD",
+      "current_match_count": 0
+    },
+    {
+      "legacy_asset_id": "EQHdc724497bca5d451",
+      "legacy_symbol": "CUK",
+      "current_match_count": 0
+    },
+    {
+      "legacy_asset_id": "EQHdd56cdf910a40261",
+      "legacy_symbol": "DAY",
+      "current_match_count": 0
+    },
+    {
+      "legacy_asset_id": "EQHe26aaac7d23f9062",
+      "legacy_symbol": "WBS",
+      "current_match_count": 0
+    },
+    {
+      "legacy_asset_id": "EQHe638c738ecc6a532",
+      "legacy_symbol": "AL",
+      "current_match_count": 0
+    },
+    {
+      "legacy_asset_id": "EQHea31af7bd80bb82a",
+      "legacy_symbol": "CFLT",
+      "current_match_count": 0
+    },
+    {
+      "legacy_asset_id": "EQHeb60c3b8c138a67d",
+      "legacy_symbol": "FER",
+      "current_match_count": 0
+    },
+    {
+      "legacy_asset_id": "EQHf424fa1d1cab2dcd",
+      "legacy_symbol": "SEE",
+      "current_match_count": 0
+    },
+    {
+      "legacy_asset_id": "EQHf767db48d9639db1",
+      "legacy_symbol": "B4B.HM",
+      "current_match_count": 0
+    }
+  ],
+  "scope": "S3 OHLCV manifest date coverage only",
+  "limitations": [
+    "Manifest dates do not prove non-null, valid or correct prices",
+    "Equal dates do not prove equal OHLCV values or corporate-action adjustments",
+    "No asset-ID merges, S3 deletions or production promotions performed"
+  ]
+}

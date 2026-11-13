@@ -1,0 +1,90 @@
+{
+  "canonical_asset_id": "EQH675bef67ea89e2ee",
+  "canonical_decision": "retain_current_asset_id",
+  "corporate_action_and_fx_independently_verified": false,
+  "current": {
+    "active_parts": 25,
+    "asset_id": "EQH675bef67ea89e2ee",
+    "duplicate_observation_dates": 0,
+    "manifest_dates": 5816,
+    "manifest_dates_without_rows": [],
+    "manifest_first_date": "2003-12-01",
+    "manifest_last_date": "2026-10-30",
+    "manifest_years": 24,
+    "observed_first_date": "2003-12-01",
+    "observed_last_date": "2026-10-30",
+    "observed_rows": 5816,
+    "rows_without_manifest_dates": []
+  },
+  "current_only_observation_dates": 4727,
+  "exchange_calendar_verified": false,
+  "legacy": {
+    "active_parts": 16,
+    "asset_id": "EQH8b634f86d5a66dfd",
+    "duplicate_observation_dates": 0,
+    "manifest_dates": 1097,
+    "manifest_dates_without_rows": [],
+    "manifest_first_date": "2021-10-26",
+    "manifest_last_date": "2026-02-13",
+    "manifest_years": 6,
+    "observed_first_date": "2021-10-26",
+    "observed_last_date": "2026-02-13",
+    "observed_rows": 1097,
+    "rows_without_manifest_dates": []
+  },
+  "legacy_asset_id": "EQH8b634f86d5a66dfd",
+  "legacy_only_date_range": {
+    "first": "2021-12-27",
+    "last": "2025-05-05"
+  },
+  "legacy_only_dates": [
+    "2021-12-27",
+    "2021-12-28",
+    "2022-01-03",
+    "2022-05-02",
+    "2022-12-27",
+    "2023-01-02",
+    "2024-05-06",
+    "2025-05-05"
+  ],
+  "legacy_only_observation_dates": 8,
+  "legacy_rows_automatically_merged": false,
+  "overlap_observation_dates": 1089,
+  "price_comparison": {
+    "overlap_observation_dates": 1089,
+    "price_fields": {
+      "adjusted_close_usd": {
+        "invalid_or_missing_overlap_rows": 0,
+        "log_return_correlation": 0.003183163695297658,
+        "log_return_rmse": 0.19021941988615185,
+        "matching_fraction": 0.0009182736455463728,
+        "matching_rows_within_tolerance": 1,
+        "max_abs_log_return_difference": 4.735843398977684,
+        "max_relative_price_difference": 0.991290723071351,
+        "median_relative_price_difference": 0.02615416890135603,
+        "p99_relative_price_difference": 0.08786748339761653,
+        "status": "compared",
+        "sum_log_return_difference": -0.0016528180348793775,
+        "valid_overlap_rows": 1089
+      },
+      "raw_close_usd": {
+        "invalid_or_missing_overlap_rows": 0,
+        "log_return_correlation": 0.002875441548299467,
+        "log_return_rmse": 0.19021946441154014,
+        "matching_fraction": 0.02203856749311295,
+        "matching_rows_within_tolerance": 24,
+        "max_abs_log_return_difference": 4.735843479470505,
+        "max_relative_price_difference": 0.9910836857136467,
+        "median_relative_price_difference": 0.012318844456536571,
+        "p99_relative_price_difference": 0.07670914810018592,
+        "status": "compared",
+        "sum_log_return_difference": -0.0021770122911610734,
+        "valid_overlap_rows": 1089
+      }
+    }
+  },
+  "production_eligible": false,
+  "same_instrument_independently_verified": false,
+  "status": "hold_price_or_structure_discrepancies",
+  "symbol": "GL9.IR"
+}

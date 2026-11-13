@@ -121,6 +121,51 @@ D3E80C938B6208F6,VXU6,derivative,Not tradable in Quantfury app,Contract expired
 2C4C30905572034A,VXM6,derivative,Not tradable in Quantfury app,Contract expired
 559EBB3FB9377A35,TON-USD,crypto,Not tradable in Quantfury app,
 4FBCDA48AB2A79BB,WBD,equity,Asset not publicly traded anymore,Acquired by Paramount Skydance Corp (PSKY)
-DEA19FC8D266CFE2,KMB,equity,Asset not publicly traded anymore,Acquired by Kimberly-Clark Corp. (KMB)
 BAF4E1F985BF6FC6,QRVO,equity,Asset not publicly traded anymore,Acquired by Skyworks Solutions Inc. (SWKS)
+B198E1A2E42F3E41,KVUE,equity,Asset not publicly traded anymore,Acquired by Kimberly-Clark Corporation (KMB)
 C2030DA0D3808CDA,CSAN,equity,Not tradable in Quantfury app,Asset delisted from NYSE
+670A9138B424DB13,PPLI,equity,Duplicate of IAC row 5E262727DC314688,Original IAC record carries locked Yahoo symbol PPLI
+DEA19FC8D266CFE2,KMB,equity,Historical NYSE row replaced by current Nasdaq row,Listing transferred NYSE to Nasdaq 2025-05-30 while ticker KMB remained unchanged
+0936DD96A220D561,ABEV3,equity,Duplicate active instrument identity (reviewed 2026-11-12),Keep historical data and asset_id; suppress from active universe and v2 acquisition
+293045D3D45E00B3,BBDC4,equity,Duplicate active instrument identity (reviewed 2026-11-12),Keep historical data and asset_id; suppress from active universe and v2 acquisition
+10BD436E766A2AF0,BRKM5,equity,Duplicate active instrument identity (reviewed 2026-11-12),Keep historical data and asset_id; suppress from active universe and v2 acquisition
+9DE214A6A0D0AE5F,CCL,equity,Duplicate active instrument identity (reviewed 2026-11-12),Keep historical data and asset_id; suppress from active universe and v2 acquisition
+CD34CE1ED7AFE649,CMCSA,equity,Duplicate active instrument identity (reviewed 2026-11-12),Keep historical data and asset_id; suppress from active universe and v2 acquisition
+C421CFDF86A913F4,CMIG4,equity,Duplicate active instrument identity (reviewed 2026-11-12),Keep historical data and asset_id; suppress from active universe and v2 acquisition
+4531F8537826244C,CSAN3,equity,Duplicate active instrument identity (reviewed 2026-11-12),Keep historical data and asset_id; suppress from active universe and v2 acquisition
+8BE3614FD204934A,CSNA3,equity,Duplicate active instrument identity (reviewed 2026-11-12),Keep historical data and asset_id; suppress from active universe and v2 acquisition
+263E0549D057543C,GGBR4,equity,Duplicate active instrument identity (reviewed 2026-11-12),Keep historical data and asset_id; suppress from active universe and v2 acquisition
+6F5BE757BDF4A359,ITUB4,equity,Duplicate active instrument identity (reviewed 2026-11-12),Keep historical data and asset_id; suppress from active universe and v2 acquisition
+8051CE766713A499,QUBT,equity,Duplicate active instrument identity (reviewed 2026-11-12),Keep historical data and asset_id; suppress from active universe and v2 acquisition
+9EEB4CD6F8AC3F26,SUZB3,equity,Duplicate active instrument identity (reviewed 2026-11-12),Keep historical data and asset_id; suppress from active universe and v2 acquisition
+50E62C8C12BA65AB,TIMS3,equity,Duplicate active instrument identity (reviewed 2026-11-12),Keep historical data and asset_id; suppress from active universe and v2 acquisition
+749E4C6AC348B3C6,UGPA3,equity,Duplicate active instrument identity (reviewed 2026-11-12),Keep historical data and asset_id; suppress from active universe and v2 acquisition
+7EC8F2ADABE1848F,VALE3,equity,Duplicate active instrument identity (reviewed 2026-11-12),Keep historical data and asset_id; suppress from active universe and v2 acquisition
+0141AEF9649C0496,AMX,equity,Duplicate active instrument identity (reviewed 2026-11-12),Keep historical data and asset_id; suppress from active universe and v2 acquisition
+BF362EF7573A7240,ASR,equity,Duplicate active instrument identity (reviewed 2026-11-12),Keep historical data and asset_id; suppress from active universe and v2 acquisition
+B966F5C590FBABF8,BRSL,equity,Duplicate current BRSL row; preserve historic broker IGT identity,Keep historical data and asset_id; suppress from active universe and v2 acquisition
+86BE84B30ADD6C8C,RBA,equity,Reviewed instrument identity resolution,Active duplicate or historical alias; preserve asset_id and existing history; retained=EQH086bf5e16288f852; source_collision=RBA; 2026-11-12
+C5FA68FEFC4F4B01,MRSH,equity,Reviewed instrument identity resolution,Active duplicate or historical alias; preserve asset_id and existing history; retained=EQH3cab51e5bafa722c; source_collision=MRSH; 2026-11-12
+0BD26A219816D281,HES,equity,Reviewed instrument identity resolution,Historical HES is a separate acquired company; do not price as HESM; retained=EQH4258f1c8f44b2cc7; source_collision=HESM; 2026-11-12
+92497602CECB5B2D,CALY,equity,Reviewed instrument identity resolution,Active duplicate or historical alias; preserve asset_id and existing history; retained=EQHa0e0d5ec90674560; source_collision=CALY; 2026-11-12
+872B8D8E186A555B,CMBT,equity,Reviewed instrument identity resolution,Active duplicate or historical alias; preserve asset_id and existing history; retained=EQH21e26ccb024cf090; source_collision=CMBT; 2026-11-12
+93444ECAFB80FCD8,VSXY,equity,Reviewed instrument identity resolution,Active duplicate or historical alias; preserve asset_id and existing history; retained=EQH235cdc9cd6be09b8; source_collision=VSXY; 2026-11-12
+EB6B258F771B6112,CIB,equity,Reviewed instrument identity resolution,Bancolombia ADR exchanged into Grupo Cibest ADR; predecessor history retained; retained=EQH240b0c26dd26381c; source_collision=CIB; 2026-11-12
+65E2A320295E61F9,NEP,equity,Reviewed instrument identity resolution,NEP is a distinct security from NEE; no cross-security price mapping; retained=EQH2442dee0e741c0c6; source_collision=NEE; 2026-11-12
+59F100687048D592,BNY,equity,Reviewed instrument identity resolution,Active duplicate or historical alias; preserve asset_id and existing history; retained=EQH75dd9e9dd741edb4; source_collision=BNY; 2026-11-12
+15511817AD2A9A0A,GTM,equity,Reviewed instrument identity resolution,Active duplicate or historical alias; preserve asset_id and existing history; retained=EQH71a0030c3be42f88; source_collision=GTM; 2026-11-12
+65AC2EB9AF9653E8,WMT,equity,Reviewed instrument identity resolution,Active duplicate or historical alias; preserve asset_id and existing history; retained=EQHbab1845d93b3af80; source_collision=WMT; 2026-11-12
+2FC621173E5C4908,PARA,equity,Reviewed instrument identity resolution,Predecessor PARA cancelled in business combination; maintain separate historical identity; retained=EQH31b32c322f27eda6; source_collision=PSKY; 2026-11-12
+39D8D0B96DA49B49,FITB,equity,Reviewed instrument identity resolution,Active duplicate or historical alias; preserve asset_id and existing history; retained=EQH9799074ca8790626; source_collision=FITB; 2026-11-12
+9C405688DDCDC19C,XYZ,equity,Reviewed instrument identity resolution,Active duplicate or historical alias; preserve asset_id and existing history; retained=EQH423810e84c014cbb; source_collision=XYZ; 2026-11-12
+C740D200C8D1EAA5,FDJU,equity,Reviewed instrument identity resolution,Active duplicate or historical alias; preserve asset_id and existing history; retained=EQH86b13f5b94e754f7; source_collision=FDJU.PA; 2026-11-12
+BC3C953CA6604032,RUM,equity,Reviewed instrument identity resolution,Active duplicate or historical alias; preserve asset_id and existing history; retained=EQH4da0e71a4b84f326; source_collision=RUM; 2026-11-12
+87470971AC5DCAF3,OPLN,equity,Reviewed instrument identity resolution,Active duplicate or historical alias; preserve asset_id and existing history; retained=EQH97e470498989a1ff; source_collision=OPLN; 2026-11-12
+97C954ECA672C901,PAC,equity,Reviewed instrument identity resolution,Active duplicate or historical alias; preserve asset_id and existing history; retained=EQH645a1052cb3edb8a; source_collision=PAC; 2026-11-12
+5CC3D00B26BBB9E8,ONC,equity,Reviewed instrument identity resolution,Active duplicate or historical alias; preserve asset_id and existing history; retained=EQH8f1a7df5ea9498c3; source_collision=ONC; 2026-11-12
+5D86145D608259FF,QS,equity,Reviewed instrument identity resolution,Active duplicate or historical alias; preserve asset_id and existing history; retained=EQHc4a57dcc29daf36e; source_collision=QS; 2026-11-12
+81DBC78D8318750A,P,equity,Reviewed instrument identity resolution,Active duplicate or historical alias; preserve asset_id and existing history; retained=EQHd0ece1cd3b004459; source_collision=P; 2026-11-12
+414CE0B9D888C12E,DMC,equity,Reviewed instrument identity resolution,FDP renamed and changed symbol to DMC; preserve original identity; retained=EQHa28169ba9e043705; source_collision=DMC; 2026-11-12
+D8C52DD0D433474D,MPT,equity,Reviewed instrument identity resolution,Active duplicate or historical alias; preserve asset_id and existing history; retained=EQHa70d98e68b7d1378; source_collision=MPT; 2026-11-12
+0497F4311ED6EB65,QBTS,equity,Reviewed instrument identity resolution,Active duplicate or historical alias; preserve asset_id and existing history; retained=EQHc25ab54246a4961f; source_collision=QBTS; 2026-11-12
+627E71FBC7CF701E,VIVT3,equity,Reviewed instrument identity resolution,B3 VIVT3.SA already exists with verified canonical symbol; preserve NYSE VIV separately; retained=EQHcc8433d3724c336a; source_collision=VIV; 2026-11-12

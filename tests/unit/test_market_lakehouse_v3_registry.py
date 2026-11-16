@@ -18,7 +18,7 @@ from alpha_edge.market.lakehouse_v3.registry_v3 import (
     stage_registry,
     validate_registry,
 )
-from alpha_edge.market.lakehouse_v3.storage import ROOT, LakehouseError, put_json, read_bytes
+from alpha_edge.market.lakehouse_v3.storage import ROOT, LakehouseError, put_json
 
 
 def _csv(rows):
@@ -104,14 +104,13 @@ def test_only_five_files_allowed_without_any_old_data():
 
 
 @pytest.mark.parametrize("modify", [
-    lambda x: x["universe.csv"].update(asset_id=""),
-    lambda x: x["universe.csv"].update(include="maybe"),
-    lambda x: x["universe.csv"].update(row_id="r-old"),
+    lambda x: x.update(asset_id=""),
+    lambda x: x.update(include="maybe"),
+    lambda x: x.update(row_id="r-old"),
 ])
 def test_canonical_source_identity_and_include_fail_closed(modify):
     files = source_fixtures()
-    import csv as _csv_lib
-    lines = list(_csv_lib.DictReader(io.StringIO(files["universe.csv"].decode())))
+    lines = list(csv.DictReader(io.StringIO(files["universe.csv"].decode())))
     modify(lines[0])
     files["universe.csv"] = _csv(lines)
     with pytest.raises(LakehouseError):

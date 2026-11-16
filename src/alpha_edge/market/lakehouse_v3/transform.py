@@ -15,6 +15,7 @@ import pandas as pd
 from alpha_edge.market.data_lake_v2 import QualityPolicy
 from alpha_edge.market.indicator_calculations import compute_market_indicators_for_asset
 from alpha_edge.market.standardize_bronze_v2 import build_silver_gold_from_bronze
+from alpha_edge.market.lakehouse_v3.contracts import validate_bronze_manifest, validate_candidate_manifest
 from alpha_edge.market.lakehouse_v3.ingest import registry_from_s3
 from alpha_edge.market.lakehouse_v3.storage import (
     ROOT,
@@ -202,8 +203,7 @@ def build_tables(
 def process(s3, bucket: str, *, bronze_run_id: str, execute: bool = False) -> dict:
     check_id(bronze_run_id)
     bronze = read_json(s3, bucket, f"{ROOT}/bronze/runs/{bronze_run_id}/manifest.json")
-    if bronze.get("schema") != "alpha_edge_bronze_v3_1" or bronze.get("status") != "bronze_committed":
-        raise LakehouseError("Uncommitted or incompatible Bronze")
+    validate_bronze_manifest(bronze, run_id=bronze_run_id)
     assets, fx_registry, sha = registry_from_s3(s3, bucket, bronze["registry_key"])
     if sha != bronze["registry_sha256"]:
         raise LakehouseError("Configuration revision changed since ingestion")
@@ -238,6 +238,7 @@ def process(s3, bucket: str, *, bronze_run_id: str, execute: bool = False) -> di
         "status": "review_required",
         "approved": False,
     }
+    validate_candidate_manifest(manifest, run_id=bronze_run_id)
     receipt = put_json(s3, bucket, prefix + "/manifest.json", manifest)
     return {"state": "review_required", "candidate_manifest": receipt, "quality": quality}
 

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import io
 import json
-from unittest.mock import Mock
 
 import boto3
 import pandas as pd

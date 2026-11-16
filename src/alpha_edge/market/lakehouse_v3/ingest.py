@@ -13,6 +13,7 @@ from datetime import date, datetime, timezone
 import pandas as pd
 
 from alpha_edge.market.ingest_bronze_yahoo_v2 import acquire_yahoo_bars, acquire_yahoo_fx_quote
+from alpha_edge.market.lakehouse_v3.contracts import validate_bronze_manifest, validate_registry_document
 from alpha_edge.market.lakehouse_v3.storage import (
     ROOT,
     LakehouseError,
@@ -33,8 +34,9 @@ def registry_from_s3(s3, bucket: str, registry_key: str) -> tuple[pd.DataFrame, 
         raise LakehouseError("Asset configuration must live under market/lake_v3/config/")
     raw = read_bytes(s3, bucket, registry_key)
     doc = json.loads(raw)
+    validate_registry_document(doc)
     assets = pd.DataFrame(doc["assets"])
-    fx = pd.DataFrame(doc.get("fx_pairs", []), columns=sorted(FX_COLUMNS))
+    fx = pd.DataFrame(doc["fx_pairs"], columns=sorted(FX_COLUMNS))
     if assets.empty or REGISTRY_COLUMNS - set(assets):
         raise LakehouseError("Registry missing assets or required columns")
     if assets["asset_id"].duplicated().any() or assets["yahoo_ticker"].isna().any():
@@ -135,6 +137,7 @@ def acquire(
         "status": "bronze_committed",
         "completed_at_utc": datetime.now(timezone.utc).isoformat(),
     }
+    validate_bronze_manifest(manifest, run_id=run_id)
     receipt = put_json(s3, bucket, base + "/manifest.json", manifest)
     return {"state": "bronze_committed", "manifest": receipt, "rows": manifest["rows"]}
 

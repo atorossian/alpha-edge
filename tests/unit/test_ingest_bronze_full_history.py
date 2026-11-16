@@ -27,40 +27,60 @@ def _csv(rows):
 def _sources():
     rows = [
         {
-            "asset_id": "EQH001", "row_id": "row-spy", "ticker": "SPY",
-            "yahoo_ticker": "SPY", "currency": "USD", "include": "1",
+            "asset_id": "EQH001",
+            "row_id": "row-spy",
+            "ticker": "SPY",
+            "yahoo_ticker": "SPY",
+            "currency": "USD",
+            "include": "1",
         },
         {
-            "asset_id": "CRYPTO:BTC-USD", "row_id": "row-btc", "ticker": "BTC-USD",
-            "yahoo_ticker": "BTC-USD", "currency": "USD", "include": "1",
+            "asset_id": "CRYPTO:BTC-USD",
+            "row_id": "row-btc",
+            "ticker": "BTC-USD",
+            "yahoo_ticker": "BTC-USD",
+            "currency": "USD",
+            "include": "1",
         },
         {
-            "asset_id": "EQH002", "row_id": "row-eur", "ticker": "EUR-USD",
-            "yahoo_ticker": "EURUSD=X", "currency": "USD", "include": "1",
+            "asset_id": "EQH002",
+            "row_id": "row-eur",
+            "ticker": "EUR-USD",
+            "yahoo_ticker": "EURUSD=X",
+            "currency": "USD",
+            "include": "1",
         },
         {
-            "asset_id": "EQH003", "row_id": "row-excluded", "ticker": "EXCLUDED",
-            "yahoo_ticker": "EXCLUDED", "currency": "USD", "include": "0",
+            "asset_id": "EQH003",
+            "row_id": "row-excluded",
+            "ticker": "EXCLUDED",
+            "yahoo_ticker": "EXCLUDED",
+            "currency": "USD",
+            "include": "0",
         },
         {
-            "asset_id": "EQH004", "row_id": "row-unknown", "ticker": "UNKNOWN",
-            "yahoo_ticker": "UNKNOWN", "currency": "", "include": "1",
+            "asset_id": "EQH004",
+            "row_id": "row-unknown",
+            "ticker": "UNKNOWN",
+            "yahoo_ticker": "UNKNOWN",
+            "currency": "",
+            "include": "1",
         },
     ]
     return {
         "universe.csv": _csv(rows),
-        "universe_overrides.csv": _csv([
-            {"target_row_id": "row-eur", "ticker": "EUR-USD", "yahoo_ticker": "EURUSD=X", "lock_yahoo_ticker": "1"}
-        ]),
-        "asset_excluded.csv": _csv([
-            {"target_row_id": "row-excluded", "ticker": "EXCLUDED", "reason": "not in broker"}
-        ]),
+        "universe_overrides.csv": _csv(
+            [{"target_row_id": "row-eur", "ticker": "EUR-USD", "yahoo_ticker": "EURUSD=X", "lock_yahoo_ticker": "1"}]
+        ),
+        "asset_excluded.csv": _csv(
+            [{"target_row_id": "row-excluded", "ticker": "EXCLUDED", "reason": "not in broker"}]
+        ),
         "ingest_force_refresh.csv": _csv([{"ticker": "SPY"}]),
         # The historical manual source mismatch is not a reason to
         # substitute the Yahoo ticker already resolved by universe.csv.
-        "universe_manual_additions.csv": _csv([
-            {"ticker": "EUR-USD", "yahoo_ticker": "EUR-USD", "lock_yahoo_ticker": "1"}
-        ]),
+        "universe_manual_additions.csv": _csv(
+            [{"ticker": "EUR-USD", "yahoo_ticker": "EUR-USD", "lock_yahoo_ticker": "1"}]
+        ),
     }
 
 
@@ -73,10 +93,7 @@ def s3_with_snapshot():
             CreateBucketConfiguration={"LocationConstraint": "eu-west-1"},
         )
         files = _sources()
-        metadata = {
-            key: {"sha256": bronze._digest(blob), "bytes": len(blob)}
-            for key, blob in files.items()
-        }
+        metadata = {key: {"sha256": bronze._digest(blob), "bytes": len(blob)} for key, blob in files.items()}
         fingerprint = bronze._digest(bronze._json_bytes(metadata))
         for filename, blob in files.items():
             s3.put_object(
@@ -138,8 +155,9 @@ def test_source_fingerprint_and_provenance_are_mandatory(s3_with_snapshot):
 
 def test_dry_run_has_no_s3_writes_and_counts_every_included_asset(s3_with_snapshot):
     s3, fingerprint = s3_with_snapshot
-    result = bronze.ingest(s3, BUCKET, fingerprint=fingerprint, run_id="all-history-test",
-                           end="2026-11-14", execute=False)
+    result = bronze.ingest(
+        s3, BUCKET, fingerprint=fingerprint, run_id="all-history-test", end="2026-11-14", execute=False
+    )
     assert result["selected"] == 4
     assert result["writes"] == 0
     assert s3.list_objects_v2(Bucket=BUCKET, Prefix=bronze.BRONZE_ROOT).get("KeyCount") == 0
@@ -149,24 +167,27 @@ def test_yahoo_period_max_arguments_and_immutable_per_asset_manifest(s3_with_sna
     s3, fingerprint = s3_with_snapshot
     calls = []
 
-    def acquire(asset_id, symbol, *, start, end, batch_id,
-                ticker_factory, currency_hint, full_history):
+    def acquire(asset_id, symbol, *, start, end, batch_id, ticker_factory, currency_hint, full_history):
         calls.append((asset_id, symbol, start, end, full_history, currency_hint))
         record = {"asset_id": asset_id, "yahoo_ticker": symbol, "currency_hint": currency_hint}
         return _fake_bars(record, batch_id), {"source": "Yahoo mock", "rows": 3}
 
     monkeypatch.setattr(bronze, "acquire_yahoo_bars", acquire)
     result = bronze.ingest(
-        s3, BUCKET, fingerprint=fingerprint, run_id="pilot-history-test",
-        end="2026-11-14", execute=True, only=["SPY", "EUR-USD"],
-        retry_count=0, pause_seconds=0,
+        s3,
+        BUCKET,
+        fingerprint=fingerprint,
+        run_id="pilot-history-test",
+        end="2026-11-14",
+        execute=True,
+        only=["SPY", "EUR-USD"],
+        retry_count=0,
+        pause_seconds=0,
     )
     assert result["selected"] == result["succeeded"] == 2
     assert all(call[2] is None and call[4] is True for call in calls)
     assert sorted(call[1] for call in calls) == ["EURUSD=X", "SPY"]
-    assert bronze.verify(
-        s3, BUCKET, fingerprint=fingerprint, run_id="pilot-history-test"
-    )["state"] == "pass"
+    assert bronze.verify(s3, BUCKET, fingerprint=fingerprint, run_id="pilot-history-test")["state"] == "pass"
     for aid in ("EQH001", "EQH002"):
         key = bronze._target_prefix("pilot-history-test", aid) + "/manifest.json"
         m = json.loads(bronze._read(s3, BUCKET, key))
@@ -187,8 +208,13 @@ def test_same_run_resumes_without_refetching_successful_assets(s3_with_snapshot,
 
     monkeypatch.setattr(bronze, "acquire_yahoo_bars", acquire)
     options = dict(
-        fingerprint=fingerprint, run_id="resume-history-test", end="2026-11-14",
-        execute=True, only=["SPY", "BTC-USD"], retry_count=0, pause_seconds=0,
+        fingerprint=fingerprint,
+        run_id="resume-history-test",
+        end="2026-11-14",
+        execute=True,
+        only=["SPY", "BTC-USD"],
+        retry_count=0,
+        pause_seconds=0,
     )
     assert bronze.ingest(s3, BUCKET, **options)["succeeded"] == 2
     second = bronze.ingest(s3, BUCKET, **options)
@@ -209,8 +235,13 @@ def test_partial_failures_are_recorded_and_retry_is_possible(s3_with_snapshot, m
 
     monkeypatch.setattr(bronze, "acquire_yahoo_bars", acquire)
     options = dict(
-        fingerprint=fingerprint, run_id="recover-history-test", end="2026-11-14",
-        execute=True, only=["SPY", "BTC-USD"], retry_count=0, pause_seconds=0,
+        fingerprint=fingerprint,
+        run_id="recover-history-test",
+        end="2026-11-14",
+        execute=True,
+        only=["SPY", "BTC-USD"],
+        retry_count=0,
+        pause_seconds=0,
     )
     first = bronze.ingest(s3, BUCKET, **options)
     assert first["failed"] == 1
@@ -226,8 +257,7 @@ def test_partial_failures_are_recorded_and_retry_is_possible(s3_with_snapshot, m
 def test_ambiguous_or_excluded_selection_never_silently_ingested(s3_with_snapshot):
     s3, fingerprint = s3_with_snapshot
     with pytest.raises(bronze.BronzeIngestError, match="Unknown or excluded"):
-        bronze.ingest(s3, BUCKET, fingerprint=fingerprint, run_id="bad-excluded",
-                      end="2026-11-14", only=["EXCLUDED"])
+        bronze.ingest(s3, BUCKET, fingerprint=fingerprint, run_id="bad-excluded", end="2026-11-14", only=["EXCLUDED"])
     with pytest.raises(bronze.BronzeIngestError, match="different selection"):
         bronze._write_run(
             s3, BUCKET, run_id="immutable-config", run_config={"run_id": "immutable-config"}, execute=True
@@ -243,7 +273,9 @@ def test_wrong_source_commit_or_bad_source_checksum_blocks_bronze(s3_with_snapsh
     key = f"{bronze.SNAPSHOT_ROOT}/{fingerprint}/{filename}"
     original = bronze._read(s3, BUCKET, key)
     s3.put_object(
-        Bucket=BUCKET, Key=key, Body=original,
+        Bucket=BUCKET,
+        Key=key,
+        Body=original,
         Metadata={"sha256": bronze._digest(original), "source-git-commit": "b" * 40},
     )
     with pytest.raises(bronze.BronzeIngestError, match="one exact Git commit"):
@@ -269,9 +301,15 @@ def test_verify_detects_corrupt_source_object(s3_with_snapshot, monkeypatch):
         return _fake_bars({"asset_id": asset_id, "yahoo_ticker": symbol}, batch_id), {}
 
     monkeypatch.setattr(bronze, "acquire_yahoo_bars", acquire)
-    options = dict(fingerprint=fingerprint, run_id="corrupt-history-test",
-                   end="2026-11-14", execute=True, only=["SPY"],
-                   retry_count=0, pause_seconds=0)
+    options = dict(
+        fingerprint=fingerprint,
+        run_id="corrupt-history-test",
+        end="2026-11-14",
+        execute=True,
+        only=["SPY"],
+        retry_count=0,
+        pause_seconds=0,
+    )
     bronze.ingest(s3, BUCKET, **options)
     manifest = json.loads(
         bronze._read(s3, BUCKET, bronze._target_prefix("corrupt-history-test", "EQH001") + "/manifest.json")

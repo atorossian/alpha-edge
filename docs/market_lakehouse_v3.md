@@ -13,7 +13,7 @@ Tests use `moto` simulated S3 and in-memory fixtures.
 
 ### Dependency graph
 
-1. **S3 config registry:** immutable asset ID, provider symbol, source currency,
+1. **S3 config registry:** selected only from the five current universe configuration files, with immutable asset ID, provider symbol, source currency,
    exchange calendar, explicit FX quote direction. Registry revision SHA is pinned.
 2. **Bronze:** source OHLCV, source dividends/splits, source FX, Yahoo provenance,
    SHA-256 artifact references. A final manifest makes an ingestion batch readable.
@@ -78,29 +78,38 @@ Run in an AWS-hosted job/container with Python 3.10 and an IAM role authorized
 for the dedicated v3 prefixes. None of these CLI commands write market data to
 local files. **No production execution is authorized merely by these examples.**
 
-### 1. Bootstrap reference registry (read-only first)
+### 1. Bootstrap the current universe configuration (dry-run first)
 
-Historical source:
-`s3://alpha-edge-algo/dev/market/lake_v2/archives/old-outputs-20261110/`.
-The S3 plan is CHECKSUM verified. Because it is historical, it is only a
-starting point, **not the current production registry**.
+The registry must derive exclusively from the five current files in
+`data/universe/`: `universe.csv`, `universe_overrides.csv`,
+`asset_excluded.csv`, `ingest_force_refresh.csv` and
+`universe_manual_additions.csv`. **Do not use old v1/v2 market prices,
+cohorts, backfills, release inventories or historical asset crosswalks.**
+
+A pinned Git commit supplies the initial five source files over HTTPS
+directly to memory; the immutable S3 source snapshots become authoritative
+once staged and separately activated.
 
 ```bash
 poetry run python -m alpha_edge.market.lakehouse_v3.pipeline bootstrap \
   --bucket alpha-edge-algo \
-  --asset-ids 'CRYPTO:BTC-USD,CRYPTO:ETH-USD'
+  --source-commit <full-40-character-commit-SHA>
 ```
 
-To store the **review candidate** registry in S3, append `--execute`; the
-result contains the immutable `target_key`. The current universe and source
-identity changes must be independently reconciled and approved.
+`--execute` stages the five immutable source files plus one
+content-addressed S3 registry. This is **not activation**. The registry
+retains every `include=1` asset while flagging invalid currency,
+calendar or conflicting overrides; it also records all `include=0`
+assets as excluded. See
+`docs/aea91_s3_asset_registry.md` for configuration authority and
+activation prerequisites.
 
 ### 2. Ingest + calculate Bronze/Silver/Gold (dry-run first)
 
 ```bash
 poetry run python -m alpha_edge.market.lakehouse_v3.pipeline build \
   --bucket alpha-edge-algo \
-  --registry-key market/lake_v3/config/registry_<hash>.json \
+  --registry-key market/lake_v3/config/registries/registry_<SHA256>.json \
   --run-id pilot-20261113 \
   --start 2025-01-01 --end 2026-11-13
 ```

@@ -11,6 +11,7 @@ from moto import mock_aws
 
 from alpha_edge.market.lakehouse_v3.registry_v3 import (
     SOURCE_FILES,
+    activate_registry,
     build_registry,
     load_active,
     read_registry,
@@ -182,3 +183,48 @@ def test_registry_checksum_binding_and_determinism():
     doc["assets"][0]["source_status"] = "blocked"
     with pytest.raises(LakehouseError):
         validate_registry(doc)
+
+
+def test_configuration_activation_requires_complete_sources_and_never_approves_prices():
+    with mock_aws():
+        s3 = boto3.client("s3", region_name="eu-west-1")
+        s3.create_bucket(Bucket="alpha-edge-algo",
+                         CreateBucketConfiguration={"LocationConstraint": "eu-west-1"})
+        candidate = stage_registry(s3, "alpha-edge-algo", source_fixtures(), execute=True)
+        options = {
+            "key": candidate["registry_key"],
+            "sha256": candidate["sha256"],
+        }
+        preview = activate_registry(s3, "alpha-edge-algo", **options)
+        assert preview["writes"] == 0
+        assert preview["market_prices_approved"] is False
+        with pytest.raises(LakehouseError):
+            load_active(s3, "alpha-edge-algo")
+        activated = activate_registry(s3, "alpha-edge-algo", **options, execute=True)
+        assert activated["writes"] == 1
+        data, pointer = load_active(s3, "alpha-edge-algo")
+        assert data["summary"]["included"] == 4
+        assert pointer["market_prices_approved"] is False
+        assert activated["blocked"] == 2
+        with pytest.raises(LakehouseError, match="expected previous SHA"):
+            activate_registry(s3, "alpha-edge-algo", **options, execute=True)
+
+
+def test_activation_rejects_tampered_configuration_source_bytes():
+    with mock_aws():
+        s3 = boto3.client("s3", region_name="eu-west-1")
+        s3.create_bucket(Bucket="alpha-edge-algo",
+                         CreateBucketConfiguration={"LocationConstraint": "eu-west-1"})
+        candidate = stage_registry(s3, "alpha-edge-algo", source_fixtures(), execute=True)
+        source = read_registry(s3, "alpha-edge-algo", candidate["registry_key"], candidate["sha256"])
+        key = f"{ROOT}/config/source_snapshots/{source['source_fingerprint']}/universe.csv"
+        s3.put_object(Bucket="alpha-edge-algo", Key=key, Body=b"corrupted")
+        with pytest.raises(LakehouseError, match="checksum/size"):
+            activate_registry(
+                s3, "alpha-edge-algo",
+                key=candidate["registry_key"],
+                sha256=candidate["sha256"],
+                execute=True,
+            )
+        with pytest.raises(LakehouseError):
+            load_active(s3, "alpha-edge-algo")

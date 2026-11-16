@@ -626,6 +626,9 @@ def ingest(
                 bucket,
                 run_id=run_id,
                 status="interrupted",
+                fingerprint=fingerprint,
+                end=end,
+                record=record,
                 metadata={"processed_before_interrupt": done - 1},
             )
             raise

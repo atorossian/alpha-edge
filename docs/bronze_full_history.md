@@ -183,3 +183,72 @@ and `s3:PutObject`, `s3:GetObject`, `s3:HeadObject` on
 `market/*/v1`, v2 datasets, trades or ledger is required.
 
 The `data/universe/*.csv` files are NOT accessed locally by this command.
+
+
+## Visible progress and audit trail (compatible with existing runs)
+
+The CLI now prints a startup summary, the first processed asset, and a
+progress line every ten selected assets (or at completion), in the spirit
+of `ingest_market_data.py`:
+
+```text
+=== BRONZE FULL HISTORY INGEST ===
+run_id:          bronze-full-20261116
+included_total:  2035
+selected:        2035
+[bronze][progress] done=1/2035 (0.0%) ok=1 resumed=0 failed=0 rate=... assets/s elapsed=...m
+[bronze][fail][1]  ... asset_id=... yahoo=... error=...
+[bronze][progress] done=10/2035 (0.5%) ok=... resumed=... failed=... rate=... assets/s elapsed=...m
+```
+
+These are **illustrative format examples**, not a live ingestion report.
+All counters reflect actual processed assets. `resumed` counts existing
+successful S3 commits skipped during this invocation; it is not the number
+of provider downloads performed. Console output is flushed immediately.
+
+New options:
+
+- `--progress-every 10`: periodic progress interval (use `1` to print
+  every asset).
+- `--print-first-failures 20`: number of individual failure messages
+  printed; all failures remain recorded in S3.
+- `--verbose-yahoo`: restore raw yfinance diagnostics when investigating
+  specific ticker failures. By default the script suppresses the
+  misleading/repeated provider logging and prints the classified
+  final per-asset exception instead.
+
+Every `--execute` invocation writes **append-only** S3 audit events:
+
+```text
+market/lake_v3/bronze/full_history/runs/<run-id>/audit/dt=YYYY-MM-DD/
+  bronze_<timestamp>-<uuid>.json
+```
+
+The audit event's fields follow Alpha Edge's established
+`build_dataset` pattern: audit ID, run ID, entity type/asset ID,
+script, status, source fingerprint, asset provider symbol, output keys,
+observed metrics and errors. Events cover invocation start, each asset's
+success/already-committed/failure, normal run completion, and
+`KeyboardInterrupt` interruption. This audit stays under the **new
+Bronze S3 namespace**, not the old engine/v1 audit paths. An
+interrupted run retains its earlier committed manifests and audit
+records.
+
+**If the previous command is still executing:** the running Python
+process will not automatically load code changes. Stop it with
+`Ctrl+C`, then update this branch:
+
+```bash
+git pull --ff-only origin feature/bronze-full-history-s3
+```
+
+Rerun **the exact same** `ingest` command, maintaining
+`--run-id bronze-full-20261116`, the same `--end` and source
+fingerprint. Existing successful S3 manifests will be skipped, and
+the newly started invocation will emit progress and new audit events.
+Don't run two copies against the same run ID concurrently.
+
+If S3 auditing itself fails, the script reports an exception rather than
+silently declaring un-audited work complete. For any pre-update assets
+that already committed successfully, the original immutable S3
+manifests remain the authoritative ingestion evidence.

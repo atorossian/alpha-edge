@@ -318,3 +318,131 @@ def test_verify_detects_corrupt_source_object(s3_with_snapshot, monkeypatch):
     report = bronze.verify(s3, BUCKET, fingerprint=fingerprint, run_id="corrupt-history-test")
     assert report["corrupt"] == 1
     assert report["state"] == "incomplete"
+
+
+def _audit_records(s3, run_id):
+    prefix = f"{bronze.BRONZE_ROOT}/runs/{run_id}/audit/"
+    objects = s3.list_objects_v2(Bucket=BUCKET, Prefix=prefix).get("Contents", [])
+    return [
+        json.loads(bronze._read(s3, BUCKET, obj["Key"]))
+        for obj in objects
+    ]
+
+
+def test_progress_and_append_only_audit_for_success_and_resume(s3_with_snapshot, monkeypatch, capsys):
+    s3, fingerprint = s3_with_snapshot
+
+    def acquire(asset_id, symbol, *, batch_id, **_kwargs):
+        return _fake_bars({"asset_id": asset_id, "yahoo_ticker": symbol}, batch_id), {}
+
+    monkeypatch.setattr(bronze, "acquire_yahoo_bars", acquire)
+    options = dict(
+        fingerprint=fingerprint,
+        run_id="progress-audit-test",
+        end="2026-11-14",
+        execute=True,
+        only=["SPY", "BTC-USD"],
+        retry_count=0,
+        pause_seconds=0,
+        progress_every=1,
+    )
+    first = bronze.ingest(s3, BUCKET, **options)
+    output = capsys.readouterr().out
+    assert "=== BRONZE FULL HISTORY INGEST ===" in output
+    assert "done=1/2" in output
+    assert "done=2/2" in output
+    assert "ok=2 resumed=0 failed=0" in output
+    assert first["audit_final_key"].startswith(f"{bronze.BRONZE_ROOT}/runs/progress-audit-test/audit/")
+    original_events = _audit_records(s3, options["run_id"])
+    assert len(original_events) == 4
+    assert sorted(a["status"] for a in original_events) == ["complete", "started", "success", "success"]
+    successful = [event for event in original_events if event["status"] == "success"]
+    assert all(event["event_type"] == "build_dataset" for event in successful)
+    assert all(len(event["output_keys"]) == 2 for event in successful)
+    assert all(event["entity_id"] for event in successful)
+    second = bronze.ingest(s3, BUCKET, **options)
+    assert second["already_committed"] == 2
+    resumed_output = capsys.readouterr().out
+    assert "ok=0 resumed=2 failed=0" in resumed_output
+    later_events = _audit_records(s3, options["run_id"])
+    assert len(later_events) == 8
+    assert sorted(event["status"] for event in later_events).count("already_committed") == 2
+    assert all(event in later_events for event in original_events)
+
+
+def test_failed_asset_has_visible_message_and_s3_audit(s3_with_snapshot, monkeypatch, capsys):
+    s3, fingerprint = s3_with_snapshot
+
+    def acquire(asset_id, symbol, *, batch_id, **_kwargs):
+        if symbol == "BTC-USD":
+            raise RuntimeError("Yahoo has no data")
+        return _fake_bars({"asset_id": asset_id, "yahoo_ticker": symbol}, batch_id), {}
+
+    monkeypatch.setattr(bronze, "acquire_yahoo_bars", acquire)
+    result = bronze.ingest(
+        s3, BUCKET,
+        fingerprint=fingerprint, run_id="failed-audit-test",
+        end="2026-11-14", execute=True, only=["SPY", "BTC-USD"],
+        retry_count=0, pause_seconds=0, progress_every=1,
+    )
+    out = capsys.readouterr().out
+    assert "[bronze][fail][1]" in out
+    assert "done=2/2" in out
+    assert "failed=1" in out
+    events = _audit_records(s3, "failed-audit-test")
+    assert sorted(event["status"] for event in events) == [
+        "completed_with_failures", "failed", "started", "success"
+    ]
+    failure = next(event for event in events if event["status"] == "failed")
+    assert failure["entity_id"] == "CRYPTO:BTC-USD"
+    assert "Yahoo has no data" in failure["error"]
+    assert "s3://" in result["report_s3_uri"]
+
+
+def test_interrupt_writes_audit_and_remains_resumable(s3_with_snapshot, monkeypatch, capsys):
+    s3, fingerprint = s3_with_snapshot
+    fail_once = {"BTC-USD"}
+
+    def acquire(asset_id, symbol, *, batch_id, **_kwargs):
+        if symbol in fail_once:
+            raise KeyboardInterrupt()
+        return _fake_bars({"asset_id": asset_id, "yahoo_ticker": symbol}, batch_id), {}
+
+    monkeypatch.setattr(bronze, "acquire_yahoo_bars", acquire)
+    options = dict(
+        fingerprint=fingerprint, run_id="interrupt-audit-test",
+        end="2026-11-14", execute=True, only=["SPY", "BTC-USD"],
+        retry_count=0, pause_seconds=0, progress_every=1,
+    )
+    with pytest.raises(KeyboardInterrupt):
+        bronze.ingest(s3, BUCKET, **options)
+    assert "[bronze][interrupted]" in capsys.readouterr().out
+    statuses = [event["status"] for event in _audit_records(s3, options["run_id"])]
+    assert "interrupted" in statuses
+    fail_once.clear()
+    resumed = bronze.ingest(s3, BUCKET, **options)
+    assert resumed["already_committed"] == 1
+    assert resumed["succeeded"] == 1
+    assert bronze.verify(
+        s3, BUCKET, fingerprint=fingerprint, run_id=options["run_id"]
+    )["state"] == "pass"
+
+
+def test_dry_run_does_not_emit_audit(s3_with_snapshot):
+    s3, fingerprint = s3_with_snapshot
+    result = bronze.ingest(
+        s3, BUCKET, fingerprint=fingerprint,
+        run_id="audit-dry-run-test", end="2026-11-14", execute=False,
+    )
+    assert result["writes"] == 0
+    assert _audit_records(s3, "audit-dry-run-test") == []
+
+
+def test_invalid_progress_configuration_is_rejected(s3_with_snapshot):
+    s3, fingerprint = s3_with_snapshot
+    with pytest.raises(bronze.BronzeIngestError, match="Invalid progress"):
+        bronze.ingest(
+            s3, BUCKET, fingerprint=fingerprint,
+            run_id="invalid-progress-test", end="2026-11-14",
+            progress_every=0,
+        )

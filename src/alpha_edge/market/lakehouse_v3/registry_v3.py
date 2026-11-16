@@ -324,14 +324,11 @@ def build_registry(files: dict[str, bytes]) -> dict:
         "summary": {
             "universe_total": len(rows),
             "included": included,
-            "configured": len(configured), "blocked": len(blocked),
+            "configured": len(configured),
+            "blocked": len(blocked),
             "excluded": len(rows) - included,
-            "blocker_counts": dict(sorted(Counter(
-                reason for a in blocked for reason in a["blockers"]
-            ).items())),
-            "by_currency": dict(sorted(Counter(
-                a["currency"] or "<missing>" for a in assets
-            ).items())),
+            "blocker_counts": dict(sorted(Counter(reason for a in blocked for reason in a["blockers"]).items())),
+            "by_currency": dict(sorted(Counter(a["currency"] or "<missing>" for a in assets).items())),
         },
     }
     validate_registry(registry)
@@ -367,9 +364,7 @@ def validate_registry(doc: dict) -> None:
         is_blocked = asset["source_status"] == "blocked"
         if bool(asset["blockers"]) != is_blocked:
             raise LakehouseError("Blocked asset has incorrect readiness flag")
-        if not is_blocked and not (
-            asset["currency"] and asset["calendar_id"] and asset["exchange_timezone"]
-        ):
+        if not is_blocked and not (asset["currency"] and asset["calendar_id"] and asset["exchange_timezone"]):
             raise LakehouseError("Configured asset lacks required market policy")
     fx_ccy = {x["currency"] for x in doc["fx_pairs"]}
     required = {a["currency"] for a in assets if a["currency"] and a["currency"] != "USD"}
@@ -387,8 +382,7 @@ def stage_registry(s3, bucket: str, source_files: dict[str, bytes], *, execute: 
     doc = build_registry(source_files)
     key = registry_key(doc)
     sha = digest(json_bytes(doc))
-    result = {"state": "candidate", "registry_key": key, "sha256": sha,
-              "summary": doc["summary"], "writes": 0}
+    result = {"state": "candidate", "registry_key": key, "sha256": sha, "summary": doc["summary"], "writes": 0}
     if not execute:
         return result
     src_root = f"{ROOT}/config/source_snapshots/{doc['source_fingerprint']}"
@@ -441,8 +435,13 @@ def verify_source_snapshots(s3, bucket: str, doc: dict) -> None:
 
 
 def activate_registry(
-    s3, bucket: str, *, key: str, sha256: str,
-    execute: bool = False, expected_previous_sha256: str | None = None,
+    s3,
+    bucket: str,
+    *,
+    key: str,
+    sha256: str,
+    execute: bool = False,
+    expected_previous_sha256: str | None = None,
 ) -> dict:
     """Activate CONFIG authority, not financial data approval.
 
@@ -493,12 +492,18 @@ def activate_registry(
     kwargs = {"IfMatch": prior["ETag"]} if prior else {"IfNoneMatch": "*"}
     try:
         s3.put_object(
-            Bucket=bucket, Key=pointer_key, Body=json_bytes(pointer),
-            ContentType="application/json", **kwargs,
+            Bucket=bucket,
+            Key=pointer_key,
+            Body=json_bytes(pointer),
+            ContentType="application/json",
+            **kwargs,
         )
     except ClientError as exc:
         if exc.response.get("Error", {}).get("Code") in {
-            "PreconditionFailed", "412", "ConditionalRequestConflict", "409"
+            "PreconditionFailed",
+            "412",
+            "ConditionalRequestConflict",
+            "409",
         }:
             raise LakehouseError("Concurrent active-registry update rejected") from exc
         raise

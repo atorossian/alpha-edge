@@ -237,3 +237,87 @@ def validate_candidate_manifest(doc: dict, *, run_id: str) -> None:
         directory=f"{ROOT}/candidates/{run_id}",
         required=CANDIDATE_ARTIFACT_KEYS,
     )
+
+
+def validate_pilot_registry_document(doc: dict) -> None:
+    """AEA-91 review-only richer registry. Never confuse with approved v3.1."""
+    _required_fields(
+        doc,
+        {"schema", "scope", "review_state", "assets", "fx_pairs", "evidence", "release_blockers"},
+        "v3 pilot registry",
+    )
+    if (
+        doc["schema"] != "alpha_edge_registry_v3_2"
+        or doc["scope"] != "pilot_eight_assets"
+        or doc["review_state"] != "review_required"
+    ):
+        raise LakehouseError("Unsupported, out-of-scope or prematurely approved pilot registry")
+    if not isinstance(doc["release_blockers"], list) or not doc["release_blockers"]:
+        raise LakehouseError("Pilot registry must retain release blockers")
+    # Shared identity, currency, FX mapping, calendar uniqueness checks.
+    compatible = {**doc, "schema": REGISTRY_SCHEMA}
+    validate_registry_document(compatible)
+    if len(doc["assets"]) != 8:
+        raise LakehouseError("Pilot registry must contain exactly eight assets")
+    _required_fields(
+        doc["evidence"],
+        {"historical_plan_sha256", "release_inventory_sha256", "current_universe_sha256",
+         "release_inventory_commit_key", "historical_archive_id", "current_git_commit"},
+        "pilot evidence",
+    )
+    for key in ("historical_plan_sha256", "release_inventory_sha256", "current_universe_sha256"):
+        _sha(doc["evidence"][key], key)
+    expected_tickers = {
+        "SPY", "GLD", "BTC-USD", "RENT3.SA", "TRAXIONA.MX",
+        "LOG.MC", "REY.MI", "EURUSD=X",
+    }
+    if {x["yahoo_ticker"] for x in doc["assets"]} != expected_tickers:
+        raise LakehouseError("Pilot registry contains an unexpected or missing security")
+    for asset in doc["assets"]:
+        _required_fields(
+            asset,
+            {"asset_id", "yahoo_ticker", "currency", "quote_unit",
+             "quote_to_currency_factor", "calendar_id", "exchange_timezone",
+             "asset_class", "include", "source_aliases",
+             "historical_retention_required", "identity_evidence_state"},
+            "pilot asset",
+        )
+        if asset["include"] is not True or asset["historical_retention_required"] is not True:
+            raise LakehouseError("Pilot excludes an asset or would discard its source history")
+        if asset["quote_unit"] != asset["currency"] or asset["quote_to_currency_factor"] != 1.0:
+            raise LakehouseError("Unverified pilot quote-unit conversion")
+        if not isinstance(asset["exchange_timezone"], str):
+            raise LakehouseError("Exchange timezone must be explicit")
+        from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+        try:
+            ZoneInfo(asset["exchange_timezone"])
+        except (ZoneInfoNotFoundError, ValueError) as exc:
+            raise LakehouseError("Unknown exchange timezone") from exc
+        aliases = asset["source_aliases"]
+        if not isinstance(aliases, list) or not aliases:
+            raise LakehouseError("Source observation alias evidence missing")
+        distinct_aliases = set()
+        for alias in aliases:
+            _required_fields(
+                alias,
+                {"provider_symbol", "observation_source", "effective_from",
+                 "effective_to", "effective_dates_verified"},
+                "source alias",
+            )
+            if (
+                alias["provider_symbol"] in distinct_aliases
+                or not alias["observation_source"]
+                or alias["effective_dates_verified"] is not False
+                or alias["effective_from"] is not None
+                or alias["effective_to"] is not None
+            ):
+                raise LakehouseError("Unexpected duplicated/approved or fabricated historical alias")
+            distinct_aliases.add(alias["provider_symbol"])
+        if asset["yahoo_ticker"] not in distinct_aliases:
+            raise LakehouseError("Current source symbol absent from alias evidence")
+        if asset["yahoo_ticker"] == "EURUSD=X":
+            if distinct_aliases != {"EUR-USD", "EURUSD=X"}:
+                raise LakehouseError("EUR/USD history must preserve both observed symbols")
+        elif distinct_aliases != {asset["yahoo_ticker"]}:
+            raise LakehouseError("Unexpected source symbol transition requires review")

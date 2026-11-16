@@ -106,10 +106,7 @@ def _archived_fx(s3, bucket: str, archive_id: str) -> list[dict]:
     if digest(body) != matches[0]["sha256"]:
         raise LakehouseError("Historical FX configuration checksum failure")
     records = list(csv.DictReader(io.StringIO(body.decode("utf-8-sig"))))
-    return [
-        {k: row[k] for k in ("currency", "provider_symbol", "direction")}
-        for row in records
-    ]
+    return [{k: row[k] for k in ("currency", "provider_symbol", "direction")} for row in records]
 
 
 def build_pilot_registry(s3, bucket: str, *, archive_id: str = ARCHIVE_ID) -> dict:
@@ -218,9 +215,7 @@ def build_pilot_registry(s3, bucket: str, *, archive_id: str = ARCHIVE_ID) -> di
     return doc
 
 
-def stage_pilot_registry(
-    s3, bucket: str, *, archive_id: str = ARCHIVE_ID, execute: bool = False
-) -> dict:
+def stage_pilot_registry(s3, bucket: str, *, archive_id: str = ARCHIVE_ID, execute: bool = False) -> dict:
     """Write an immutable, unapproved S3 candidate only when explicitly executed."""
     from alpha_edge.market.lakehouse_v3.contracts import validate_pilot_registry_document
 

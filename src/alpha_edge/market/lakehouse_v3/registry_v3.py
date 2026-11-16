@@ -322,6 +322,8 @@ def build_registry(files: dict[str, bytes]) -> dict:
         "fx_pairs": _fx_sources(currencies, rows),
         "refresh_tickers": sorted(refresh_tickers),
         "summary": {
+            "universe_total": len(rows),
+            "included": included,
             "configured": len(configured), "blocked": len(blocked),
             "excluded": len(rows) - included,
             "blocker_counts": dict(sorted(Counter(

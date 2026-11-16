@@ -88,11 +88,15 @@ def _required(rows: list[dict], fields: set[str], filename: str) -> None:
 
 
 def _resolve(row: dict, by_id: dict, by_ticker: dict, filename: str) -> dict:
-    """Prefer stable row_id; a provided invalid row_id is NOT a fallback ticker."""
+    """Prefer stable row ID; never guess among duplicate broker tickers."""
     rid = row.get("target_row_id", "")
-    result = by_id.get(rid) if rid else by_ticker.get(row.get("ticker", ""))
+    if rid:
+        result = by_id.get(rid)
+    else:
+        candidates = by_ticker.get(row.get("ticker", ""), [])
+        result = candidates[0] if len(candidates) == 1 else None
     if result is None or (rid and row.get("ticker") and result["ticker"] != row["ticker"]):
-        raise LakehouseError(f"{filename}: unknown or conflicting target {rid or row.get('ticker')}")
+        raise LakehouseError(f"{filename}: unknown or ambiguous row target {rid or row.get('ticker')}")
     return result
 
 
@@ -112,10 +116,12 @@ def validate_source_files(files: dict[str, bytes]) -> dict[str, list[dict]]:
               {"ticker", "yahoo_ticker", "lock_yahoo_ticker"}, "universe_manual_additions.csv")
     _required(frames["ingest_force_refresh.csv"], {"ticker"}, "ingest_force_refresh.csv")
     rows = frames["universe.csv"]
-    for col in ("row_id", "ticker", "asset_id"):
+    for col in ("row_id", "asset_id"):
         vals = [r[col] for r in rows]
         if not all(vals) or len(vals) != len(set(vals)):
             raise LakehouseError(f"universe.csv: missing or duplicate {col}")
+    if any(not r["ticker"] for r in rows):
+        raise LakehouseError("universe.csv: missing broker ticker")
     if any(r["include"] not in {"0", "1"} for r in rows):
         raise LakehouseError("universe.csv: include must be 0 or 1")
     return frames
@@ -165,7 +171,10 @@ def build_registry(files: dict[str, bytes]) -> dict:
     frames = validate_source_files(files)
     rows = frames["universe.csv"]
     by_id = {r["row_id"]: r for r in rows}
-    by_ticker = {r["ticker"]: r for r in rows}
+    # Broker tickers are not unique across listings (for example SW and MRK).
+    by_ticker: dict[str, list[dict]] = {}
+    for row in rows:
+        by_ticker.setdefault(row["ticker"], []).append(row)
     exceptions: dict[str, set[str]] = {r["asset_id"]: set() for r in rows}
     reasons: dict[str, str] = {}
     overrides = frames["universe_overrides.csv"]
@@ -183,12 +192,22 @@ def build_registry(files: dict[str, bytes]) -> dict:
             exceptions[aid].add("override_symbol_conflict")
     seen_manual: set[str] = set()
     for x in manual:
-        r = by_ticker.get(x["ticker"])
-        if r is None:
+        candidates = by_ticker.get(x["ticker"], [])
+        if not candidates:
             raise LakehouseError(f"universe_manual_additions.csv: not materialized {x['ticker']}")
-        if r["ticker"] in seen_manual:
-            raise LakehouseError(f"Duplicate manual addition: {r['ticker']}")
-        seen_manual.add(r["ticker"])
+        matched = [r for r in candidates if r["yahoo_ticker"] == x["yahoo_ticker"]]
+        if len(matched) == 1:
+            r = matched[0]
+        elif len(candidates) == 1:
+            r = candidates[0]
+        else:
+            for candidate in candidates:
+                if candidate["include"] == "1":
+                    exceptions[candidate["asset_id"]].add("manual_ticker_ambiguous")
+            continue
+        if r["asset_id"] in seen_manual:
+            raise LakehouseError(f"Duplicate manual addition: {r['asset_id']}")
+        seen_manual.add(r["asset_id"])
         if x["lock_yahoo_ticker"] == "1" and x["yahoo_ticker"] != r["yahoo_ticker"]:
             exceptions[r["asset_id"]].add("manual_locked_yahoo_symbol_conflict")
     seen_excluded: set[str] = set()
@@ -207,6 +226,10 @@ def build_registry(files: dict[str, bytes]) -> dict:
         if ticker not in by_ticker or ticker in refresh_tickers:
             raise LakehouseError(f"Missing/duplicate force-refresh ticker: {ticker}")
         refresh_tickers.add(ticker)
+        if len(by_ticker[ticker]) != 1:
+            for candidate in by_ticker[ticker]:
+                if candidate["include"] == "1":
+                    exceptions[candidate["asset_id"]].add("force_refresh_ticker_ambiguous")
     symbols: dict[str, list[str]] = {}
     for r in rows:
         if r["include"] == "1":
@@ -234,7 +257,7 @@ def build_registry(files: dict[str, bytes]) -> dict:
             "exchange_timezone": tz, "market": r["market"],
             "exchange": r["exchange"], "asset_class": r["asset_class"],
             "source_status": "blocked" if issues else "configured",
-            "blockers": sorted(issues), "force_refresh": r["ticker"] in refresh_tickers,
+            "blockers": sorted(issues), "force_refresh": (r["ticker"] in refresh_tickers and len(by_ticker[r["ticker"]]) == 1),
             "quote_unit": ccy or None, "quote_to_currency_factor": 1.0 if ccy else None,
             "quote_unit_policy": "same_as_source_currency_pending_source_verification",
         })

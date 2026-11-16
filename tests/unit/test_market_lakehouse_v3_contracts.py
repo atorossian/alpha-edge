@@ -246,7 +246,8 @@ def test_madrid_and_milan_calendar_identifiers_work_in_project_dependency(symbol
         session.strftime("%Y-%m-%d")
         for session in calendar.valid_days(start_date="2026-04-02", end_date="2026-04-08")
     }
-    assert "2026-04-02" in sessions, (symbol, calendar_id)
+    # Holy Thursday closes Madrid; Milan trades. Do not assume shared holidays.
+    assert ("2026-04-02" in sessions) == (calendar_id == "XMIL"), (symbol, calendar_id)
     assert "2026-04-03" not in sessions, (symbol, calendar_id)  # Good Friday
     assert "2026-04-06" not in sessions, (symbol, calendar_id)  # Easter Monday
     assert "2026-04-07" in sessions, (symbol, calendar_id)

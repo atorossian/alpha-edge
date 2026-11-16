@@ -243,8 +243,7 @@ def test_madrid_and_milan_calendar_identifiers_work_in_project_dependency(symbol
 
     calendar = mcal.get_calendar(calendar_id)
     sessions = {
-        session.strftime("%Y-%m-%d")
-        for session in calendar.valid_days(start_date="2026-04-02", end_date="2026-04-08")
+        session.strftime("%Y-%m-%d") for session in calendar.valid_days(start_date="2026-04-02", end_date="2026-04-08")
     }
     # Both exchanges trade on Holy Thursday 2026, unlike Good Friday.
     assert "2026-04-02" in sessions, (symbol, calendar_id)

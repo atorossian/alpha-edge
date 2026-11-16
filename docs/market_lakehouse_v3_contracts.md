@@ -149,3 +149,80 @@ S3/Glue/Athena is **not** proven by passing offline CI.
 
 **No market data was downloaded or stored locally to create these
 contracts. The production bucket remains unchanged.**
+
+
+## Live read-only S3 reconciliation — 2026-11-16
+
+The AWS connection was reauthorized. Inspection was **read-only** against
+`s3://alpha-edge-algo` in `eu-west-1`; no mutation, ingestion, deletion,
+approval, or warehouse activation was executed.
+
+### Sources inspected
+
+1. Git-tracked current identity/eligibility configuration:
+   `data/universe/universe.csv` at integration HEAD `cfb36a1`.
+2. S3 archived v2 first-review plan:
+   `dev/market/lake_v2/archives/old-outputs-20261110/files/full_universe_preflight_v2/first_review/`.
+   All 79 cohort CSVs and `fx_config.csv` could be read successfully.
+   Their S3 archive inventory declares SHA-256 checksums; **those
+   content digests were not recomputed in this inspection**, so reads
+   alone are *not* final archived-plan integrity approval.
+3. Two S3 committed release-inventory candidates under
+   `dev/market/lake_v2/release_candidates/`, including the newer
+   exclusions-adjusted snapshot (2,207 assessed, 2,078 currently eligible).
+4. S3 prefix presence: **no objects** currently under
+   `market/lake_v3/`, `market/lake_v2/`, or
+   `engine/v1/universe/`. Existing v2 research evidence is under
+   `dev/market/lake_v2/`. The Git-tracked universe remains the
+   available current configuration; the v3 canonical S3 registry
+   has **not** been installed.
+
+### Eight-asset reconciliation matrix
+
+| Asset | Archived cohort | Archived Yahoo symbol | Current Git symbol | Registry state | Existing v2 release candidate |
+|---|---:|---|---|---|---|
+| BTC/USD | 0001 | BTC-USD | BTC-USD | Same ID/symbol | Unverified marker |
+| RENT3 | 0010 | RENT3.SA | RENT3.SA | Same ID/symbol | Unverified marker |
+| TRAXIONA | 0012 | TRAXIONA.MX | TRAXIONA.MX | Same ID/symbol | Unverified marker |
+| LOG | 0021 | LOG.MC | LOG.MC | Same ID/symbol | Unverified marker |
+| REY | 0023 | REY.MI | REY.MI | Same ID/symbol | Unverified marker |
+| GLD | 0036 | GLD | GLD | Same ID/symbol | Unverified marker |
+| SPY | 0058 | SPY | SPY | Same ID/symbol | Unverified marker |
+| EUR/USD | 0078 | **EUR-USD** | **EURUSD=X** | **Identity preserved; provider symbol differs** | Reprocessed marker unverified |
+
+**Significant finding:** archived EUR/USD had calendar `24/7` and
+Yahoo ticker `EUR-USD`; current universe uses `EURUSD=X` while the
+v3 pilot proposes a dedicated `FOREX` session-date policy. The
+asset_id `EQHe874aca04f607837` is unchanged, and v2 release evidence
+explicitly references `reviewed_symbol=EURUSD=X`. The historical
+reprocessing has a committed source marker, **not final audited price
+approval**. This is an intentional source-symbol/calendar migration
+requiring effective-dated alias evidence and data comparison under
+AEA-91 and AEA-93, not an automatic rename or rewriting of Bronze.
+
+FX mappings in the archived plan agree with the v3 pilot:
+BRL via inverse `USDBRL=X`; MXN via inverse `USDMXN=X`;
+EUR via direct `EURUSD=X`. All eight are `current_eligible=true`
+in the older v2 inventory. **All eight** also have
+`external_evidence_approved=false` and
+`production_eligible=false`. No observed source-data accuracy or
+corporate action has been independently certified.
+
+### Decisions and blockers
+
+- **Accepted for AEA-90 contract pilot:** the eight canonical asset
+  IDs, current provider-symbol mapping, FX pair roles, and distinct
+  exchange calendar support in CI.
+- **Not yet accepted for production:** historical EUR/USD alias/date
+  transition, independently verified prices/actions/FX timing, and
+  approval of the real S3 registry and Gold release.
+- **AEA-91:** reconcile archived `EUR-USD/24/7` against current
+  `EURUSD=X/FOREX`; preserve original observations, attach
+  effective-dated alias history, and publish a reviewed canonical
+  S3 registry with immutable hash.
+- **AEA-93:** verify the actual `FOREX` daily-bar calendar semantics;
+  daily Yahoo FX dates are source session labels, not proof of
+  24/7 trading or actual Sunday-close timestamps.
+- **S3 no-write guarantee for this audit:** listed and read only
+  `GetObject`/`ListObjectsV2`, no `PutObject`/delete/publish.
+

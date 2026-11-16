@@ -16,6 +16,7 @@ import csv
 import hashlib
 import io
 import json
+import logging
 import re
 import time
 import uuid
@@ -393,6 +394,77 @@ def _record_failure(s3: Any, bucket: str, run_id: str, record: dict, error: Exce
     _put_immutable(s3, bucket, key, _json_bytes(report), "application/json")
 
 
+def _audit_event(
+    s3: Any,
+    bucket: str,
+    *,
+    run_id: str,
+    status: str,
+    fingerprint: str,
+    end: str,
+    record: dict | None = None,
+    output_keys: list[str] | None = None,
+    metadata: dict | None = None,
+    error: str | None = None,
+) -> str:
+    """Immutable S3 audit, mirroring Alpha Edge's existing build_dataset event fields.
+
+    Unlike core.audit.write_audit_event, this stays inside the dedicated
+    Bronze prefix and never mutates the legacy engine/v1 audit namespace.
+    Per-asset events survive interruptions and are append-only on resume.
+    """
+    now = datetime.now(timezone.utc)
+    audit_id = f"bronze_{now:%Y%m%dT%H%M%S}-{uuid.uuid4().hex}"
+    key = f"{BRONZE_ROOT}/runs/{run_id}/audit/dt={now:%Y-%m-%d}/{audit_id}.json"
+    payload = {
+        "schema": "alpha_edge_bronze_audit_v1",
+        "audit_id": audit_id,
+        "run_id": run_id,
+        "event_type": "build_dataset",
+        "entity_type": "bronze_full_history",
+        "entity_id": record["asset_id"] if record else None,
+        "source_script": "ingest_bronze_full_history.py",
+        "source_mode": "yahoo_finance_full_history",
+        "created_at_utc": now.isoformat(),
+        "status": status,
+        "input_args": {
+            "source_fingerprint": fingerprint,
+            "end_exclusive": end,
+            "asset_id": record["asset_id"] if record else None,
+            "provider_symbol": record["yahoo_ticker"] if record else None,
+        },
+        "output_keys": output_keys or [],
+        "metadata": metadata or {},
+        "error": error,
+    }
+    _put_immutable(s3, bucket, key, _json_bytes(payload), "application/json")
+    return key
+
+
+def _print_progress(
+    *,
+    done: int,
+    total: int,
+    ok: int,
+    resumed: int,
+    failed: int,
+    started_monotonic: float,
+    progress_every: int,
+    force: bool = False,
+) -> None:
+    """Unbuffered, observed progress; no speculative ETA."""
+    if not force and done != 1 and done % progress_every != 0 and done != total:
+        return
+    elapsed = max(0.0, time.monotonic() - started_monotonic)
+    rate = done / max(elapsed, 1e-6)
+    print(
+        f"[bronze][progress] done={done}/{total} ({100 * done / total:.1f}%) "
+        f"ok={ok} resumed={resumed} failed={failed} "
+        f"rate={rate:.2f} assets/s elapsed={elapsed / 60:.1f}m",
+        flush=True,
+    )
+
+
 def ingest(
     s3: Any,
     bucket: str,
@@ -407,6 +479,8 @@ def ingest(
     ticker_factory: Callable | None = None,
     sleep: Callable[[float], None] = time.sleep,
     pause_seconds: float = 0.5,
+    progress_every: int = 10,
+    print_first_failures: int = 20,
 ) -> dict:
     if not SAFE_RUN.fullmatch(run_id):
         raise BronzeIngestError("run_id must be 3–80 lowercase letters/digits/hyphens/underscores")
@@ -414,6 +488,8 @@ def ingest(
         raise BronzeIngestError("Exclusive end date must not exceed current UTC date")
     if retry_count < 0 or retry_count > 8 or retry_delay < 0 or pause_seconds < 0:
         raise BronzeIngestError("Invalid retry or pacing configuration")
+    if progress_every <= 0 or print_first_failures < 0:
+        raise BronzeIngestError("Invalid progress reporting configuration")
     all_assets, source = load_universe(s3, bucket, fingerprint)
     selected = all_assets
     if only:
@@ -464,34 +540,109 @@ def ingest(
     failures = []
     skipped = []
     started = _utc_now()
-    for record in selected:
+    started_monotonic = time.monotonic()
+    total = len(selected)
+    print(
+        f"\\n=== BRONZE FULL HISTORY INGEST ===\\n"
+        f"run_id:          {run_id}\\n"
+        f"bucket:          {bucket}\\n"
+        f"snapshot:        {fingerprint}\\n"
+        f"universe_total:  {source['universe_total']}\\n"
+        f"included_total:  {source['included']}\\n"
+        f"selected:        {total}\\n"
+        f"end_exclusive:   {end}\\n"
+        f"source:          Yahoo Finance 1d (period=max)\\n"
+        f"audit:           s3://{bucket}/{BRONZE_ROOT}/runs/{run_id}/audit/\\n",
+        flush=True,
+    )
+    _audit_event(
+        s3, bucket, run_id=run_id, status="started",
+        fingerprint=fingerprint, end=end,
+        metadata={"selected": total, "universe_included_count": source["included"]},
+        output_keys=[f"{BRONZE_ROOT}/runs/{run_id}/run.json"],
+    )
+    for done, record in enumerate(selected, start=1):
+        aid = record["asset_id"]
+        symbol = record["yahoo_ticker"]
         try:
             existing = _completed(s3, bucket, run_id=run_id, record=record, verify_hash=False)
             if existing:
-                skipped.append({"asset_id": record["asset_id"], "ticker": record["yahoo_ticker"]})
-                continue
-            result = _acquire_one(
-                s3,
-                bucket,
-                run_id=run_id,
-                record=record,
-                end=end,
-                retry_count=retry_count,
-                retry_delay=retry_delay,
-                ticker_factory=ticker_factory,
-                sleep=sleep,
-            )
-            completed.append(result)
+                skipped.append({"asset_id": aid, "ticker": symbol})
+                _audit_event(
+                    s3, bucket, run_id=run_id, status="already_committed",
+                    fingerprint=fingerprint, end=end, record=record,
+                    output_keys=[
+                        existing["data"]["key"],
+                        f"{_target_prefix(run_id, aid)}/manifest.json",
+                    ],
+                    metadata=existing.get("validation", {}),
+                )
+            else:
+                result = _acquire_one(
+                    s3,
+                    bucket,
+                    run_id=run_id,
+                    record=record,
+                    end=end,
+                    retry_count=retry_count,
+                    retry_delay=retry_delay,
+                    ticker_factory=ticker_factory,
+                    sleep=sleep,
+                )
+                completed.append(result)
+                manifest = _completed(
+                    s3, bucket, run_id=run_id, record=record, verify_hash=False
+                )
+                if manifest is None:
+                    raise BronzeIngestError(f"Committed manifest missing for {aid}")
+                _audit_event(
+                    s3, bucket, run_id=run_id, status="success",
+                    fingerprint=fingerprint, end=end, record=record,
+                    output_keys=[
+                        manifest["data"]["key"],
+                        f"{_target_prefix(run_id, aid)}/manifest.json",
+                    ],
+                    metadata=manifest["validation"],
+                )
         except (KeyboardInterrupt, SystemExit):
+            print(
+                f"\\n[bronze][interrupted] done={done - 1}/{total}; "
+                f"rerun identical command to resume.\\n",
+                flush=True,
+            )
+            _audit_event(
+                s3, bucket, run_id=run_id, status="interrupted",
+                fingerprint=fingerprint, end=end, record=record,
+                metadata={"processed_before_interrupt": done - 1},
+            )
             raise
         except Exception as exc:
             failure = {
-                "asset_id": record["asset_id"],
-                "ticker": record["yahoo_ticker"],
+                "asset_id": aid,
+                "ticker": symbol,
                 "error": f"{type(exc).__name__}: {exc}"[:2000],
             }
             failures.append(failure)
             _record_failure(s3, bucket, run_id, record, exc)
+            _audit_event(
+                s3, bucket, run_id=run_id, status="failed",
+                fingerprint=fingerprint, end=end, record=record,
+                error=failure["error"],
+                metadata={"selected_index": done, "selected_total": total},
+            )
+            if len(failures) <= print_first_failures:
+                print(
+                    f"[bronze][fail][{len(failures)}] "
+                    f"{done}/{total} asset_id={aid} yahoo={symbol} "
+                    f"error={failure['error'][:320]}",
+                    flush=True,
+                )
+        _print_progress(
+            done=done, total=total, ok=len(completed),
+            resumed=len(skipped), failed=len(failures),
+            started_monotonic=started_monotonic,
+            progress_every=progress_every,
+        )
         if pause_seconds:
             sleep(pause_seconds)
     result = {
@@ -512,6 +663,29 @@ def ingest(
     key = f"{BRONZE_ROOT}/runs/{run_id}/reports/{datetime.now(timezone.utc):%Y%m%dT%H%M%S}-{uuid.uuid4().hex}.json"
     _put_immutable(s3, bucket, key, _json_bytes(result), "application/json")
     result["report_s3_uri"] = f"s3://{bucket}/{key}"
+    result["audit_final_key"] = _audit_event(
+        s3, bucket, run_id=run_id,
+        status="complete" if not failures else "completed_with_failures",
+        fingerprint=fingerprint, end=end,
+        output_keys=[key],
+        metadata={
+            "selected": len(selected), "succeeded": len(completed),
+            "already_committed": len(skipped), "failed": len(failures),
+            "elapsed_seconds": round(time.monotonic() - started_monotonic, 2),
+        },
+    )
+    _print_progress(
+        done=total, total=total, ok=len(completed),
+        resumed=len(skipped), failed=len(failures),
+        started_monotonic=started_monotonic,
+        progress_every=progress_every, force=True,
+    )
+    print(
+        f"[bronze][done] state={result['state']} "
+        f"report={result['report_s3_uri']} "
+        f"audit=s3://{bucket}/{result['audit_final_key']}",
+        flush=True,
+    )
     return result
 
 
@@ -569,10 +743,18 @@ def main() -> None:
             p.add_argument("--execute", action="store_true", help="Explicit S3 writes; otherwise only dry run")
             p.add_argument("--retries", type=int, default=2)
             p.add_argument("--pause-seconds", type=float, default=0.5)
+            p.add_argument("--progress-every", type=int, default=10)
+            p.add_argument("--print-first-failures", type=int, default=20)
+            p.add_argument("--verbose-yahoo", action="store_true", help="Show raw yfinance diagnostics")
     args = parser.parse_args()
     s3 = boto3.client("s3", region_name=args.region)
     selectors = [x.strip() for x in args.only.split(",") if x.strip()] or None
     if args.command == "ingest":
+        if not args.verbose_yahoo:
+            # All failed acquisitions are still surfaced in the Bronze failure
+            # stream and immutable S3 audit trail; Yahoo may emit several
+            # misleading "possibly delisted" messages per one attempt.
+            logging.getLogger("yfinance").setLevel(logging.CRITICAL)
         output = ingest(
             s3,
             args.bucket,
@@ -583,6 +765,8 @@ def main() -> None:
             only=selectors,
             retry_count=args.retries,
             pause_seconds=args.pause_seconds,
+            progress_every=args.progress_every,
+            print_first_failures=args.print_first_failures,
         )
     else:
         output = verify(

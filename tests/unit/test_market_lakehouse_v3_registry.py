@@ -228,3 +228,12 @@ def test_activation_rejects_tampered_configuration_source_bytes():
             )
         with pytest.raises(LakehouseError):
             load_active(s3, "alpha-edge-algo")
+
+
+def test_unknown_stable_override_row_id_fails_closed():
+    files = source_fixtures()
+    overrides = list(csv.DictReader(io.StringIO(files["universe_overrides.csv"].decode())))
+    overrides[0]["target_row_id"] = "nonexistent-row"
+    files["universe_overrides.csv"] = _csv(overrides)
+    with pytest.raises(LakehouseError, match="unknown or ambiguous row target"):
+        build_registry(files)

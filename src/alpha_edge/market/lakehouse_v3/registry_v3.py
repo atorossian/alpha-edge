@@ -222,10 +222,10 @@ def stage_pilot_registry(
     s3, bucket: str, *, archive_id: str = ARCHIVE_ID, execute: bool = False
 ) -> dict:
     """Write an immutable, unapproved S3 candidate only when explicitly executed."""
-    from alpha_edge.market.lakehouse_v3.contracts import validate_registry_document
+    from alpha_edge.market.lakehouse_v3.contracts import validate_pilot_registry_document
 
     doc = build_pilot_registry(s3, bucket, archive_id=archive_id)
-    validate_registry_document(doc)
+    validate_pilot_registry_document(doc)
     sha = digest(json_bytes(doc))
     key = f"{ROOT}/config/candidates/registry_{sha}.json"
     output = {

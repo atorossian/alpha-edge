@@ -231,3 +231,25 @@ def test_static_architecture_guard_allows_only_memory_bytesio_exceptions():
     unsafe_source = "import pandas as pd\\npd.read_parquet('data.parquet')"
     assert not lint_text(safe_source.replace("\\n", "\n"), "storage.py")
     assert lint_text(unsafe_source.replace("\\n", "\n"), "storage.py")
+
+
+@pytest.mark.parametrize(
+    ("symbol", "calendar_id"),
+    [("LOG.MC", "XMAD"), ("REY.MI", "XMIL")],
+)
+def test_madrid_and_milan_calendar_identifiers_work_in_project_dependency(symbol, calendar_id):
+    """Require an actual supported calendar and correct Easter exchange sessions."""
+    import pandas_market_calendars as mcal
+
+    calendar = mcal.get_calendar(calendar_id)
+    sessions = {
+        session.strftime("%Y-%m-%d")
+        for session in calendar.valid_days(start_date="2026-04-02", end_date="2026-04-08")
+    }
+    assert "2026-04-02" in sessions, (symbol, calendar_id)
+    assert "2026-04-03" not in sessions, (symbol, calendar_id)  # Good Friday
+    assert "2026-04-06" not in sessions, (symbol, calendar_id)  # Easter Monday
+    assert "2026-04-07" in sessions, (symbol, calendar_id)
+    schedule = calendar.schedule(start_date="2026-04-07", end_date="2026-04-07")
+    assert len(schedule) == 1
+    assert schedule.iloc[0]["market_open"] < schedule.iloc[0]["market_close"]

@@ -261,25 +261,47 @@ def validate_pilot_registry_document(doc: dict) -> None:
         raise LakehouseError("Pilot registry must contain exactly eight assets")
     _required_fields(
         doc["evidence"],
-        {"historical_plan_sha256", "release_inventory_sha256", "current_universe_sha256",
-         "release_inventory_commit_key", "historical_archive_id", "current_git_commit"},
+        {
+            "historical_plan_sha256",
+            "release_inventory_sha256",
+            "current_universe_sha256",
+            "release_inventory_commit_key",
+            "historical_archive_id",
+            "current_git_commit",
+        },
         "pilot evidence",
     )
     for key in ("historical_plan_sha256", "release_inventory_sha256", "current_universe_sha256"):
         _sha(doc["evidence"][key], key)
     expected_tickers = {
-        "SPY", "GLD", "BTC-USD", "RENT3.SA", "TRAXIONA.MX",
-        "LOG.MC", "REY.MI", "EURUSD=X",
+        "SPY",
+        "GLD",
+        "BTC-USD",
+        "RENT3.SA",
+        "TRAXIONA.MX",
+        "LOG.MC",
+        "REY.MI",
+        "EURUSD=X",
     }
     if {x["yahoo_ticker"] for x in doc["assets"]} != expected_tickers:
         raise LakehouseError("Pilot registry contains an unexpected or missing security")
     for asset in doc["assets"]:
         _required_fields(
             asset,
-            {"asset_id", "yahoo_ticker", "currency", "quote_unit",
-             "quote_to_currency_factor", "calendar_id", "exchange_timezone",
-             "asset_class", "include", "source_aliases",
-             "historical_retention_required", "identity_evidence_state"},
+            {
+                "asset_id",
+                "yahoo_ticker",
+                "currency",
+                "quote_unit",
+                "quote_to_currency_factor",
+                "calendar_id",
+                "exchange_timezone",
+                "asset_class",
+                "include",
+                "source_aliases",
+                "historical_retention_required",
+                "identity_evidence_state",
+            },
             "pilot asset",
         )
         if asset["include"] is not True or asset["historical_retention_required"] is not True:
@@ -301,8 +323,7 @@ def validate_pilot_registry_document(doc: dict) -> None:
         for alias in aliases:
             _required_fields(
                 alias,
-                {"provider_symbol", "observation_source", "effective_from",
-                 "effective_to", "effective_dates_verified"},
+                {"provider_symbol", "observation_source", "effective_from", "effective_to", "effective_dates_verified"},
                 "source alias",
             )
             if (

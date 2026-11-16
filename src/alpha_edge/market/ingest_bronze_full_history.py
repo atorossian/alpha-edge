@@ -641,8 +641,13 @@ def ingest(
             failures.append(failure)
             _record_failure(s3, bucket, run_id, record, exc)
             _audit_event(
-                s3, bucket, run_id=run_id, status="failed",
-                fingerprint=fingerprint, end=end, record=record,
+                s3,
+                bucket,
+                run_id=run_id,
+                status="failed",
+                fingerprint=fingerprint,
+                end=end,
+                record=record,
                 error=failure["error"],
                 metadata={"selected_index": done, "selected_total": total},
             )
@@ -654,8 +659,11 @@ def ingest(
                     flush=True,
                 )
         _print_progress(
-            done=done, total=total, ok=len(completed),
-            resumed=len(skipped), failed=len(failures),
+            done=done,
+            total=total,
+            ok=len(completed),
+            resumed=len(skipped),
+            failed=len(failures),
             started_monotonic=started_monotonic,
             progress_every=progress_every,
         )
@@ -680,21 +688,30 @@ def ingest(
     _put_immutable(s3, bucket, key, _json_bytes(result), "application/json")
     result["report_s3_uri"] = f"s3://{bucket}/{key}"
     result["audit_final_key"] = _audit_event(
-        s3, bucket, run_id=run_id,
+        s3,
+        bucket,
+        run_id=run_id,
         status="complete" if not failures else "completed_with_failures",
-        fingerprint=fingerprint, end=end,
+        fingerprint=fingerprint,
+        end=end,
         output_keys=[key],
         metadata={
-            "selected": len(selected), "succeeded": len(completed),
-            "already_committed": len(skipped), "failed": len(failures),
+            "selected": len(selected),
+            "succeeded": len(completed),
+            "already_committed": len(skipped),
+            "failed": len(failures),
             "elapsed_seconds": round(time.monotonic() - started_monotonic, 2),
         },
     )
     _print_progress(
-        done=total, total=total, ok=len(completed),
-        resumed=len(skipped), failed=len(failures),
+        done=total,
+        total=total,
+        ok=len(completed),
+        resumed=len(skipped),
+        failed=len(failures),
         started_monotonic=started_monotonic,
-        progress_every=progress_every, force=True,
+        progress_every=progress_every,
+        force=True,
     )
     print(
         f"[bronze][done] state={result['state']} "

@@ -7,7 +7,6 @@ or downloaded market data. S3 is mocked in memory.
 from __future__ import annotations
 
 import copy
-import json
 
 import boto3
 import pytest

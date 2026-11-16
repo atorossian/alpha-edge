@@ -9,7 +9,7 @@ from __future__ import annotations
 import argparse
 import json
 
-from alpha_edge.market.lakehouse_v3.bootstrap import build_registry
+from alpha_edge.market.lakehouse_v3.bootstrap import bootstrap
 from alpha_edge.market.lakehouse_v3.ingest import acquire
 from alpha_edge.market.lakehouse_v3.transform import process
 from alpha_edge.market.lakehouse_v3.warehouse import publish
@@ -20,8 +20,7 @@ def main() -> None:
     parser.add_argument("action", choices=["bootstrap", "build", "publish"])
     parser.add_argument("--bucket", default="alpha-edge-algo")
     parser.add_argument("--registry-key")
-    parser.add_argument("--archive-id", default="old-outputs-20261110")
-    parser.add_argument("--asset-ids", default="")
+    parser.add_argument("--source-commit", help="Pinned 40-character commit containing the five universe config files")
     parser.add_argument("--run-id")
     parser.add_argument("--start")
     parser.add_argument("--end", help="Exclusive end date")
@@ -33,13 +32,9 @@ def main() -> None:
 
     s3 = boto3.client("s3", region_name="eu-west-1")
     if args.action == "bootstrap":
-        result = build_registry(
-            s3,
-            args.bucket,
-            archive_id=args.archive_id,
-            selected_asset_ids=[x.strip() for x in args.asset_ids.split(",") if x.strip()] or None,
-            execute=args.execute,
-        )
+        if not args.source_commit:
+            parser.error("bootstrap requires --source-commit")
+        result = bootstrap(s3, args.bucket, source_commit=args.source_commit, execute=args.execute)
     elif args.action == "build":
         if not (args.registry_key and args.run_id and args.start and args.end):
             parser.error("build requires --registry-key --run-id --start --end")

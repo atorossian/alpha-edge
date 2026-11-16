@@ -401,7 +401,7 @@ def test_failed_asset_has_visible_message_and_s3_audit(s3_with_snapshot, monkeyp
 
 def test_interrupt_writes_audit_and_remains_resumable(s3_with_snapshot, monkeypatch, capsys):
     s3, fingerprint = s3_with_snapshot
-    fail_once = {"BTC-USD"}
+    fail_once = {"SPY"}
 
     def acquire(asset_id, symbol, *, batch_id, **_kwargs):
         if symbol in fail_once:

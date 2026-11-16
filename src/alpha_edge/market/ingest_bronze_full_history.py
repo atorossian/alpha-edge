@@ -556,8 +556,12 @@ def ingest(
         flush=True,
     )
     _audit_event(
-        s3, bucket, run_id=run_id, status="started",
-        fingerprint=fingerprint, end=end,
+        s3,
+        bucket,
+        run_id=run_id,
+        status="started",
+        fingerprint=fingerprint,
+        end=end,
         metadata={"selected": total, "universe_included_count": source["included"]},
         output_keys=[f"{BRONZE_ROOT}/runs/{run_id}/run.json"],
     )
@@ -569,8 +573,13 @@ def ingest(
             if existing:
                 skipped.append({"asset_id": aid, "ticker": symbol})
                 _audit_event(
-                    s3, bucket, run_id=run_id, status="already_committed",
-                    fingerprint=fingerprint, end=end, record=record,
+                    s3,
+                    bucket,
+                    run_id=run_id,
+                    status="already_committed",
+                    fingerprint=fingerprint,
+                    end=end,
+                    record=record,
                     output_keys=[
                         existing["data"]["key"],
                         f"{_target_prefix(run_id, aid)}/manifest.json",
@@ -590,14 +599,17 @@ def ingest(
                     sleep=sleep,
                 )
                 completed.append(result)
-                manifest = _completed(
-                    s3, bucket, run_id=run_id, record=record, verify_hash=False
-                )
+                manifest = _completed(s3, bucket, run_id=run_id, record=record, verify_hash=False)
                 if manifest is None:
                     raise BronzeIngestError(f"Committed manifest missing for {aid}")
                 _audit_event(
-                    s3, bucket, run_id=run_id, status="success",
-                    fingerprint=fingerprint, end=end, record=record,
+                    s3,
+                    bucket,
+                    run_id=run_id,
+                    status="success",
+                    fingerprint=fingerprint,
+                    end=end,
+                    record=record,
                     output_keys=[
                         manifest["data"]["key"],
                         f"{_target_prefix(run_id, aid)}/manifest.json",
@@ -606,13 +618,14 @@ def ingest(
                 )
         except (KeyboardInterrupt, SystemExit):
             print(
-                f"\\n[bronze][interrupted] done={done - 1}/{total}; "
-                f"rerun identical command to resume.\\n",
+                f"\\n[bronze][interrupted] done={done - 1}/{total}; rerun identical command to resume.\\n",
                 flush=True,
             )
             _audit_event(
-                s3, bucket, run_id=run_id, status="interrupted",
-                fingerprint=fingerprint, end=end, record=record,
+                s3,
+                bucket,
+                run_id=run_id,
+                status="interrupted",
                 metadata={"processed_before_interrupt": done - 1},
             )
             raise

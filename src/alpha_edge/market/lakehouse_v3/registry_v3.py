@@ -95,7 +95,7 @@ def _resolve(row: dict, by_id: dict, by_ticker: dict, filename: str) -> dict:
     else:
         candidates = by_ticker.get(row.get("ticker", ""), [])
         result = candidates[0] if len(candidates) == 1 else None
-    if result is None or (rid and row.get("ticker") and result["ticker"] != row["ticker"]):
+    # The display ticker may have changed since an override was authored.\n    # A stable target_row_id takes precedence and never guesses another listing.\n    if result is None:
         raise LakehouseError(f"{filename}: unknown or ambiguous row target {rid or row.get('ticker')}")
     return result
 

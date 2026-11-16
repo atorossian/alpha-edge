@@ -15,8 +15,11 @@ import csv
 import io
 import json
 import re
+from datetime import datetime, timezone
 from collections import Counter
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+from botocore.exceptions import ClientError
 
 from alpha_edge.market.lakehouse_v3.storage import (
     ROOT,
@@ -361,3 +364,88 @@ def load_active(s3, bucket: str) -> tuple[dict, dict]:
         raise LakehouseError("Unsupported S3 active registry pointer")
     doc = read_registry(s3, bucket, pointer["registry_key"], pointer["registry_sha256"])
     return doc, pointer
+
+
+def verify_source_snapshots(s3, bucket: str, doc: dict) -> None:
+    """Every one of the five files must exist in S3 with its pinned digest."""
+    validate_registry(doc)
+    prefix = f"{ROOT}/config/source_snapshots/{doc['source_fingerprint']}/"
+    for name in SOURCE_FILES:
+        payload = read_bytes(s3, bucket, prefix + name)
+        expected = doc["source_files"][name]
+        if digest(payload) != expected["sha256"] or len(payload) != expected["bytes"]:
+            raise LakehouseError(f"Source configuration checksum/size mismatch: {name}")
+    # Reconstruct selection to detect malicious or accidental registry mutation.
+    files = {name: read_bytes(s3, bucket, prefix + name) for name in SOURCE_FILES}
+    regenerated = build_registry(files)
+    if digest(json_bytes(regenerated)) != digest(json_bytes(doc)):
+        raise LakehouseError("Registry differs from its five authoritative source files")
+
+
+def activate_registry(
+    s3, bucket: str, *, key: str, sha256: str,
+    execute: bool = False, expected_previous_sha256: str | None = None,
+) -> dict:
+    """Activate CONFIG authority, not financial data approval.
+
+    Initial activation is conditional on no prior pointer. Replacements
+    require the caller to name the exact prior registry SHA and use a
+    conditional S3 update. The historical config remains immutable.
+    """
+    doc = read_registry(s3, bucket, key, sha256)
+    verify_source_snapshots(s3, bucket, doc)
+    pointer_key = f"{ROOT}/config/active.json"
+    try:
+        prior = s3.get_object(Bucket=bucket, Key=pointer_key)
+    except ClientError as exc:
+        if exc.response.get("Error", {}).get("Code") not in {"NoSuchKey", "404", "NotFound"}:
+            raise
+        prior = None
+    if prior is not None:
+        old = json.loads(prior["Body"].read())
+        if old.get("schema") != ACTIVE_SCHEMA or old.get("registry_sha256") != expected_previous_sha256:
+            raise LakehouseError("Existing registry requires exact expected previous SHA for replacement")
+    elif expected_previous_sha256 is not None:
+        raise LakehouseError("Previous registry expectation differs from empty S3 pointer")
+    result = {
+        "status": "configuration_active" if execute else "activation_dry_run",
+        "registry_key": key,
+        "registry_sha256": sha256,
+        "source_fingerprint": doc["source_fingerprint"],
+        "included": doc["summary"]["included"],
+        "excluded": doc["summary"]["excluded"],
+        "blocked": doc["summary"]["blocked"],
+        "previous_registry_sha256": expected_previous_sha256,
+        "writes": 0,
+        "market_prices_approved": False,
+    }
+    if not execute:
+        return result
+    pointer = {
+        "schema": ACTIVE_SCHEMA,
+        "registry_key": key,
+        "registry_sha256": sha256,
+        "source_fingerprint": doc["source_fingerprint"],
+        "included": doc["summary"]["included"],
+        "blocked": doc["summary"]["blocked"],
+        "previous_registry_sha256": expected_previous_sha256,
+        "activated_at_utc": datetime.now(timezone.utc).isoformat(),
+        "market_prices_approved": False,
+    }
+    kwargs = {"IfMatch": prior["ETag"]} if prior else {"IfNoneMatch": "*"}
+    try:
+        s3.put_object(
+            Bucket=bucket, Key=pointer_key, Body=json_bytes(pointer),
+            ContentType="application/json", **kwargs,
+        )
+    except ClientError as exc:
+        if exc.response.get("Error", {}).get("Code") in {
+            "PreconditionFailed", "412", "ConditionalRequestConflict", "409"
+        }:
+            raise LakehouseError("Concurrent active-registry update rejected") from exc
+        raise
+    active, current = load_active(s3, bucket)
+    if active["source_fingerprint"] != doc["source_fingerprint"] or current != pointer:
+        raise LakehouseError("Active S3 registry read-back mismatch after promotion")
+    result["writes"] = 1
+    return result

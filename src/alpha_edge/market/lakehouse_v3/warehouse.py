@@ -12,6 +12,7 @@ import json
 import re
 import time
 
+from alpha_edge.market.lakehouse_v3.contracts import validate_candidate_manifest
 from alpha_edge.market.lakehouse_v3.storage import (
     ROOT,
     LakehouseError,
@@ -130,10 +131,7 @@ def approved_candidate(s3, bucket: str, run_id: str, approval_key: str) -> tuple
     prefix = f"{ROOT}/candidates/{run_id}/"
     manifest_bytes = read_bytes(s3, bucket, prefix + "manifest.json")
     candidate = json.loads(manifest_bytes)
-    if candidate.get("schema") != "alpha_edge_gold_candidate_v3_1":
-        raise LakehouseError("Invalid warehouse candidate")
-    if candidate.get("run_id") != run_id or candidate.get("status") != "review_required":
-        raise LakehouseError("Candidate identity/state invalid")
+    validate_candidate_manifest(candidate, run_id=run_id)
     if not approval_key.startswith(f"{ROOT}/approvals/{run_id}/"):
         raise LakehouseError("Approval must be a dedicated immutable S3 record")
     approval = read_json(s3, bucket, approval_key)

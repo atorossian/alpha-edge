@@ -47,9 +47,12 @@ def main() -> None:
     p.add_argument("--execute", action="store_true", help="Stage six immutable S3 objects, never activate")
     args = p.parse_args()
     import boto3
+
     result = bootstrap(
         boto3.client("s3", region_name="eu-west-1"),
-        args.bucket, source_commit=args.source_commit, execute=args.execute,
+        args.bucket,
+        source_commit=args.source_commit,
+        execute=args.execute,
     )
     print(json.dumps(result, indent=2))
 

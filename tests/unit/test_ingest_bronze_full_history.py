@@ -323,10 +323,7 @@ def test_verify_detects_corrupt_source_object(s3_with_snapshot, monkeypatch):
 def _audit_records(s3, run_id):
     prefix = f"{bronze.BRONZE_ROOT}/runs/{run_id}/audit/"
     objects = s3.list_objects_v2(Bucket=BUCKET, Prefix=prefix).get("Contents", [])
-    return [
-        json.loads(bronze._read(s3, BUCKET, obj["Key"]))
-        for obj in objects
-    ]
+    return [json.loads(bronze._read(s3, BUCKET, obj["Key"])) for obj in objects]
 
 
 def test_progress_and_append_only_audit_for_success_and_resume(s3_with_snapshot, monkeypatch, capsys):
@@ -380,19 +377,23 @@ def test_failed_asset_has_visible_message_and_s3_audit(s3_with_snapshot, monkeyp
 
     monkeypatch.setattr(bronze, "acquire_yahoo_bars", acquire)
     result = bronze.ingest(
-        s3, BUCKET,
-        fingerprint=fingerprint, run_id="failed-audit-test",
-        end="2026-11-14", execute=True, only=["SPY", "BTC-USD"],
-        retry_count=0, pause_seconds=0, progress_every=1,
+        s3,
+        BUCKET,
+        fingerprint=fingerprint,
+        run_id="failed-audit-test",
+        end="2026-11-14",
+        execute=True,
+        only=["SPY", "BTC-USD"],
+        retry_count=0,
+        pause_seconds=0,
+        progress_every=1,
     )
     out = capsys.readouterr().out
     assert "[bronze][fail][1]" in out
     assert "done=2/2" in out
     assert "failed=1" in out
     events = _audit_records(s3, "failed-audit-test")
-    assert sorted(event["status"] for event in events) == [
-        "completed_with_failures", "failed", "started", "success"
-    ]
+    assert sorted(event["status"] for event in events) == ["completed_with_failures", "failed", "started", "success"]
     failure = next(event for event in events if event["status"] == "failed")
     assert failure["entity_id"] == "CRYPTO:BTC-USD"
     assert "Yahoo has no data" in failure["error"]
@@ -410,9 +411,14 @@ def test_interrupt_writes_audit_and_remains_resumable(s3_with_snapshot, monkeypa
 
     monkeypatch.setattr(bronze, "acquire_yahoo_bars", acquire)
     options = dict(
-        fingerprint=fingerprint, run_id="interrupt-audit-test",
-        end="2026-11-14", execute=True, only=["SPY", "BTC-USD"],
-        retry_count=0, pause_seconds=0, progress_every=1,
+        fingerprint=fingerprint,
+        run_id="interrupt-audit-test",
+        end="2026-11-14",
+        execute=True,
+        only=["SPY", "BTC-USD"],
+        retry_count=0,
+        pause_seconds=0,
+        progress_every=1,
     )
     with pytest.raises(KeyboardInterrupt):
         bronze.ingest(s3, BUCKET, **options)
@@ -423,16 +429,18 @@ def test_interrupt_writes_audit_and_remains_resumable(s3_with_snapshot, monkeypa
     resumed = bronze.ingest(s3, BUCKET, **options)
     assert resumed["already_committed"] == 1
     assert resumed["succeeded"] == 1
-    assert bronze.verify(
-        s3, BUCKET, fingerprint=fingerprint, run_id=options["run_id"]
-    )["state"] == "pass"
+    assert bronze.verify(s3, BUCKET, fingerprint=fingerprint, run_id=options["run_id"])["state"] == "pass"
 
 
 def test_dry_run_does_not_emit_audit(s3_with_snapshot):
     s3, fingerprint = s3_with_snapshot
     result = bronze.ingest(
-        s3, BUCKET, fingerprint=fingerprint,
-        run_id="audit-dry-run-test", end="2026-11-14", execute=False,
+        s3,
+        BUCKET,
+        fingerprint=fingerprint,
+        run_id="audit-dry-run-test",
+        end="2026-11-14",
+        execute=False,
     )
     assert result["writes"] == 0
     assert _audit_records(s3, "audit-dry-run-test") == []
@@ -442,7 +450,10 @@ def test_invalid_progress_configuration_is_rejected(s3_with_snapshot):
     s3, fingerprint = s3_with_snapshot
     with pytest.raises(bronze.BronzeIngestError, match="Invalid progress"):
         bronze.ingest(
-            s3, BUCKET, fingerprint=fingerprint,
-            run_id="invalid-progress-test", end="2026-11-14",
+            s3,
+            BUCKET,
+            fingerprint=fingerprint,
+            run_id="invalid-progress-test",
+            end="2026-11-14",
             progress_every=0,
         )

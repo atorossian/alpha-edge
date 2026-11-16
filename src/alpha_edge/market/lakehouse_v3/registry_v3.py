@@ -95,7 +95,8 @@ def _resolve(row: dict, by_id: dict, by_ticker: dict, filename: str) -> dict:
     else:
         candidates = by_ticker.get(row.get("ticker", ""), [])
         result = candidates[0] if len(candidates) == 1 else None
-    # The display ticker may have changed since an override was authored.\n    # A stable target_row_id takes precedence and never guesses another listing.\n    if result is None:
+        # The display ticker may have changed since an override was authored.
+    # A stable target_row_id takes precedence and never guesses another listing.\n    if result is None:
         raise LakehouseError(f"{filename}: unknown or ambiguous row target {rid or row.get('ticker')}")
     return result
 
@@ -104,16 +105,33 @@ def validate_source_files(files: dict[str, bytes]) -> dict[str, list[dict]]:
     if set(files) != set(SOURCE_FILES):
         raise LakehouseError(f"Expected only these five sources: {SOURCE_FILES}")
     frames = {name: _read_csv(files[name], name) for name in SOURCE_FILES}
-    _required(frames["universe.csv"],
-              {"row_id", "ticker", "asset_id", "yahoo_ticker", "include",
-               "currency", "market", "calendar_id", "exchange", "asset_class"},
-              "universe.csv")
-    _required(frames["universe_overrides.csv"],
-              {"target_row_id", "ticker", "yahoo_ticker", "lock_yahoo_ticker"},
-              "universe_overrides.csv")
+    _required(
+        frames["universe.csv"],
+        {
+            "row_id",
+            "ticker",
+            "asset_id",
+            "yahoo_ticker",
+            "include",
+            "currency",
+            "market",
+            "calendar_id",
+            "exchange",
+            "asset_class",
+        },
+        "universe.csv",
+    )
+    _required(
+        frames["universe_overrides.csv"],
+        {"target_row_id", "ticker", "yahoo_ticker", "lock_yahoo_ticker"},
+        "universe_overrides.csv",
+    )
     _required(frames["asset_excluded.csv"], {"target_row_id", "ticker", "reason"}, "asset_excluded.csv")
-    _required(frames["universe_manual_additions.csv"],
-              {"ticker", "yahoo_ticker", "lock_yahoo_ticker"}, "universe_manual_additions.csv")
+    _required(
+        frames["universe_manual_additions.csv"],
+        {"ticker", "yahoo_ticker", "lock_yahoo_ticker"},
+        "universe_manual_additions.csv",
+    )
     _required(frames["ingest_force_refresh.csv"], {"ticker"}, "ingest_force_refresh.csv")
     rows = frames["universe.csv"]
     for col in ("row_id", "asset_id"):
@@ -159,10 +177,15 @@ def _fx_sources(currencies: set[str], rows: list[dict]) -> list[dict]:
         inverse = "USD" + ccy + "=X"
         # Prefer a source actually present in the five-file universe.
         source, direction = (direct, "direct") if direct in available else (inverse, "inverse")
-        output.append({
-            "currency": ccy, "provider_symbol": source, "direction": direction,
-            "verification": "unverified_candidate", "source_convention": "generated_not_historical_data",
-        })
+        output.append(
+            {
+                "currency": ccy,
+                "provider_symbol": source,
+                "direction": direction,
+                "verification": "unverified_candidate",
+                "source_convention": "generated_not_historical_data",
+            }
+        )
     return output
 
 
@@ -251,27 +274,33 @@ def build_registry(files: dict[str, bytes]) -> dict:
             issues.add("missing_or_invalid_quote_currency")
         calendar, tz, policy_issues = _policy(r)
         issues.update(policy_issues)
-        assets.append({
-            "asset_id": r["asset_id"], "row_id": r["row_id"],
-            "ticker": r["ticker"], "yahoo_ticker": r["yahoo_ticker"],
-            "currency": ccy or None, "calendar_id": calendar,
-            "exchange_timezone": tz, "market": r["market"],
-            "exchange": r["exchange"], "asset_class": r["asset_class"],
-            "source_status": "blocked" if issues else "configured",
-            "blockers": sorted(issues), "force_refresh": (r["ticker"] in refresh_tickers and len(by_ticker[r["ticker"]]) == 1),
-            "quote_unit": ccy or None, "quote_to_currency_factor": 1.0 if ccy else None,
-            "quote_unit_policy": "same_as_source_currency_pending_source_verification",
-        })
+        assets.append(
+            {
+                "asset_id": r["asset_id"],
+                "row_id": r["row_id"],
+                "ticker": r["ticker"],
+                "yahoo_ticker": r["yahoo_ticker"],
+                "currency": ccy or None,
+                "calendar_id": calendar,
+                "exchange_timezone": tz,
+                "market": r["market"],
+                "exchange": r["exchange"],
+                "asset_class": r["asset_class"],
+                "source_status": "blocked" if issues else "configured",
+                "blockers": sorted(issues),
+                "force_refresh": (r["ticker"] in refresh_tickers and len(by_ticker[r["ticker"]]) == 1),
+                "quote_unit": ccy or None,
+                "quote_to_currency_factor": 1.0 if ccy else None,
+                "quote_unit_policy": "same_as_source_currency_pending_source_verification",
+            }
+        )
     included = sum(r["include"] == "1" for r in rows)
     if len(assets) != included:
         raise LakehouseError("Included universe rows silently dropped")
     blocked = [x for x in assets if x["source_status"] == "blocked"]
     configured = [x for x in assets if x["source_status"] == "configured"]
     currencies = {x["currency"] for x in assets if x["currency"]}
-    source_files = {
-        name: {"sha256": digest(files[name]), "bytes": len(files[name])}
-        for name in SOURCE_FILES
-    }
+    source_files = {name: {"sha256": digest(files[name]), "bytes": len(files[name])} for name in SOURCE_FILES}
     source_digest = digest(json_bytes(source_files))
     registry = {
         "schema": SCHEMA,
@@ -282,14 +311,17 @@ def build_registry(files: dict[str, bytes]) -> dict:
         "status": "configuration_candidate",
         "assets": assets,
         "excluded": [
-            {"asset_id": r["asset_id"], "ticker": r["ticker"],
-             "exclusion_reason": reasons.get(r["asset_id"], "universe_include_0")}
-            for r in sorted(rows, key=lambda x: x["asset_id"]) if r["include"] == "0"
+            {
+                "asset_id": r["asset_id"],
+                "ticker": r["ticker"],
+                "exclusion_reason": reasons.get(r["asset_id"], "universe_include_0"),
+            }
+            for r in sorted(rows, key=lambda x: x["asset_id"])
+            if r["include"] == "0"
         ],
         "fx_pairs": _fx_sources(currencies, rows),
         "refresh_tickers": sorted(refresh_tickers),
         "summary": {
-            "universe_total": len(rows), "included": included,
             "configured": len(configured), "blocked": len(blocked),
             "excluded": len(rows) - included,
             "blocker_counts": dict(sorted(Counter(

@@ -221,13 +221,13 @@ def test_pilot_config_roundtrip_uses_mocked_s3_not_local_files():
     ],
 )
 def test_static_architecture_guard_rejects_local_market_io(source):
-    assert lint_text(source.replace('\\n', '\n'), 'candidate.py')
+    assert lint_text(source.replace("\\n", "\n"), "candidate.py")
     with pytest.raises(LakehouseError):
-        validate_source_tree({'candidate.py': source.replace('\\n', '\n')})
+        validate_source_tree({"candidate.py": source.replace("\\n", "\n")})
 
 
 def test_static_architecture_guard_allows_only_memory_bytesio_exceptions():
     safe_source = "import pandas as pd\\nimport io\\npd.read_parquet(io.BytesIO(b'data'))"
     unsafe_source = "import pandas as pd\\npd.read_parquet('data.parquet')"
-    assert not lint_text(safe_source.replace('\\n', '\n'), 'storage.py')
-    assert lint_text(unsafe_source.replace('\\n', '\n'), 'storage.py')
+    assert not lint_text(safe_source.replace("\\n", "\n"), "storage.py")
+    assert lint_text(unsafe_source.replace("\\n", "\n"), "storage.py")

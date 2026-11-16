@@ -1,97 +1,57 @@
-"""Bootstrap an immutable v3 S3 registry from the checksummed S3-only v2 plan.
+"""S3-only bootstrap from the five current universe configuration files.
 
-The archived source is a historical snapshot, NOT necessarily the latest
-production universe. Any eligibility/identity changes require a reviewed
-new registry revision before Gold approval.
+GitHub provides a pinned initial config revision. Runtime consumers read S3.
+No historical market-data lake, past backfills, or local file is consulted.
 """
 
 from __future__ import annotations
 
 import argparse
-import hashlib
-import io
 import json
+import re
+from urllib.request import urlopen
 
-import pandas as pd
+from alpha_edge.market.lakehouse_v3.registry_v3 import SOURCE_FILES, stage_registry
 
-from alpha_edge.market.archive_local_outputs_v2 import archive_prefix
-from alpha_edge.market.universe_registry_v2 import load_archived_plan
-from alpha_edge.market.lakehouse_v3.storage import ROOT, LakehouseError, json_bytes, put_json, read_bytes
+_REPO = "atorossian/alpha-edge"
+_SHA = re.compile(r"^[0-9a-f]{40}$")
 
 
-def build_registry(
-    s3,
-    bucket: str,
-    *,
-    archive_id: str,
-    selected_asset_ids: list[str] | None = None,
-    execute: bool = False,
-) -> dict:
-    frame, info = load_archived_plan(s3, bucket, archive_id)
-    root = archive_prefix(archive_id)
-    index = json.loads(read_bytes(s3, bucket, f"{root}/_verified_inventory.json"))
-    path = "full_universe_preflight_v2/first_review/fx_config.csv"
-    evidence = {x["path"]: x for x in index["files"]}
-    if path not in evidence:
-        raise LakehouseError("Archived plan lacks expected pinned FX config")
-    fx_blob = read_bytes(s3, bucket, f"{root}/files/{path}")
-    if hashlib.sha256(fx_blob).hexdigest() != evidence[path]["sha256"]:
-        raise LakehouseError("Archived FX config checksum mismatch")
-    fx = pd.read_csv(io.BytesIO(fx_blob), dtype=str, keep_default_na=False)
-    if frame.duplicated("asset_id").any() or not {"asset_id", "yahoo_ticker", "currency", "calendar_id"} <= set(frame):
-        raise LakehouseError("Archived asset registry missing identity/calendar contract")
-    if selected_asset_ids:
-        chosen = set(selected_asset_ids)
-        frame = frame.loc[frame["asset_id"].isin(chosen)].copy()
-        if set(frame["asset_id"]) != chosen:
-            raise LakehouseError("Requested asset IDs not found in archived S3 plan")
-    if frame.empty:
-        raise LakehouseError("No eligible assets selected")
-    needed_fx = set(frame["currency"].astype(str)) - {"USD"}
-    fx = fx.loc[fx["currency"].isin(needed_fx)]
-    if needed_fx - set(fx["currency"]):
-        raise LakehouseError("Missing FX mappings in archived plan")
-    assets = frame[["asset_id", "yahoo_ticker", "currency", "calendar_id"]].sort_values("asset_id")
-    doc = {
-        "schema": "alpha_edge_registry_v3_1",
-        "source": "verified_v2_archived_plan",
-        "archive_id": archive_id,
-        "source_plan_sha256": info["plan_sha256"],
-        "review_state": "historical_snapshot_unapproved",
-        "assets": assets.to_dict("records"),
-        "fx_pairs": fx[["currency", "provider_symbol", "direction"]].sort_values("currency").to_dict("records"),
-    }
-    source_hash = hashlib.sha256(json_bytes(doc)).hexdigest()
-    target = f"{ROOT}/config/registry_{source_hash[:24]}.json"
-    if not execute:
-        return {"state": "dry_run", "target_key": target, "assets": len(assets), "writes": 0}
-    put_json(s3, bucket, target, doc)
-    return {"state": "registry_staged_for_review", "target_key": target, "assets": len(assets)}
+def fetch_five_github_files(commit_sha: str, *, opener=urlopen) -> dict[str, bytes]:
+    if not _SHA.fullmatch(commit_sha):
+        raise ValueError("Bootstrap source must be a full 40-character Git commit SHA")
+    contents = {}
+    for name in SOURCE_FILES:
+        url = f"https://raw.githubusercontent.com/{_REPO}/{commit_sha}/data/universe/{name}"
+        with opener(url, timeout=30) as response:
+            data = response.read(8 * 1024 * 1024 + 1)
+        if len(data) > 8 * 1024 * 1024:
+            raise ValueError(f"Unexpectedly large configuration source: {name}")
+        contents[name] = data
+    return contents
+
+
+def bootstrap(s3, bucket: str, *, source_commit: str, execute: bool = False) -> dict:
+    files = fetch_five_github_files(source_commit)
+    result = stage_registry(s3, bucket, files, execute=execute)
+    result["github_repo"] = _REPO
+    result["github_commit"] = source_commit
+    result["source_file_names"] = list(SOURCE_FILES)
+    return result
 
 
 def main() -> None:
-    p = argparse.ArgumentParser(description="S3-only historical registry bootstrapping")
-    p.add_argument("--bucket", required=True)
-    p.add_argument("--archive-id", default="old-outputs-20261110")
-    p.add_argument(
-        "--asset-ids", default="", help="Comma-separated canonical asset IDs; empty selects archived universe"
-    )
-    p.add_argument("--execute", action="store_true")
-    a = p.parse_args()
+    p = argparse.ArgumentParser(description="Canonical S3 registry from five current universe files")
+    p.add_argument("--bucket", default="alpha-edge-algo")
+    p.add_argument("--source-commit", required=True, help="40-character immutable Git commit SHA")
+    p.add_argument("--execute", action="store_true", help="Stage six immutable S3 objects, never activate")
+    args = p.parse_args()
     import boto3
-
-    print(
-        json.dumps(
-            build_registry(
-                boto3.client("s3", region_name="eu-west-1"),
-                a.bucket,
-                archive_id=a.archive_id,
-                selected_asset_ids=[x.strip() for x in a.asset_ids.split(",") if x.strip()] or None,
-                execute=a.execute,
-            ),
-            indent=2,
-        )
+    result = bootstrap(
+        boto3.client("s3", region_name="eu-west-1"),
+        args.bucket, source_commit=args.source_commit, execute=args.execute,
     )
+    print(json.dumps(result, indent=2))
 
 
 if __name__ == "__main__":

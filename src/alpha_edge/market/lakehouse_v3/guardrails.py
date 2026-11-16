@@ -80,7 +80,11 @@ def lint_text(source: str, filename: str) -> list[str]:
             method = call.split(".")[-1]
             if (filename, call) in IN_MEMORY_READ_EXCEPTIONS:
                 # S3 byte streams via BytesIO; do not permit new paths.
-                if not node.args or _name(node.args[0].func) != "io.BytesIO" if isinstance(node.args[0], ast.Call) else True:
+                if (
+                    not node.args
+                    or not isinstance(node.args[0], ast.Call)
+                    or _name(node.args[0].func) != "io.BytesIO"
+                ):
                     problems.append(f"{filename}:{node.lineno}: in-memory read exception must use io.BytesIO")
                 continue
             if call in BANNED_CALLS or method in BANNED_METHODS:

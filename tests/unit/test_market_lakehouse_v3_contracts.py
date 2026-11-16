@@ -17,6 +17,7 @@ from alpha_edge.market.lakehouse_v3.contracts import (
     validate_candidate_manifest,
     validate_registry_document,
 )
+from alpha_edge.market.lakehouse_v3.guardrails import lint_text, validate_source_tree
 from alpha_edge.market.lakehouse_v3.ingest import registry_from_s3
 from alpha_edge.market.lakehouse_v3.storage import ROOT, LakehouseError, put_json
 
@@ -206,3 +207,27 @@ def test_pilot_config_roundtrip_uses_mocked_s3_not_local_files():
         corrupt["fx_pairs"] = [x for x in corrupt["fx_pairs"] if x["currency"] != "BRL"]
         with pytest.raises(LakehouseError):
             validate_registry_document(corrupt)
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "from pathlib import Path\\nPath('market.parquet').write_bytes(b'data')",
+        "import tempfile\\ntempfile.TemporaryDirectory()",
+        "import pandas as pd\\npd.DataFrame().to_csv('data.csv')",
+        "import pandas as pd\\npd.read_parquet('local.parquet')",
+        "import pandas as pd\\npd.DataFrame().to_parquet('local.parquet')",
+        "open('data.csv', 'wb')",
+    ],
+)
+def test_static_architecture_guard_rejects_local_market_io(source):
+    assert lint_text(source.replace('\\n', '\n'), 'candidate.py')
+    with pytest.raises(LakehouseError):
+        validate_source_tree({'candidate.py': source.replace('\\n', '\n')})
+
+
+def test_static_architecture_guard_allows_only_memory_bytesio_exceptions():
+    safe_source = "import pandas as pd\\nimport io\\npd.read_parquet(io.BytesIO(b'data'))"
+    unsafe_source = "import pandas as pd\\npd.read_parquet('data.parquet')"
+    assert not lint_text(safe_source.replace('\\n', '\n'), 'storage.py')
+    assert lint_text(unsafe_source.replace('\\n', '\n'), 'storage.py')

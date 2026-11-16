@@ -35,7 +35,7 @@ jobs:
       - name: Install dependencies
         run: poetry install --no-interaction --no-ansi
       - name: Run in-memory S3 contract tests
-        run: poetry run pytest -q tests/unit/test_market_lakehouse_v3.py tests/unit/test_market_lakehouse_v3_contracts.py
+        run: poetry run pytest -q tests/unit/test_market_lakehouse_v3.py tests/unit/test_market_lakehouse_v3_contracts.py tests/unit/test_market_lakehouse_v3_registry.py
       - name: Enforce S3-only data-plane code contracts
         run: poetry run python -m alpha_edge.market.lakehouse_v3.guardrails
       - name: Format and lint only the new implementation

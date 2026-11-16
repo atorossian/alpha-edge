@@ -181,13 +181,14 @@ def build_registry(files: dict[str, bytes]) -> dict:
     manual = frames["universe_manual_additions.csv"]
     excluded = frames["asset_excluded.csv"]
     refresh = frames["ingest_force_refresh.csv"]
-    seen_overrides: set[str] = set()
+    seen_overrides: dict[str, tuple[str, str]] = {}
     for x in overrides:
         r = _resolve(x, by_id, by_ticker, "universe_overrides.csv")
         aid = r["asset_id"]
-        if aid in seen_overrides:
-            raise LakehouseError(f"Duplicate overrides for {r['ticker']}")
-        seen_overrides.add(aid)
+        decision = (x["yahoo_ticker"], x["lock_yahoo_ticker"])
+        if aid in seen_overrides and seen_overrides[aid] != decision:
+            exceptions[aid].add("conflicting_locked_overrides")
+        seen_overrides[aid] = decision
         if x["lock_yahoo_ticker"] == "1" and x["yahoo_ticker"] != r["yahoo_ticker"]:
             exceptions[aid].add("override_symbol_conflict")
     seen_manual: set[str] = set()

@@ -574,14 +574,23 @@ def main() -> None:
     selectors = [x.strip() for x in args.only.split(",") if x.strip()] or None
     if args.command == "ingest":
         output = ingest(
-            s3, args.bucket, fingerprint=args.source_fingerprint, run_id=args.run_id,
-            end=args.end, execute=args.execute, only=selectors,
-            retry_count=args.retries, pause_seconds=args.pause_seconds,
+            s3,
+            args.bucket,
+            fingerprint=args.source_fingerprint,
+            run_id=args.run_id,
+            end=args.end,
+            execute=args.execute,
+            only=selectors,
+            retry_count=args.retries,
+            pause_seconds=args.pause_seconds,
         )
     else:
         output = verify(
-            s3, args.bucket, fingerprint=args.source_fingerprint,
-            run_id=args.run_id, only=selectors,
+            s3,
+            args.bucket,
+            fingerprint=args.source_fingerprint,
+            run_id=args.run_id,
+            only=selectors,
         )
     # Full results are persisted as S3 run reports. Terminal output stays short.
     display = {k: v for k, v in output.items() if k not in {"successes", "failure_details"}}

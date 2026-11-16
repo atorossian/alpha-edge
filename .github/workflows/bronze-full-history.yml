@@ -38,4 +38,5 @@ jobs:
       - name: Lint and format
         run: |
           poetry run ruff check --no-fix src/alpha_edge/market/ingest_bronze_full_history.py tests/unit/test_ingest_bronze_full_history.py
+          poetry run ruff format --diff src/alpha_edge/market/ingest_bronze_full_history.py tests/unit/test_ingest_bronze_full_history.py
           poetry run ruff format --check src/alpha_edge/market/ingest_bronze_full_history.py tests/unit/test_ingest_bronze_full_history.py

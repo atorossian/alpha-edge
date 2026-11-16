@@ -81,9 +81,7 @@ def validate_registry_document(doc: dict) -> None:
     for record in assets:
         _required_fields(record, {"asset_id", "yahoo_ticker", "currency", "calendar_id"}, "asset")
         asset_id = record["asset_id"]
-        if not isinstance(asset_id, str) or not (
-            asset_id.startswith("EQH") or asset_id.startswith("CRYPTO:")
-        ):
+        if not isinstance(asset_id, str) or not (asset_id.startswith("EQH") or asset_id.startswith("CRYPTO:")):
             raise LakehouseError(f"Invalid canonical asset ID: {asset_id!r}")
         if asset_id in seen_ids:
             raise LakehouseError(f"Duplicate canonical asset ID: {asset_id}")
@@ -128,9 +126,7 @@ def validate_registry_document(doc: dict) -> None:
         raise LakehouseError(f"Registry currencies missing FX mappings: {sorted(missing)}")
 
 
-def validate_artifacts(
-    artifacts: dict, *, directory: str, required: dict[str, str]
-) -> None:
+def validate_artifacts(artifacts: dict, *, directory: str, required: dict[str, str]) -> None:
     _required_fields(artifacts, set(required), "manifest artifacts")
     if set(artifacts) != set(required):
         raise LakehouseError("Artifact manifest includes missing or unexpected table references")
@@ -150,9 +146,19 @@ def validate_bronze_manifest(doc: dict, *, run_id: str) -> None:
     _required_fields(
         doc,
         {
-            "schema", "run_id", "status", "registry_key", "registry_sha256",
-            "start", "end_exclusive", "assets", "rows", "artifacts",
-            "provenance", "completed_at_utc", "price_basis",
+            "schema",
+            "run_id",
+            "status",
+            "registry_key",
+            "registry_sha256",
+            "start",
+            "end_exclusive",
+            "assets",
+            "rows",
+            "artifacts",
+            "provenance",
+            "completed_at_utc",
+            "price_basis",
         },
         "Bronze manifest",
     )
@@ -192,8 +198,14 @@ def validate_candidate_manifest(doc: dict, *, run_id: str) -> None:
     _required_fields(
         doc,
         {
-            "schema", "run_id", "status", "approved", "bronze_manifest_key",
-            "bronze_registry_sha256", "artifacts", "quality",
+            "schema",
+            "run_id",
+            "status",
+            "approved",
+            "bronze_manifest_key",
+            "bronze_registry_sha256",
+            "artifacts",
+            "quality",
         },
         "Gold candidate manifest",
     )
@@ -209,16 +221,16 @@ def validate_candidate_manifest(doc: dict, *, run_id: str) -> None:
         raise LakehouseError("Candidate does not reference its exact immutable Bronze source")
     _sha(doc["bronze_registry_sha256"], "candidate registry SHA-256")
     _required_fields(
-        doc["quality"], {"bronze_rows", "silver_rows", "gold_rows", "assets"},
+        doc["quality"],
+        {"bronze_rows", "silver_rows", "gold_rows", "assets"},
         "candidate quality report",
     )
-    if any(type(doc["quality"][x]) is not int or doc["quality"][x] < 0 for x in (
-        "bronze_rows", "silver_rows", "gold_rows", "assets"
-    )):
-        raise LakehouseError("Invalid candidate row counts")
-    if not (
-        doc["quality"]["bronze_rows"] == doc["quality"]["silver_rows"] == doc["quality"]["gold_rows"]
+    if any(
+        type(doc["quality"][x]) is not int or doc["quality"][x] < 0
+        for x in ("bronze_rows", "silver_rows", "gold_rows", "assets")
     ):
+        raise LakehouseError("Invalid candidate row counts")
+    if not (doc["quality"]["bronze_rows"] == doc["quality"]["silver_rows"] == doc["quality"]["gold_rows"]):
         raise LakehouseError("Bronze/Silver/Gold candidate row counts do not reconcile")
     validate_artifacts(
         doc["artifacts"],

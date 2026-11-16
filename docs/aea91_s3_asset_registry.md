@@ -1,129 +1,144 @@
-# AEA-91 — Canonical S3 Asset Registry: staged pilot design
+# AEA-91 — Canonical S3 registry from the five current universe files
 
 **Jira:** https://alejandrotorossian.atlassian.net/browse/AEA-91
 
-**Implementation:** `src/alpha_edge/market/lakehouse_v3/registry_v3.py`
-and `contracts.validate_pilot_registry_document`.
+## Authoritative inputs — no historical data
 
-**Release status:** review-only pilot candidate; **not approved for ingestion**.
-The source of truth for any runtime ingestion must eventually be a
-separately promoted immutable S3 registry, never the Git configuration.
+Only these configuration files may determine membership, identity, provider
+symbols and exclusions:
 
-## What the first delivery does
+1. `data/universe/universe.csv`
+2. `data/universe/universe_overrides.csv`
+3. `data/universe/asset_excluded.csv`
+4. `data/universe/ingest_force_refresh.csv`
+5. `data/universe/universe_manual_additions.csv`
 
-- Reads the 79-cohort historical plan exclusively from the archived S3
-  evidence via `universe_registry_v2.load_archived_plan`, including the
-  plan and per-cohort SHA-256 verification.
-- Reads and verifies the SHA-256 and byte lengths of all three files
-  declared by the *committed* v2 exclusions-adjusted release inventory,
-  checks that it is explicitly `production_eligible=false`, and
-  reconciles 2,207 inventory rows / 2,078 eligible identities.
-- Checks the exact stable IDs, historical quote currencies, calendar
-  expectations, inclusion flags, and independently unapproved state for
-  the eight pilot assets against both sets of S3 evidence.
-- Reads historical `fx_config.csv` from S3 and verifies its archived
-  checksum; retains USD per local-unit conventions.
-- Carries current provider symbols, approved/not-approved flag,
-  exchange-specific timezone, trading-calendar key, quote currency,
-  quote unit and factor (identity 1.0 for this pilot) and historical
-  aliases without inventing an effective date.
-- Generates a sorted, deterministic JSON schema
-  `alpha_edge_registry_v3_2`, with an immutable S3 candidate key
-  `market/lake_v3/config/candidates/registry_<SHA256>.json`.
-- Never activates, promotes, or replaces the current production
-  registry. The existing ingestion contract rejects this review-only
-  `v3_2` document. A future versioned approval/promotion contract
-  must explicitly authorize ingestion.
+**Explicitly prohibited as registry inputs:** legacy v1/v2 market prices,
+backfills, historical release inventories, recovery crosswalks, old cohort
+metadata and previous data-quality approval flags. None are imported by the
+new AEA-91 registry builder.
 
-## Sample CLI: live-read-only dry-run by default
+The latest inspected Git configuration had **2,207 rows**,
+**2,035 with `include=1`** and **172 with `include=0`**.
+The supporting files had 153 overrides, 170 explicit exclusion records,
+36 manual additions and one force-refresh ticker. A separate excluded record
+is not required for every `include=0` row; the include flag is the
+authoritative membership rule.
 
-```bash
-poetry run python -m alpha_edge.market.lakehouse_v3.registry_v3 \
-  --bucket alpha-edge-algo
+All 2,035 included rows remain represented in the versioned registry
+even when operationally blocked by missing configuration.
+Excluded assets are recorded separately for an auditable membership
+decision, but not sent to ingestion.
+
+## Registry architecture
+
+```text
+Five pinned Git configuration files [bootstrap only, read in memory]
+  -> strict source validation and reconciliation
+  -> immutable S3 source snapshot (all five files + SHA-256)
+  -> immutable S3 canonical registry
+        assets: 2035 included, with individual blockers if necessary
+        excluded: 172 excluded, with reasons
+        FX configuration candidates: generated from current currency needs
+  -> explicitly authorized S3 active pointer (separate activation step)
+  -> read-only, version/hash-pinned operational registry reader
+  -> downstream Bronze ingestion selects valid configured assets only
 ```
 
-With `--execute`, this new command writes **one immutable
-review-only candidate** under the `market/lake_v3/config/candidates/`
-prefix using `IfNoneMatch="*"`, checksum verification, and exact-byte
-collision rejection. It does not create an active pointer, approve
-the source history or run Yahoo ingestion.
+**Gold market-data approval is not implied by registry activation.** The
+registry says which instruments are included and how to attempt ingestion.
+Independent source/FX/corporate-action validation is a later gate.
 
-Do not execute before the AWS IAM role and remaining evidence are
-reviewed. `--execute` is not a production activation.
+### Config precedence and safe conflict handling
 
-## Pilot identity and policy
+- `universe.csv` owns stable `asset_id`, `row_id` and `include`.
+- `universe_overrides.csv` must resolve to an existing row; locked Yahoo
+  symbol conflicts are blocked, not silently overwritten.
+- `asset_excluded.csv` must resolve to an existing row. Any conflicting
+  `include=1` entry is blocked for review.
+- `universe_manual_additions.csv` must be materialized in the universe;
+  a locked-symbol mismatch blocks that asset.
+- `ingest_force_refresh.csv` marks a present ticker for refresh but cannot
+  add a missing asset or override exclusion.
+- Duplicate IDs/row IDs/tickers, malformed includes, orphaned references or
+  unexpected extra data files fail before S3 publication.
 
-| Asset | Canonical ID | Current provider symbol | Exchange calendar | Currency |
-|---|---|---|---|---|
-| SPY | `EQH7f9e4349dabafdd9` | `SPY` | NYSE | USD |
-| GLD | `EQH4561ad9433b2a662` | `GLD` | NYSE | USD |
-| BTC/USD | `CRYPTO:BTC-USD` | `BTC-USD` | 24/7 | USD |
-| RENT3 | `EQH0f232d452fb06a46` | `RENT3.SA` | BMF | BRL |
-| TRAXIONA | `EQH11f97bdc8d8dfe85` | `TRAXIONA.MX` | XMEX | MXN |
-| LOG | `EQH2325a2fe8044198c` | `LOG.MC` | XMAD | EUR |
-| REY | `EQH2834655e74af1b24` | `REY.MI` | XMIL | EUR |
-| EUR/USD | `EQHe874aca04f607837` | `EURUSD=X` | FOREX | USD |
+The `EUR-USD` manual-addition entry still requests `EUR-USD`, while
+the universe's canonical provider symbol is `EURUSD=X`.
+The registry retains the current `EURUSD=X` mapping and marks the
+locked-manual conflict. **No historical rename or date is invented.**
 
-### EUR/USD: unresolved ticker observation, NOT a verified rename date
+### Exchange calendars, currencies and FX
 
-The original archived source was `EUR-USD` / `24/7`;
-the current source is `EURUSD=X` / `FOREX`.
-Both belong to the SAME stable asset ID according to the existing
-registry and v2 review evidence. The schema captures them as two
-separate `source_aliases` observations. Both
-`effective_from` and `effective_to` remain null, and
-`effective_dates_verified=false` until a reviewer checks the exact
-historical transition and the daily Yahoo FX session convention.
+Most equities have no `calendar_id` populated in the five source files.
+The new `MARKET_POLICY` maps the *current universe's own market values*
+to proposed exchange calendar and timezone policies, retaining explicit
+conflicts and marking unsupported/blank markets as blocked.
+Each venue's historical session conventions still require AEA-93 checks.
 
-The archive alone does not prove that the two provider symbols are
-interchangeable or their prices equivalent. Do not backfill across the
-change without a controlled source/series reconciliation.
+Five included assets have missing currency in the current config:
+`HYPE-USD`, `KMB`, `USD-CNY`, `USD-BRL`, `USD-JPY`.
+They are retained as **included but blocked** until corrected in the five
+configuration sources.
 
-### FX normalization inputs
+The FX configuration builder generates candidate direct/inverse symbols
+from the currencies required by included assets, without consulting old
+market data. These are **unverified quotation-source suggestions** and are
+not accepted conversion observations. AEA-95 must verify source quote
+existence, quote units and timing. Any ambiguity should block USD return
+publication.
 
-- EUR direct `EURUSD=X`.
-- BRL inverse `USDBRL=X`.
-- MXN inverse `USDMXN=X`.
+## S3 location and versioning
 
-These source quotes are available as an archived configuration;
-their actual timing and values require validation in AEA-95.
+Immutable source files:
+`s3://alpha-edge-algo/market/lake_v3/config/source_snapshots/<source_fingerprint>/<filename>`
 
-## Immutable data version and validation policy
+Immutable, content-addressed registry:
+`s3://alpha-edge-algo/market/lake_v3/config/registries/registry_<SHA256>.json`
 
-- A historical or excluded asset never disappears simply because
-  its modern `include` flag is false; it remains represented in the
-  historical registry and separate audit evidence.
-- One current symbol per active asset and no duplicate canonical IDs.
-  Unresolved current eligibility/identity/quote policies fail.
-- A changed input (archive plan, eligible source inventory, FX evidence,
-  pilot mapping, alias/review resolution) changes the serialized
-  candidate and its SHA, producing a new S3 key.
-- A previously written key may only be reused when its bytes match.
-  Candidate structure and lineage are validated before writing.
-- A candidate must keep `review_state=review_required` and
-  nonempty `release_blockers`; attempting to mark it approved
-  without independent verification fails.
+Active pointer (only once separately authorized):
+`s3://alpha-edge-algo/market/lake_v3/config/active.json`
 
-## Remaining work before AEA-91 is complete
+The runtime registry reader must validate exact content SHA, registered
+schema, membership counts and the active pointer. Merely staging a candidate
+must never cause activation or ingestion.
 
-1. Establish a **full universe** S3 registry; this pilot covers eight
-   assets only. Current Git-tracked configuration is not yet an
-   immutable, checksum-pinned S3 upstream source for all 2,207 identities.
-2. Resolve the historical EUR/USD alias dates and price-series
-   equivalence; no automatic historical remapping.
-3. Close the 911 historical identity crosswalk candidates: S3 asset
-   plan reports **888 single-symbol matches requiring instrument review,
-   14 ambiguous current symbols, 2 ambiguous historical symbols, and
-   7 historical symbols absent from the current universe**.
-   There are **zero approved identity merges** in that plan.
-4. Implement independent registry review, active-pointer promotion
-   with IAM separation/concurrency control, and approved-reader
-   version pinning. Do not reuse a reviewer-created JSON boolean as
-   a production authorization.
-5. Verify full-universe exclusions/overrides, quote units, instrument
-   identity and source preferences from immutable S3 configuration.
-   Keep all unresolved identities explicitly blocked.
-6. Run an isolated AWS S3 end-to-end integration, verify actual
-   candidate checksum and ensure no accidental local data persistence.
+## Bootstrap CLI
 
-**No real market-data observations are approved by this task.**
+To generate the registry from **exactly the five current universe config
+files** at a pinned Git commit, in memory, without a local data file or
+historical S3 source:
+
+```bash
+poetry run python -m alpha_edge.market.lakehouse_v3.bootstrap \
+  --bucket alpha-edge-algo \
+  --source-commit <40-character commit SHA>
+```
+
+This is **dry-run by default** and prints a registry key, SHA and
+inclusion/blocker summary. `--execute` stages the five immutable S3 source
+snapshots and the registry candidate. Staging does not activate it, run
+ingestion, or certify market-data observations.
+
+On subsequent config changes, take the new five files from an immutable
+Git commit, stage a **new** S3 registry and approve/activate that
+version only after reconciling the membership differences.
+Never overwrite the prior registry.
+
+## Validation status and outstanding gates
+
+- Clean-slate build and synthetic in-memory S3 tests cover inclusion,
+  exclusions, override conflicts, missing data, source fingerprints,
+  idempotent staging, and failure to load a registry without an active
+  pointer.
+- Real integration must check all 2,207 config rows and confirm blocker
+  counts, calendar policies and constrained FX configuration.
+- Explicit activation and IAM-controlled pointer update must be tested
+  before anyone relies on the registry in production.
+- The S3 bootstrap snapshot/registry must be staged and verified before
+  declaring S3 the operative source of truth.
+- Independent verification of source prices, actions and conversions is
+  outside AEA-91 and remains mandatory before Gold publication.
+
+The old historical-v2 reconciliation work was incorrectly included in
+an earlier draft of AEA-91; that dependency is now removed by design.

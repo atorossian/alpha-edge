@@ -43,9 +43,20 @@ SOURCE_NAMES = (
 SAFE_RUN = re.compile(r"^[a-z0-9][a-z0-9_-]{2,79}$")
 SHA_RE = re.compile(r"^[a-f0-9]{64}$")
 REQUIRED_BARS = {
-    "asset_id", "provider_symbol", "session_date", "source_timestamp",
-    "source_timezone", "currency_original", "open", "high", "low",
-    "close", "adj_close", "volume", "dividends", "stock_splits",
+    "asset_id",
+    "provider_symbol",
+    "session_date",
+    "source_timestamp",
+    "source_timezone",
+    "currency_original",
+    "open",
+    "high",
+    "low",
+    "close",
+    "adj_close",
+    "volume",
+    "dividends",
+    "stock_splits",
 }
 
 
@@ -84,12 +95,19 @@ def _put_immutable(s3: Any, bucket: str, key: str, payload: bytes, content_type:
         raise BronzeIngestError(f"Refusing S3 write outside dedicated Bronze prefix: {key}")
     try:
         s3.put_object(
-            Bucket=bucket, Key=key, Body=payload, ContentType=content_type,
-            Metadata={"sha256": _digest(payload)}, IfNoneMatch="*",
+            Bucket=bucket,
+            Key=key,
+            Body=payload,
+            ContentType=content_type,
+            Metadata={"sha256": _digest(payload)},
+            IfNoneMatch="*",
         )
     except ClientError as exc:
         if exc.response.get("Error", {}).get("Code") not in {
-            "PreconditionFailed", "412", "ConditionalRequestConflict", "409",
+            "PreconditionFailed",
+            "412",
+            "ConditionalRequestConflict",
+            "409",
         }:
             raise
         existing = _read(s3, bucket, key)
@@ -149,12 +167,15 @@ def load_universe(s3: Any, bucket: str, fingerprint: str) -> tuple[list[dict], d
             raise BronzeIngestError(f"Duplicate/missing source row identifier: {row_id}")
         by_row[row_id] = row
         if row["include"] == "1":
-            included.append({
-                "asset_id": asset_id, "row_id": row_id,
-                "ticker": row["ticker"].strip(),
-                "yahoo_ticker": row["yahoo_ticker"].strip(),
-                "currency_hint": row["currency"].strip() or None,
-            })
+            included.append(
+                {
+                    "asset_id": asset_id,
+                    "row_id": row_id,
+                    "ticker": row["ticker"].strip(),
+                    "yahoo_ticker": row["yahoo_ticker"].strip(),
+                    "currency_hint": row["currency"].strip() or None,
+                }
+            )
         else:
             excluded.append(row)
     if len({x["asset_id"] for x in included}) != len(included):
@@ -180,13 +201,17 @@ def load_universe(s3: Any, bucket: str, fingerprint: str) -> tuple[list[dict], d
     for row in raw_files["universe_manual_additions.csv"]:
         candidates = [a for a in included if a["ticker"] == row.get("ticker")]
         if (
-            row.get("lock_yahoo_ticker") == "1" and len(candidates) == 1
+            row.get("lock_yahoo_ticker") == "1"
+            and len(candidates) == 1
             and candidates[0]["yahoo_ticker"] != row.get("yahoo_ticker")
         ):
-            warnings.append({
-                "ticker": row.get("ticker"), "reason": "manual_locked_symbol_disagrees_with_resolved_universe",
-                "resolved_yahoo_ticker": candidates[0]["yahoo_ticker"],
-            })
+            warnings.append(
+                {
+                    "ticker": row.get("ticker"),
+                    "reason": "manual_locked_symbol_disagrees_with_resolved_universe",
+                    "resolved_yahoo_ticker": candidates[0]["yahoo_ticker"],
+                }
+            )
     metadata = {
         "source_fingerprint": fingerprint,
         "source_git_commit": next(iter(source_commits)),
@@ -216,8 +241,10 @@ def _check_bars(frame: pd.DataFrame, record: dict) -> dict:
     if frame["session_date"].isna().any():
         raise BronzeIngestError("Provider returned missing session labels")
     # Retain flagged anomalies: Bronze is not a repaired dataset.
-    numeric = {field: pd.to_numeric(frame[field], errors="coerce") for field in
-               ("open", "high", "low", "close", "adj_close", "volume")}
+    numeric = {
+        field: pd.to_numeric(frame[field], errors="coerce")
+        for field in ("open", "high", "low", "close", "adj_close", "volume")
+    }
     close = numeric["close"]
     sessions = frame["session_date"].astype(str)
     return {
@@ -281,9 +308,16 @@ def _completed(s3: Any, bucket: str, *, run_id: str, record: dict, verify_hash: 
 
 
 def _acquire_one(
-    s3: Any, bucket: str, *, run_id: str, record: dict,
-    end: str, retry_count: int, retry_delay: float,
-    ticker_factory: Callable | None, sleep: Callable[[float], None],
+    s3: Any,
+    bucket: str,
+    *,
+    run_id: str,
+    record: dict,
+    end: str,
+    retry_count: int,
+    retry_delay: float,
+    ticker_factory: Callable | None,
+    sleep: Callable[[float], None],
 ) -> dict:
     asset_id, symbol = record["asset_id"], record["yahoo_ticker"]
     if not symbol:
@@ -292,8 +326,13 @@ def _acquire_one(
     for attempt in range(1, retry_count + 2):
         try:
             bars, provenance = acquire_yahoo_bars(
-                asset_id, symbol, start=None, end=end, batch_id=run_id,
-                ticker_factory=ticker_factory, currency_hint=record["currency_hint"],
+                asset_id,
+                symbol,
+                start=None,
+                end=end,
+                batch_id=run_id,
+                ticker_factory=ticker_factory,
+                currency_hint=record["currency_hint"],
                 full_history=True,
             )
             validation = _check_bars(bars, record)
@@ -306,18 +345,25 @@ def _acquire_one(
             _put_immutable(s3, bucket, data_key, payload, "application/vnd.apache.parquet")
             manifest = {
                 "schema": "alpha_edge_full_history_asset_v1",
-                "run_id": run_id, "asset_id": asset_id,
+                "run_id": run_id,
+                "asset_id": asset_id,
                 "broker_ticker": record["ticker"],
-                "provider_symbol": symbol, "status": "committed",
-                "period_requested": "max", "interval": "1d",
+                "provider_symbol": symbol,
+                "status": "committed",
+                "period_requested": "max",
+                "interval": "1d",
                 "end_exclusive": end,
                 "source_values_preserved": True,
                 "data": {"key": data_key, "sha256": sha, "bytes": len(payload)},
-                "validation": validation, "provenance": provenance,
+                "validation": validation,
+                "provenance": provenance,
             }
             _put_immutable(
-                s3, bucket, prefix + "/manifest.json",
-                _json_bytes(manifest), "application/json",
+                s3,
+                bucket,
+                prefix + "/manifest.json",
+                _json_bytes(manifest),
+                "application/json",
             )
             _completed(s3, bucket, run_id=run_id, record=record, verify_hash=False)
             return {"asset_id": asset_id, "ticker": symbol, "status": "success", **validation}
@@ -336,18 +382,28 @@ def _record_failure(s3: Any, bucket: str, run_id: str, record: dict, error: Exce
         f"{datetime.now(timezone.utc):%Y%m%dT%H%M%S}-{uuid.uuid4().hex}.json"
     )
     report = {
-        "schema": "alpha_edge_bronze_failure_v1", "run_id": run_id,
-        "asset_id": record["asset_id"], "provider_symbol": record["yahoo_ticker"],
-        "error_type": type(error).__name__, "error": str(error)[:2000],
+        "schema": "alpha_edge_bronze_failure_v1",
+        "run_id": run_id,
+        "asset_id": record["asset_id"],
+        "provider_symbol": record["yahoo_ticker"],
+        "error_type": type(error).__name__,
+        "error": str(error)[:2000],
         "occurred_at_utc": _utc_now(),
     }
     _put_immutable(s3, bucket, key, _json_bytes(report), "application/json")
 
 
 def ingest(
-    s3: Any, bucket: str, *, fingerprint: str, run_id: str, end: str,
-    execute: bool = False, only: list[str] | None = None,
-    retry_count: int = 2, retry_delay: float = 2.0,
+    s3: Any,
+    bucket: str,
+    *,
+    fingerprint: str,
+    run_id: str,
+    end: str,
+    execute: bool = False,
+    only: list[str] | None = None,
+    retry_count: int = 2,
+    retry_delay: float = 2.0,
     ticker_factory: Callable | None = None,
     sleep: Callable[[float], None] = time.sleep,
     pause_seconds: float = 0.5,
@@ -362,8 +418,11 @@ def ingest(
     selected = all_assets
     if only:
         requested = {x.strip() for x in only if x.strip()}
-        matches = [a for a in all_assets if a["asset_id"] in requested or a["ticker"] in requested
-                   or a["yahoo_ticker"] in requested]
+        matches = [
+            a
+            for a in all_assets
+            if a["asset_id"] in requested or a["ticker"] in requested or a["yahoo_ticker"] in requested
+        ]
         found = {value for a in matches for value in (a["asset_id"], a["ticker"], a["yahoo_ticker"])}
         unknown = requested - found
         if unknown:
@@ -383,16 +442,23 @@ def ingest(
         "universe_included_count": source["included"],
         "price_adjustment": "none_by_our_pipeline",
         "provider_parameters": {
-            "provider": "yahoo_finance", "interval": "1d", "period": "max",
-            "auto_adjust": False, "actions": True, "repair": False,
+            "provider": "yahoo_finance",
+            "interval": "1d",
+            "period": "max",
+            "auto_adjust": False,
+            "actions": True,
+            "repair": False,
         },
     }
     _write_run(s3, bucket, run_id=run_id, run_config=config, execute=execute)
     if not execute:
         return {
-            "state": "dry_run", "source": source,
-            "run_id": run_id, "selected": len(selected),
-            "writes": 0, "end_exclusive": end,
+            "state": "dry_run",
+            "source": source,
+            "run_id": run_id,
+            "selected": len(selected),
+            "writes": 0,
+            "end_exclusive": end,
         }
     completed = []
     failures = []
@@ -405,16 +471,23 @@ def ingest(
                 skipped.append({"asset_id": record["asset_id"], "ticker": record["yahoo_ticker"]})
                 continue
             result = _acquire_one(
-                s3, bucket, run_id=run_id, record=record, end=end,
-                retry_count=retry_count, retry_delay=retry_delay,
-                ticker_factory=ticker_factory, sleep=sleep,
+                s3,
+                bucket,
+                run_id=run_id,
+                record=record,
+                end=end,
+                retry_count=retry_count,
+                retry_delay=retry_delay,
+                ticker_factory=ticker_factory,
+                sleep=sleep,
             )
             completed.append(result)
         except (KeyboardInterrupt, SystemExit):
             raise
         except Exception as exc:
             failure = {
-                "asset_id": record["asset_id"], "ticker": record["yahoo_ticker"],
+                "asset_id": record["asset_id"],
+                "ticker": record["yahoo_ticker"],
                 "error": f"{type(exc).__name__}: {exc}"[:2000],
             }
             failures.append(failure)
@@ -423,26 +496,26 @@ def ingest(
             sleep(pause_seconds)
     result = {
         "schema": "alpha_edge_full_history_report_v1",
-        "run_id": run_id, "source_fingerprint": fingerprint,
-        "end_exclusive": end, "started_at_utc": started,
+        "run_id": run_id,
+        "source_fingerprint": fingerprint,
+        "end_exclusive": end,
+        "started_at_utc": started,
         "completed_at_utc": _utc_now(),
-        "selected": len(selected), "succeeded": len(completed),
-        "already_committed": len(skipped), "failed": len(failures),
+        "selected": len(selected),
+        "succeeded": len(completed),
+        "already_committed": len(skipped),
+        "failed": len(failures),
         "state": "complete" if not failures else "completed_with_failures",
         "failure_details": failures,
         "successes": completed,
     }
-    key = (
-        f"{BRONZE_ROOT}/runs/{run_id}/reports/"
-        f"{datetime.now(timezone.utc):%Y%m%dT%H%M%S}-{uuid.uuid4().hex}.json"
-    )
+    key = f"{BRONZE_ROOT}/runs/{run_id}/reports/{datetime.now(timezone.utc):%Y%m%dT%H%M%S}-{uuid.uuid4().hex}.json"
     _put_immutable(s3, bucket, key, _json_bytes(result), "application/json")
     result["report_s3_uri"] = f"s3://{bucket}/{key}"
     return result
 
 
-def verify(s3: Any, bucket: str, *, fingerprint: str, run_id: str,
-           only: list[str] | None = None) -> dict:
+def verify(s3: Any, bucket: str, *, fingerprint: str, run_id: str, only: list[str] | None = None) -> dict:
     """Independent full-byte/Parquet check of every selected S3 asset commit."""
     config_key = f"{BRONZE_ROOT}/runs/{run_id}/run.json"
     config = json.loads(_read(s3, bucket, config_key))
@@ -473,8 +546,10 @@ def verify(s3: Any, bucket: str, *, fingerprint: str, run_id: str,
             errors.append({"asset_id": aid, "error": str(exc)[:1000]})
     return {
         "schema": "alpha_edge_full_history_verification_v1",
-        "run_id": run_id, "source_fingerprint": fingerprint,
-        **stats, "errors": errors,
+        "run_id": run_id,
+        "source_fingerprint": fingerprint,
+        **stats,
+        "errors": errors,
         "state": "pass" if stats["expected"] == stats["committed"] else "incomplete",
     }
 

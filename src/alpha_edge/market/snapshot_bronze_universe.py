@@ -101,12 +101,18 @@ def publish_snapshot(
         try:
             s3.put_object(
                 Bucket=bucket,
+                Key=key,
+                Body=payload,
+                ContentType="text/csv",
                 IfNoneMatch="*",
                 Metadata={"sha256": _digest(payload), "source-git-commit": commit},
             )
         except ClientError as exc:
             if exc.response.get("Error", {}).get("Code") not in {
-                "PreconditionFailed", "412", "ConditionalRequestConflict", "409",
+                "PreconditionFailed",
+                "412",
+                "ConditionalRequestConflict",
+                "409",
             }:
                 raise
             previous = s3.get_object(Bucket=bucket, Key=key)

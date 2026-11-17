@@ -396,29 +396,39 @@ def ingest(
             raise
         except Exception as exc:
             item = {
-                "asset_id": record["asset_id"], "ticker": record["yahoo_ticker"],
+                "asset_id": record["asset_id"],
+                "ticker": record["yahoo_ticker"],
                 "error": f"{type(exc).__name__}: {exc}"[:1800],
             }
             failed.append(item)
             print(f"[incremental][failed] {position}/{total}: {item}", flush=True)
             _audit(s3, bucket, run_id, "failed", record=record, details=item)
         _print_progress(
-            done=position, total=total, ok=len(ok), resumed=len(skipped),
-            failed=len(failed), started_monotonic=started, progress_every=progress_every,
+            done=position,
+            total=total,
+            ok=len(ok),
+            resumed=len(skipped),
+            failed=len(failed),
+            started_monotonic=started,
+            progress_every=progress_every,
         )
         if pause_seconds:
             sleep(pause_seconds)
     result = {
         "schema": "alpha_edge_bronze_incremental_report_v1",
-        "run_id": run_id, "parent_run_id": parent_run_id,
-        "source_fingerprint": fingerprint, "selected": total,
-        "succeeded": len(ok), "already_committed": len(skipped),
-        "failed": len(failed), "failure_details": failed,
-        "successes": ok, "state": "complete" if not failed else "completed_with_failures",
+        "run_id": run_id,
+        "parent_run_id": parent_run_id,
+        "source_fingerprint": fingerprint,
+        "selected": total,
+        "succeeded": len(ok),
+        "already_committed": len(skipped),
+        "failed": len(failed),
+        "failure_details": failed,
+        "successes": ok,
+        "state": "complete" if not failed else "completed_with_failures",
     }
     report_key = (
-        f"{INCREMENTAL_ROOT}/runs/{run_id}/reports/"
-        f"{datetime.now(timezone.utc):%Y%m%dT%H%M%S}-{uuid.uuid4().hex}.json"
+        f"{INCREMENTAL_ROOT}/runs/{run_id}/reports/{datetime.now(timezone.utc):%Y%m%dT%H%M%S}-{uuid.uuid4().hex}.json"
     )
     _put_immutable(s3, bucket, report_key, _json_bytes(result), "application/json")
     _audit(s3, bucket, run_id, result["state"], details={"report": report_key, "failed": len(failed)})
@@ -449,7 +459,8 @@ def verify(s3: Any, bucket: str, *, fingerprint: str, run_id: str) -> dict:
             result["errors"].append({"asset_id": aid, "error": str(exc)[:1000]})
     result.update(
         schema="alpha_edge_bronze_incremental_verification_v1",
-        run_id=run_id, source_fingerprint=fingerprint,
+        run_id=run_id,
+        source_fingerprint=fingerprint,
         state="pass" if result["expected"] == result["committed"] else "incomplete",
     )
     return result
@@ -483,12 +494,19 @@ def main() -> None:
         if not args.verbose_yahoo:
             logging.getLogger("yfinance").setLevel(logging.CRITICAL)
         result = ingest(
-            s3, args.bucket, fingerprint=args.source_fingerprint, run_id=args.run_id,
-            parent_run_id=args.parent_run_id, end=args.end,
-            overlap_days=args.overlap_days, max_staleness_days=args.max_staleness_days,
+            s3,
+            args.bucket,
+            fingerprint=args.source_fingerprint,
+            run_id=args.run_id,
+            parent_run_id=args.parent_run_id,
+            end=args.end,
+            overlap_days=args.overlap_days,
+            max_staleness_days=args.max_staleness_days,
             only=[s.strip() for s in args.only.split(",") if s.strip()] or None,
-            execute=args.execute, retry_count=args.retries,
-            pause_seconds=args.pause_seconds, progress_every=args.progress_every,
+            execute=args.execute,
+            retry_count=args.retries,
+            pause_seconds=args.pause_seconds,
+            progress_every=args.progress_every,
         )
     print(json.dumps({k: v for k, v in result.items() if k not in {"successes", "failure_details"}}, indent=2))
     if result.get("failed") or result.get("state") == "incomplete":

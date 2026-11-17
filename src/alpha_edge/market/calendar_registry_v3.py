@@ -64,15 +64,16 @@ def _derive(row: dict) -> dict:
     explicit = (row.get("calendar_id") or "").strip().upper()
     exchange = (row.get("exchange") or "").strip().upper()
     quote_type = (row.get("quoteType") or "").strip().upper()
-    if explicit in {"24/7", "CRYPTO_24_7"} and quote_type == "CRYPTOCURRENCY":
+    asset_class = (row.get("asset_class") or "").strip().lower()
+    if explicit in {"24/7", "CRYPTO_24_7"} and asset_class == "crypto":
         calendar, origin = "CRYPTO_24_7", "universe_explicit"
-    elif explicit in {"FOREX", "YAHOO_FX_WEEKDAYS"} and (row.get("asset_class") or "").lower() == "fx":
+    elif explicit in {"FOREX", "YAHOO_FX_WEEKDAYS"} and asset_class in {"fx", "fx_pair"}:
         calendar, origin = "YAHOO_FX_WEEKDAYS", "universe_explicit"
-    elif not explicit and exchange == "CCC" and quote_type == "CRYPTOCURRENCY":
+    elif not explicit and exchange == "CCC" and quote_type == "CRYPTOCURRENCY" and asset_class == "crypto":
         calendar, origin = "CRYPTO_24_7", "universe_exchange"
-    elif not explicit and exchange == "CCY" and quote_type == "CURRENCY":
+    elif not explicit and exchange == "CCY" and quote_type == "CURRENCY" and asset_class in {"fx", "fx_pair"}:
         calendar, origin = "YAHOO_FX_WEEKDAYS", "universe_exchange"
-    elif not explicit and exchange in EXCHANGE_CALENDAR_V2 and quote_type in {"ETF", "EQUITY"}:
+    elif not explicit and exchange in EXCHANGE_CALENDAR_V2 and quote_type in {"ETF", "EQUITY"} and asset_class == "equity":
         calendar, origin = EXCHANGE_CALENDAR_V2[exchange], "v2_exchange_mapping"
     else:
         calendar, origin = None, "unresolved_or_conflicting_source"

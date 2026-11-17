@@ -73,7 +73,12 @@ def _derive(row: dict) -> dict:
         calendar, origin = "CRYPTO_24_7", "universe_exchange"
     elif not explicit and exchange == "CCY" and quote_type == "CURRENCY" and asset_class in {"fx", "fx_pair"}:
         calendar, origin = "YAHOO_FX_WEEKDAYS", "universe_exchange"
-    elif not explicit and exchange in EXCHANGE_CALENDAR_V2 and quote_type in {"ETF", "EQUITY"} and asset_class == "equity":
+    elif (
+        not explicit
+        and exchange in EXCHANGE_CALENDAR_V2
+        and quote_type in {"ETF", "EQUITY"}
+        and asset_class == "equity"
+    ):
         calendar, origin = EXCHANGE_CALENDAR_V2[exchange], "v2_exchange_mapping"
     else:
         calendar, origin = None, "unresolved_or_conflicting_source"

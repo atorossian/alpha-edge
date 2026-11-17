@@ -108,6 +108,43 @@ registry, robust exchange coverage (US/EU/Asia), half-days, holiday/DST,
 provider-availability evidence, independently established observation time,
 data-quality quarantine policy and approved release gate.
 
+## Silver SPY S3 candidate publication — 2026-11-17
+
+Source: user-provided execution of `build_silver_sessions_v3` with
+`--execute`; independently inspected S3 run configuration, published
+report, committed asset manifest and S3 object HEAD responses.
+
+- Silver run: `silver-session-pilot-20261117`; explicit calendar: NYSE.
+- Source Bronze run: `bronze-recovery-20261117`; canonical SPY asset:
+  `EQH7f9e4349dabafdd9`.
+- User's report: `processed=1`, `missing_bronze=0`,
+  `status=candidate_written`, `executed=true`,
+  `production_eligible=false`.
+- 8,508 input/source rows preserved, no reported duplicate/invalid sessions,
+  invalid OHLC, negative volume, calendar gaps or quality findings.
+- S3 prefix:
+  `market/lake_v3/silver/session_candidates/runs/silver-session-pilot-20261117/`.
+- S3 candidate object: 604,688 bytes, SHA-256 metadata
+  `34d1b86b52ceb081bf4df076d0a0efbd86924279afc531870a9f2730171d928f`.
+- S3 findings object: 3,170 bytes, SHA-256 metadata
+  `24432b507b6ddfdaf9d89e6b94b2f6250b745e4468ddc9639513db21a1709026`.
+- Both object byte sizes and stored SHA-256 metadata match the committed
+  Silver asset manifest. S3 run config and report agree on the pinned
+  Bronze identity, NYSE calendar and candidate-only status.
+- Published report:
+  `s3://alpha-edge-algo/market/lake_v3/silver/session_candidates/runs/silver-session-pilot-20261117/reports/4fc0971579514ae59c11bc38b6c54a53.json`.
+- **Unverified:** independently rehashing the downloaded Parquet bytes and
+  examining every resulting row, as well as broader financial-data acceptance,
+  cross-provider checks, corporate actions and FX conversion. No Gold
+  release or production acceptance is implied.
+
+**Next step:** approve a versioned per-asset calendar registry rather than
+scaling manual `--calendar NYSE` across the entire 2,031-asset Bronze
+baseline. Missing/unsupported calendars must remain explicit. Run an
+exchange-diverse sample (US equities, EU, Asia, FX, 24/7 crypto), audit
+its findings and full byte-level S3 readback before broader Silver
+publication.
+
 ## Silver subsequent stages (not implemented in this ticket)
 
 1. **AEA-94:** independently validate split and dividend adjustment factors

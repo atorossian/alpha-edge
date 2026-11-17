@@ -6,12 +6,16 @@ on:
       - feature/bronze-full-history-s3
     paths:
       - "data/universe/*.csv"
+      - "src/alpha_edge/universe/universe.py"
       - "src/alpha_edge/market/ingest_bronze_full_history.py"
+      - "tests/unit/test_universe_enrich_currency_preservation.py"
       - "tests/unit/test_ingest_bronze_full_history.py"
       - ".github/workflows/bronze-full-history.yml"
   pull_request:
     paths:
+      - "src/alpha_edge/universe/universe.py"
       - "src/alpha_edge/market/ingest_bronze_full_history.py"
+      - "tests/unit/test_universe_enrich_currency_preservation.py"
       - "tests/unit/test_ingest_bronze_full_history.py"
       - ".github/workflows/bronze-full-history.yml"
 
@@ -35,9 +39,9 @@ jobs:
       - name: Install dependencies
         run: poetry install --no-interaction --no-ansi
       - name: Test S3-only Bronze ingestion
-        run: poetry run pytest -q tests/unit/test_ingest_bronze_full_history.py tests/unit/test_ingest_bronze_yahoo_v2.py
+        run: poetry run pytest -q tests/unit/test_ingest_bronze_full_history.py tests/unit/test_ingest_bronze_yahoo_v2.py tests/unit/test_universe_enrich_currency_preservation.py
       - name: Lint and format
         run: |
-          poetry run ruff check --no-fix src/alpha_edge/market/ingest_bronze_full_history.py tests/unit/test_ingest_bronze_full_history.py
-          poetry run ruff format --diff src/alpha_edge/market/ingest_bronze_full_history.py tests/unit/test_ingest_bronze_full_history.py
-          poetry run ruff format --check src/alpha_edge/market/ingest_bronze_full_history.py tests/unit/test_ingest_bronze_full_history.py
+          poetry run ruff check --no-fix src/alpha_edge/market/ingest_bronze_full_history.py tests/unit/test_ingest_bronze_full_history.py src/alpha_edge/universe/universe.py tests/unit/test_universe_enrich_currency_preservation.py
+          poetry run ruff format --diff src/alpha_edge/market/ingest_bronze_full_history.py tests/unit/test_ingest_bronze_full_history.py src/alpha_edge/universe/universe.py tests/unit/test_universe_enrich_currency_preservation.py
+          poetry run ruff format --check src/alpha_edge/market/ingest_bronze_full_history.py tests/unit/test_ingest_bronze_full_history.py src/alpha_edge/universe/universe.py tests/unit/test_universe_enrich_currency_preservation.py

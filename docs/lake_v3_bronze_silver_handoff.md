@@ -188,6 +188,43 @@ mapping evidence before publishing with `--execute`.
 Use `--registry-version` for subsequent Silver *candidate* pilots.
 This does not authorize a full-universe release.
 
+- `src/alpha_edge/market/build_silver_financial_v3.py`: runnable
+  one-asset S3 candidate pipeline, consuming only SHA-verified, committed
+  Bronze Parquet from the pinned source run, extracting reported action
+  events and adjustment-ratio review signals. When an explicit
+  `--fx-currency` and `--fx-direction` are supplied for an FX quote asset,
+  it publishes accepted rate *evidence* with a source manifest and separate
+  anomaly evidence. Outputs are immutable and content-addressed under
+  `market/lake_v3/silver/financial_evidence/`. Without `--execute`, it
+  performs only S3 reads and in-memory calculations. Tests use mocked AWS.
+  This is NOT an approved adjusted-price or FX-converted-price table;
+  no corporate action is applied and no cross-asset FX as-of join is done.
+
+**Two focused read-only pilots after CI:**
+
+```bash
+poetry run python -m alpha_edge.market.build_silver_financial_v3 \
+  --bucket alpha-edge-algo \
+  --source-fingerprint 87fc22f9c87353b9b3b5c69d816ee18bb2699c2aec501aa8e6be10cedf421179 \
+  --bronze-run-id bronze-recovery-20261117 \
+  --silver-run-id silver-action-evidence-spy-20261117 \
+  --only SPY
+
+poetry run python -m alpha_edge.market.build_silver_financial_v3 \
+  --bucket alpha-edge-algo \
+  --source-fingerprint 87fc22f9c87353b9b3b5c69d816ee18bb2699c2aec501aa8e6be10cedf421179 \
+  --bronze-run-id bronze-recovery-20261117 \
+  --silver-run-id silver-fx-evidence-jpy-20261117 \
+  --only USD-JPY \
+  --fx-currency JPY \
+  --fx-direction inverse
+```
+
+Both commands deliberately omit `--execute`: do not publish a new
+candidate until its dry-run statistics, provider conventions and source
+lineage have been inspected. Do not interpret `USD-JPY` itself as a
+JPY-denominated equity or convert its quote series as if it were one.
+
 **Remaining before complete Silver:** independent per-asset calendar
 approval (e.g. valid non-US exchange coverage and effective dating), FX
 quote-unit metadata and observation-time/no-look-ahead policy, independently

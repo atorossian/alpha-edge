@@ -22,7 +22,7 @@ def frozen_utc_clock(monkeypatch):
     class TestClock(datetime):
         @classmethod
         def now(cls, tz=None):
-            return datetime(2026, 11, 20, tzinfo=timezone.utc).astimezone(tz or timezone.utc)
+            return datetime(2026, 11, 30, tzinfo=timezone.utc).astimezone(tz or timezone.utc)
 
     monkeypatch.setattr(inc, "datetime", TestClock)
 

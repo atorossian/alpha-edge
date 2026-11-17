@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import json
+from pathlib import Path
 
 import boto3
 import pandas as pd
@@ -457,3 +458,36 @@ def test_invalid_progress_configuration_is_rejected(s3_with_snapshot):
             end="2026-11-14",
             progress_every=0,
         )
+
+
+def test_current_universe_acquisition_and_fx_corrections_do_not_change_identity():
+    """Read the five checked-in CURRENT configurations only; never v1/v2 data."""
+    root = Path(__file__).resolve().parents[2] / "data" / "universe"
+    sources = {
+        name: bronze._source_records((root / name).read_bytes(), name)
+        for name in bronze.SOURCE_NAMES
+    }
+    universe = {row["ticker"]: row for row in sources["universe.csv"]}
+    assert len(sources["universe.csv"]) == 2207
+    assert sum(row["include"] == "1" for row in universe.values()) == 2032
+    assert sum(row["include"] == "0" for row in universe.values()) == 175
+    for ticker in ("ATKR", "NWE", "ACVA"):
+        assert universe[ticker]["include"] == "0"
+        assert any(row["ticker"] == ticker for row in sources["asset_excluded.csv"])
+    assert universe["PSKY"]["include"] == "1"  # deliberately deferred
+    assert universe["EMBJ"]["include"] == "1"  # split retained for Bronze/Silver validation
+    assert universe["BKH"]["include"] == "1"
+    assert universe["BKH"]["yahoo_ticker"] == "HZN"
+    assert universe["BKH"]["asset_id"] == "EQH3ed12a76f622ff34"
+    expected = {"USD-CNY": ("CNY=X", "CNY"), "USD-BRL": ("BRL=X", "BRL"), "USD-JPY": ("JPY=X", "JPY")}
+    overrides = {row["ticker"]: row for row in sources["universe_overrides.csv"]}
+    manual = {row["ticker"]: row for row in sources["universe_manual_additions.csv"]}
+    for ticker, (symbol, ccy) in expected.items():
+        assert universe[ticker]["include"] == "1"
+        assert universe[ticker]["yahoo_ticker"] == symbol
+        assert universe[ticker]["currency"] == ccy
+        assert overrides[ticker]["yahoo_ticker"] == symbol
+        assert overrides[ticker]["lock_yahoo_ticker"] == "1"
+        assert manual[ticker]["yahoo_ticker"] == symbol
+        assert manual[ticker]["lock_yahoo_ticker"] == "1"
+    assert overrides["BKH"]["yahoo_ticker"] == "HZN"

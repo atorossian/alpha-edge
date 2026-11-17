@@ -107,13 +107,23 @@ def _special_session_audit(bars: pd.DataFrame, calendar_id: str) -> tuple[pd.Dat
         lambda d: preceding.get(d) is not None and preceding.get(d) not in actual
     ).to_numpy()
     issues = [
-        {"asset_id": bars["asset_id"].iloc[0], "provider_symbol": bars["provider_symbol"].iloc[0],
-         "session_date": date, "issue": "missing_expected_session", "calendar_id": calendar_id}
+        {
+            "asset_id": bars["asset_id"].iloc[0],
+            "provider_symbol": bars["provider_symbol"].iloc[0],
+            "session_date": date,
+            "issue": "missing_expected_session",
+            "calendar_id": calendar_id,
+        }
         for date in sorted(valid - actual)
     ]
     issues.extend(
-        {"asset_id": bars["asset_id"].iloc[0], "provider_symbol": bars["provider_symbol"].iloc[0],
-         "session_date": date, "issue": "unexpected_session", "calendar_id": calendar_id}
+        {
+            "asset_id": bars["asset_id"].iloc[0],
+            "provider_symbol": bars["provider_symbol"].iloc[0],
+            "session_date": date,
+            "issue": "unexpected_session",
+            "calendar_id": calendar_id,
+        }
         for date in sorted(actual - valid)
     )
     columns = ["asset_id", "provider_symbol", "session_date", "issue", "calendar_id"]

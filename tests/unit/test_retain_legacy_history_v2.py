@@ -1,4 +1,5 @@
 """Historical delisted assets are retained as raw, unapproved evidence."""
+
 from __future__ import annotations
 
 import io
@@ -23,13 +24,15 @@ class _S3:
         for table in ("ohlcv_usd", "returns_usd"):
             prefix = f"market/{table}/v1/asset_id={asset_id}/year=2023"
             part = f"{prefix}/part-original.parquet"
-            manifest_key = (
-                f"market/manifests/v1/{table}/asset_id={asset_id}/year=2023/manifest.json"
-            )
-            self.files[manifest_key] = json.dumps({
-                "asset_id": asset_id, "year": 2023, "parts": [part],
-                "dates": ["2023-05-04"],
-            }).encode()
+            manifest_key = f"market/manifests/v1/{table}/asset_id={asset_id}/year=2023/manifest.json"
+            self.files[manifest_key] = json.dumps(
+                {
+                    "asset_id": asset_id,
+                    "year": 2023,
+                    "parts": [part],
+                    "dates": ["2023-05-04"],
+                }
+            ).encode()
             self.files[part] = b"original-legacy-parquet-bytes-" + table.encode()
 
     def get_paginator(self, name):

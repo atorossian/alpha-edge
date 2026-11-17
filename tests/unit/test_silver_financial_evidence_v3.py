@@ -12,16 +12,18 @@ from alpha_edge.market.silver_financial_evidence_v3 import (
 
 
 def _bars():
-    return pd.DataFrame({
-        "asset_id": ["EQH-SPY"] * 3,
-        "provider_symbol": ["SPY"] * 3,
-        "session_date": ["2026-11-12", "2026-11-13", "2026-11-16"],
-        "currency_original": ["USD"] * 3,
-        "close": [100.0, 101.0, 25.5],
-        "adj_close": [100.0, 101.0, 25.5],
-        "dividends": [0.0, 0.3, 0.0],
-        "stock_splits": [0.0, 0.0, 4.0],
-    })
+    return pd.DataFrame(
+        {
+            "asset_id": ["EQH-SPY"] * 3,
+            "provider_symbol": ["SPY"] * 3,
+            "session_date": ["2026-11-12", "2026-11-13", "2026-11-16"],
+            "currency_original": ["USD"] * 3,
+            "close": [100.0, 101.0, 25.5],
+            "adj_close": [100.0, 101.0, 25.5],
+            "dividends": [0.0, 0.3, 0.0],
+            "stock_splits": [0.0, 0.0, 4.0],
+        }
+    )
 
 
 def test_actions_are_source_events_not_price_repairs():
@@ -71,11 +73,13 @@ def test_ratio_audit_reuses_v2_without_fixing_prices():
 
 
 def test_explicit_inverse_jpy_and_direct_eur_quotes():
-    q = pd.DataFrame({
-        "provider_symbol": ["JPY=X", "JPY=X", "EURUSD=X", "EURUSD=X"],
-        "session_date": ["2026-11-12", "2026-11-13"] * 2,
-        "quote_close": [150.0, 151.0, 1.1, 1.2],
-    })
+    q = pd.DataFrame(
+        {
+            "provider_symbol": ["JPY=X", "JPY=X", "EURUSD=X", "EURUSD=X"],
+            "session_date": ["2026-11-12", "2026-11-13"] * 2,
+            "quote_close": [150.0, 151.0, 1.1, 1.2],
+        }
+    )
     rates, evidence, info = normalize_fx_candidate(
         q, pairs={"JPY": ("JPY=X", "inverse"), "EUR": ("EURUSD=X", "direct")}
     )

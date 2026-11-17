@@ -1,0 +1,242 @@
+"""Silver v3 stage-1 contract tests with no live Yahoo or AWS writes."""
+
+from __future__ import annotations
+
+import io
+import json
+
+import boto3
+import pandas as pd
+import pytest
+from moto import mock_aws
+
+from alpha_edge.market import build_silver_sessions_v3 as silver
+from alpha_edge.market import ingest_bronze_full_history as bronze
+
+
+BUCKET = "alpha-edge-algo"
+BRONZE_RUN = "bronze-test-20261117"
+SILVER_RUN = "silver-pilot-20261117"
+
+
+def raw_frame(
+    sessions: tuple[str, ...] = ("2026-10-05", "2026-10-06", "2026-10-07"),
+    *,
+    asset_id: str = "EQH-SPY",
+    symbol: str = "SPY",
+) -> pd.DataFrame:
+    return pd.DataFrame(
+        {
+            "asset_id": [asset_id] * len(sessions),
+            "provider_symbol": [symbol] * len(sessions),
+            "session_date": list(sessions),
+            "source_timestamp": [day + "T00:00:00+09:00" for day in sessions],
+            "source_timezone": ["Asia/Tokyo"] * len(sessions),
+            "currency_original": ["USD"] * len(sessions),
+            "open": [100.0] * len(sessions),
+            "high": [101.0] * len(sessions),
+            "low": [99.0] * len(sessions),
+            "close": [100.5] * len(sessions),
+            "adj_close": [100.2] * len(sessions),
+            "volume": [1000] * len(sessions),
+            "dividends": [0.0] * len(sessions),
+            "stock_splits": [0.0] * len(sessions),
+        }
+    )
+
+
+def _csv(rows: list[dict]) -> bytes:
+    import csv
+
+    out = io.StringIO(newline="")
+    writer = csv.DictWriter(out, fieldnames=list(rows[0]))
+    writer.writeheader()
+    writer.writerows(rows)
+    return out.getvalue().encode("utf-8")
+
+
+@pytest.fixture
+def s3():
+    with mock_aws():
+        s3 = boto3.client("s3", region_name="eu-west-1")
+        s3.create_bucket(
+            Bucket=BUCKET,
+            CreateBucketConfiguration={"LocationConstraint": "eu-west-1"},
+        )
+        yield s3
+
+
+def setup_bronze(s3):
+    rows = [
+        {
+            "asset_id": "EQH-SPY", "row_id": "one", "ticker": "SPY",
+            "yahoo_ticker": "SPY", "include": "1", "currency": "USD",
+        },
+        {
+            "asset_id": "EQH-HZN", "row_id": "two", "ticker": "BKH",
+            "yahoo_ticker": "HZN", "include": "1", "currency": "USD",
+        },
+    ]
+    source = {
+        "universe.csv": _csv(rows),
+        "universe_overrides.csv": _csv([
+            {"target_row_id": "two", "ticker": "BKH", "yahoo_ticker": "HZN", "lock_yahoo_ticker": "1"}
+        ]),
+        "asset_excluded.csv": _csv([{"target_row_id": "one", "ticker": "OLD", "reason": ""}]),
+        "ingest_force_refresh.csv": _csv([{"ticker": "SPY"}]),
+        "universe_manual_additions.csv": _csv([{"ticker": "SPY"}]),
+    }
+    # Make exclusion support fixture structurally valid without actually
+    # excluding the active SPY security.
+    source["asset_excluded.csv"] = _csv([{"target_row_id": "", "ticker": "OLD", "reason": "historical"}])
+    entries = {name: {"bytes": len(blob), "sha256": bronze._digest(blob)} for name, blob in source.items()}
+    fingerprint = bronze._digest(bronze._json_bytes(entries))
+    for name, blob in source.items():
+        s3.put_object(
+            Bucket=BUCKET,
+            Key=f"{bronze.SNAPSHOT_ROOT}/{fingerprint}/{name}",
+            Body=blob,
+            Metadata={"sha256": bronze._digest(blob), "source-git-commit": "a" * 40},
+        )
+    config = {
+        "schema": "alpha_edge_full_history_run_v1",
+        "run_id": BRONZE_RUN,
+        "source_fingerprint": fingerprint,
+        "requested_asset_ids": ["EQH-SPY", "EQH-HZN"],
+    }
+    s3.put_object(
+        Bucket=BUCKET,
+        Key=f"{bronze.BRONZE_ROOT}/runs/{BRONZE_RUN}/run.json",
+        Body=bronze._json_bytes(config),
+    )
+    bars = raw_frame()
+    buf = io.BytesIO()
+    bars.to_parquet(buf, index=False)
+    data = buf.getvalue()
+    record = {"asset_id": "EQH-SPY", "yahoo_ticker": "SPY"}
+    prefix = bronze._target_prefix(BRONZE_RUN, "EQH-SPY")
+    data_key = f"{prefix}/objects/{bronze._digest(data)}.parquet"
+    s3.put_object(
+        Bucket=BUCKET, Key=data_key, Body=data, Metadata={"sha256": bronze._digest(data)}
+    )
+    manifest = {
+        "schema": "alpha_edge_full_history_asset_v1",
+        "asset_id": "EQH-SPY", "provider_symbol": "SPY",
+        "run_id": BRONZE_RUN, "status": "committed",
+        "data": {"key": data_key, "bytes": len(data), "sha256": bronze._digest(data)},
+        "validation": {"rows": len(bars)},
+    }
+    s3.put_object(
+        Bucket=BUCKET,
+        Key=f"{prefix}/manifest.json",
+        Body=bronze._json_bytes(manifest),
+    )
+    return fingerprint, data_key
+
+
+def test_calendar_reuses_existing_v2_audit_and_preserves_source_values():
+    bars = raw_frame(("2026-10-05", "2026-10-07"))
+    copy = bars.copy(deep=True)
+    candidate, issues, report = silver.prepare_session_candidate(
+        bars, asset_id="EQH-SPY", symbol="SPY", calendar_id="NYSE"
+    )
+    pd.testing.assert_frame_equal(bars, copy)
+    assert candidate["exchange_session_date"].tolist() == ["2026-10-05", "2026-10-07"]
+    assert candidate["source_timestamp_utc"].iloc[0] == "2026-10-04T15:00:00+00:00"
+    assert candidate["source_timestamp_utc"].iloc[1] == "2026-10-06T15:00:00+00:00"
+    assert report["missing_prior_expected_session_rows"] == 1
+    assert report["calendar_issue_rows"] == 1
+    assert "missing_expected_session" in set(issues["issue"])
+    assert candidate["close"].tolist() == bars["close"].tolist()
+    assert not report["production_eligible"]
+
+
+def test_missing_calendar_is_review_not_silent_weekdays():
+    frame, findings, report = silver.prepare_session_candidate(
+        raw_frame(), asset_id="EQH-SPY", symbol="SPY"
+    )
+    assert not report["calendar_mapped"]
+    assert "calendar_mapping_not_configured" in set(findings["issue"])
+    assert frame["calendar_session_status"].eq("not_checked").all()
+    assert frame["previous_expected_session_missing"].isna().all()
+    assert frame["session_quality_status"].eq("review_required").all()
+
+
+def test_duplicates_and_malformed_dates_are_preserved_with_evidence():
+    frame = raw_frame(("2026-10-05", "2026-10-05", "bad-date"))
+    candidate, issues, report = silver.prepare_session_candidate(
+        frame, asset_id="EQH-SPY", symbol="SPY", calendar_id="NYSE"
+    )
+    assert report["rows"] == 3
+    assert report["duplicate_session_rows"] == 2
+    assert report["invalid_session_dates"] == 1
+    assert candidate["session_quality_status"].eq("quarantined").all()
+    assert "duplicate_source_session" in set(issues["issue"])
+    assert "invalid_session_date" in set(issues["issue"])
+    assert candidate["calendar_session_status"].eq("blocked_invalid_source_dates").all()
+
+
+def test_naive_source_timestamp_does_not_fabricate_utc():
+    frame = raw_frame()
+    frame["source_timestamp"] = ["2026-10-05", "2026-10-06", "2026-10-07"]
+    candidate, issues, report = silver.prepare_session_candidate(
+        frame, asset_id="EQH-SPY", symbol="SPY", calendar_id="NYSE"
+    )
+    assert candidate["source_timestamp_utc"].isna().all()
+    assert report["missing_offset_aware_timestamps"] == 3
+    assert "missing_offset_aware_timestamp" in set(issues["issue"])
+
+
+def test_unusual_ohlc_is_flagged_not_rewritten():
+    frame = raw_frame()
+    frame.loc[1, "high"] = 1.0
+    result, issues, report = silver.prepare_session_candidate(
+        frame, asset_id="EQH-SPY", symbol="SPY", calendar_id="NYSE"
+    )
+    assert report["invalid_ohlc_rows"] == 1
+    assert result.loc[1, "high"] == 1.0
+    assert result.loc[1, "session_quality_status"] == "quarantined"
+    assert "inconsistent_raw_ohlc" in set(issues["issue"])
+
+
+def test_pinned_bronze_s3_dry_run_and_candidate_publication(s3):
+    fingerprint, data_key = setup_bronze(s3)
+    kwargs = {
+        "source_fingerprint": fingerprint,
+        "bronze_run_id": BRONZE_RUN,
+        "silver_run_id": SILVER_RUN,
+        "only": ["SPY"],
+        "calendar_id": "NYSE",
+    }
+    dry = silver.build(s3, BUCKET, **kwargs)
+    assert dry["processed"] == 1
+    assert dry["missing_bronze"] == 0
+    assert dry["assets"][0]["source"] == data_key
+    assert s3.list_objects_v2(Bucket=BUCKET, Prefix=silver.SILVER_ROOT).get("KeyCount", 0) == 0
+
+    committed = silver.build(s3, BUCKET, **kwargs, execute=True)
+    assert committed["processed"] == 1
+    assert committed["assets"][0]["status"] == "candidate_written"
+    assert not committed["production_eligible"]
+    same = silver.build(s3, BUCKET, **kwargs, execute=True)
+    assert same["assets"][0]["status"] == "already_committed"
+
+
+def test_hzn_missing_baseline_is_a_reported_exception_not_fabricated(s3):
+    fingerprint, _ = setup_bronze(s3)
+    report = silver.build(
+        s3, BUCKET, source_fingerprint=fingerprint, bronze_run_id=BRONZE_RUN,
+        silver_run_id=SILVER_RUN, only=["BKH"], calendar_id="NYSE",
+    )
+    assert report["missing_bronze"] == 1
+    assert report["assets"][0]["status"] == "source_unavailable"
+    assert report["processed"] == 0
+
+
+def test_bronze_provenance_mismatch_blocks_silver(s3):
+    fingerprint, _ = setup_bronze(s3)
+    with pytest.raises(silver.SilverSessionError, match="differs"):
+        silver.build(
+            s3, BUCKET, source_fingerprint="b" * 64, bronze_run_id=BRONZE_RUN,
+            silver_run_id=SILVER_RUN, only=["SPY"], calendar_id="NYSE"
+        )

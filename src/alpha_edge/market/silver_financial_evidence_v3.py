@@ -21,8 +21,12 @@ class SilverFinancialError(ValueError):
 def extract_source_actions(bars: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
     """Extract reported split/dividend events without modifying provider prices."""
     required = {
-        "asset_id", "provider_symbol", "session_date",
-        "dividends", "stock_splits", "currency_original",
+        "asset_id",
+        "provider_symbol",
+        "session_date",
+        "dividends",
+        "stock_splits",
+        "currency_original",
     }
     missing = required - set(bars)
     if missing or bars.empty:
@@ -61,9 +65,15 @@ def extract_source_actions(bars: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
                 }
             )
     columns = [
-        "asset_id", "provider_symbol", "effective_date", "action_type",
-        "source_value", "source_currency", "source_row_number",
-        "origin", "evidence_status",
+        "asset_id",
+        "provider_symbol",
+        "effective_date",
+        "action_type",
+        "source_value",
+        "source_currency",
+        "source_row_number",
+        "origin",
+        "evidence_status",
     ]
     table = pd.DataFrame(events, columns=columns)
     return table, {
@@ -76,9 +86,7 @@ def extract_source_actions(bars: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
     }
 
 
-def source_adjustment_flags(
-    bars: pd.DataFrame, actions: pd.DataFrame, *, threshold: float = 0.005
-) -> pd.DataFrame:
+def source_adjustment_flags(bars: pd.DataFrame, actions: pd.DataFrame, *, threshold: float = 0.005) -> pd.DataFrame:
     """Reuse v2 ratio-change audit as a review signal, never a split repair."""
     columns = ["asset_id", "effective_date", "action_type", "split_factor"]
     if actions.empty:
@@ -101,13 +109,17 @@ def normalize_fx_candidate(
     if any(not k or v[1] not in {"direct", "inverse"} for k, v in pairs.items()):
         raise SilverFinancialError("Invalid FX source/direction configuration")
     accepted, evidence = normalize_bronze_fx_quotes(quotes, pairs=pairs)
-    return accepted, evidence, {
-        "source_quote_rows": len(evidence),
-        "accepted_rates": len(accepted),
-        "rejected_rates": int(evidence["fx_validation_status"].ne("accepted").sum()),
-        "rate_definition": "USD per 1 unit of original currency",
-        "conversion_to_underlying_asset_prices_applied": False,
-        "observation_time_verified": False,
-        "independently_verified": False,
-        "production_eligible": False,
-    }
+    return (
+        accepted,
+        evidence,
+        {
+            "source_quote_rows": len(evidence),
+            "accepted_rates": len(accepted),
+            "rejected_rates": int(evidence["fx_validation_status"].ne("accepted").sum()),
+            "rate_definition": "USD per 1 unit of original currency",
+            "conversion_to_underlying_asset_prices_applied": False,
+            "observation_time_verified": False,
+            "independently_verified": False,
+            "production_eligible": False,
+        },
+    )

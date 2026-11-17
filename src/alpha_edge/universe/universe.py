@@ -499,12 +499,13 @@ def resolve_ticker_strict(
 
         # Strong matching identity is required before a home-market preference
         # can outrank a cross-listing with a slightly different name score.
-        if best is None or (
-            score >= 0.75 and best_score >= 0.75
-            and is_home_listing and not best_home
-        ) or (
-            is_home_listing == best_home
-            and (score > best_score or (abs(score - best_score) < 1e-12 and rank < best_rank))
+        if (
+            best is None
+            or (score >= 0.75 and best_score >= 0.75 and is_home_listing and not best_home)
+            or (
+                is_home_listing == best_home
+                and (score > best_score or (abs(score - best_score) < 1e-12 and rank < best_rank))
+            )
         ):
             best = cand
             best_score = score

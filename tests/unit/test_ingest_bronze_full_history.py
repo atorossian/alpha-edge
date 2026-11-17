@@ -463,10 +463,7 @@ def test_invalid_progress_configuration_is_rejected(s3_with_snapshot):
 def test_current_universe_acquisition_and_fx_corrections_do_not_change_identity():
     """Read the five checked-in CURRENT configurations only; never v1/v2 data."""
     root = Path(__file__).resolve().parents[2] / "data" / "universe"
-    sources = {
-        name: bronze._source_records((root / name).read_bytes(), name)
-        for name in bronze.SOURCE_NAMES
-    }
+    sources = {name: bronze._source_records((root / name).read_bytes(), name) for name in bronze.SOURCE_NAMES}
     universe = {row["ticker"]: row for row in sources["universe.csv"]}
     assert len(sources["universe.csv"]) == 2207
     assert sum(row["include"] == "1" for row in sources["universe.csv"]) == 2032

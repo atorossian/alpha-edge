@@ -1,4 +1,5 @@
 """Regression tests for conservative universe collision recommendations."""
+
 from __future__ import annotations
 
 import pandas as pd
@@ -9,19 +10,34 @@ from alpha_edge.universe.universe import name_match_score, resolve_ticker_strict
 
 def _row(*, rid, aid, ticker, name, region, yahoo, include=1, role="stock"):
     return {
-        "row_id": rid, "asset_id": aid, "ticker": ticker,
-        "yahoo_ticker": yahoo, "name": name, "asset_class": "equity",
-        "role": role, "region": region, "include": include,
+        "row_id": rid,
+        "asset_id": aid,
+        "ticker": ticker,
+        "yahoo_ticker": yahoo,
+        "name": name,
+        "asset_class": "equity",
+        "role": role,
+        "region": region,
+        "include": include,
     }
 
 
 def test_ambev_duplicate_proposes_later_exclusion_without_mutation():
-    rows = pd.DataFrame([
-        _row(rid="FIRST", aid="EQH6ecf933f2adfa3f7", ticker="ABEV3",
-             name="Ambev SA", region="B3", yahoo="ABEV3.SA"),
-        _row(rid="SECOND", aid="EQH78bd0291b1513b79", ticker="ABEV3",
-             name="Ambev S.A.", region="B3", yahoo="ABEV3.SA"),
-    ])
+    rows = pd.DataFrame(
+        [
+            _row(
+                rid="FIRST", aid="EQH6ecf933f2adfa3f7", ticker="ABEV3", name="Ambev SA", region="B3", yahoo="ABEV3.SA"
+            ),
+            _row(
+                rid="SECOND",
+                aid="EQH78bd0291b1513b79",
+                ticker="ABEV3",
+                name="Ambev S.A.",
+                region="B3",
+                yahoo="ABEV3.SA",
+            ),
+        ]
+    )
     original = rows.copy(deep=True)
     result = identify_collisions(rows)
     assert len(result) == 1
@@ -35,12 +51,26 @@ def test_ambev_duplicate_proposes_later_exclusion_without_mutation():
 
 
 def test_adp_collision_recommends_provider_review_without_network():
-    rows = pd.DataFrame([
-        _row(rid="US", aid="EQH5cd6ee5dd8d979a3", ticker="ADP",
-             name="Automatic Data Processing Inc.", region="NASDAQ", yahoo="ADP"),
-        _row(rid="FR", aid="EQH8983943c3dcf91dc", ticker="ADP",
-             name="Aeroports de Paris SA", region="Cboe Europe", yahoo="ADP"),
-    ])
+    rows = pd.DataFrame(
+        [
+            _row(
+                rid="US",
+                aid="EQH5cd6ee5dd8d979a3",
+                ticker="ADP",
+                name="Automatic Data Processing Inc.",
+                region="NASDAQ",
+                yahoo="ADP",
+            ),
+            _row(
+                rid="FR",
+                aid="EQH8983943c3dcf91dc",
+                ticker="ADP",
+                name="Aeroports de Paris SA",
+                region="Cboe Europe",
+                yahoo="ADP",
+            ),
+        ]
+    )
     result = identify_collisions(rows)
     assert result.iloc[0]["proposed_action"] == "REVIEW_PROVIDER_MAPPING"
     assert result.iloc[0]["exclude_row_id"] == ""
@@ -48,12 +78,12 @@ def test_adp_collision_recommends_provider_review_without_network():
 
 
 def test_adp_provider_verified_distinct_mapping_is_a_proposal_only():
-    rows = pd.DataFrame([
-        _row(rid="US", aid="A", ticker="ADP", name="Automatic Data Processing Inc.",
-             region="NASDAQ", yahoo="ADP"),
-        _row(rid="FR", aid="B", ticker="ADP", name="Aeroports de Paris SA",
-             region="Cboe Europe", yahoo="ADP"),
-    ])
+    rows = pd.DataFrame(
+        [
+            _row(rid="US", aid="A", ticker="ADP", name="Automatic Data Processing Inc.", region="NASDAQ", yahoo="ADP"),
+            _row(rid="FR", aid="B", ticker="ADP", name="Aeroports de Paris SA", region="Cboe Europe", yahoo="ADP"),
+        ]
+    )
     seen = []
 
     def resolver(raw, **kwargs):
@@ -61,7 +91,8 @@ def test_adp_provider_verified_distinct_mapping_is_a_proposal_only():
         return "ADP.PA", {"verified": True}
 
     result = identify_collisions(
-        rows, provider_resolver=resolver,
+        rows,
+        provider_resolver=resolver,
         provider_metadata_fetcher=lambda symbol: {
             "yahoo_ok": True,
             "longName": "Automatic Data Processing Inc.",
@@ -78,49 +109,53 @@ def test_adp_provider_verified_distinct_mapping_is_a_proposal_only():
 
 
 def test_same_company_different_market_does_not_exclude():
-    rows = pd.DataFrame([
-        _row(rid="US", aid="A", ticker="WMT", name="Walmart Inc.",
-             region="NYSE", yahoo="WMT"),
-        _row(rid="EU", aid="B", ticker="WMT", name="Walmart Inc.",
-             region="Cboe Europe", yahoo="WMT"),
-    ])
+    rows = pd.DataFrame(
+        [
+            _row(rid="US", aid="A", ticker="WMT", name="Walmart Inc.", region="NYSE", yahoo="WMT"),
+            _row(rid="EU", aid="B", ticker="WMT", name="Walmart Inc.", region="Cboe Europe", yahoo="WMT"),
+        ]
+    )
     result = identify_collisions(rows)
     assert result.iloc[0]["proposed_action"] == "REVIEW_IDENTITY"
     assert result.iloc[0]["exclude_row_id"] == ""
 
 
 def test_exclusion_ledger_is_applied_by_row_id():
-    rows = pd.DataFrame([
-        _row(rid="ONE", aid="A", ticker="ABEV3", name="Ambev SA",
-             region="B3", yahoo="ABEV3.SA"),
-        _row(rid="TWO", aid="B", ticker="ABEV3", name="Ambev SA",
-             region="B3", yahoo="ABEV3.SA"),
-    ])
-    exclusions = pd.DataFrame([{
-        "target_row_id": "TWO", "ticker": "ABEV3",
-        "asset_class": "equity", "reason": "reviewed duplicate",
-    }])
+    rows = pd.DataFrame(
+        [
+            _row(rid="ONE", aid="A", ticker="ABEV3", name="Ambev SA", region="B3", yahoo="ABEV3.SA"),
+            _row(rid="TWO", aid="B", ticker="ABEV3", name="Ambev SA", region="B3", yahoo="ABEV3.SA"),
+        ]
+    )
+    exclusions = pd.DataFrame(
+        [
+            {
+                "target_row_id": "TWO",
+                "ticker": "ABEV3",
+                "asset_class": "equity",
+                "reason": "reviewed duplicate",
+            }
+        ]
+    )
     assert identify_collisions(rows, exclusions=exclusions).empty
 
 
 def test_triple_collision_never_proposes_automatic_exclusion():
-    rows = pd.DataFrame([
-        _row(rid=str(i), aid=str(i), ticker="ABC", name="ABC Holdings",
-             region="NYSE", yahoo="ABC")
-        for i in range(3)
-    ])
+    rows = pd.DataFrame(
+        [_row(rid=str(i), aid=str(i), ticker="ABC", name="ABC Holdings", region="NYSE", yahoo="ABC") for i in range(3)]
+    )
     result = identify_collisions(rows)
     assert len(result) == 2
     assert "PROPOSE_EXCLUSION" not in result["proposed_action"].tolist()
 
 
 def test_report_writes_only_audit_csv(tmp_path):
-    rows = pd.DataFrame([
-        _row(rid="ONE", aid="A", ticker="ABEV3", name="Ambev SA",
-             region="B3", yahoo="ABEV3.SA"),
-        _row(rid="TWO", aid="B", ticker="ABEV3", name="Ambev SA",
-             region="B3", yahoo="ABEV3.SA"),
-    ])
+    rows = pd.DataFrame(
+        [
+            _row(rid="ONE", aid="A", ticker="ABEV3", name="Ambev SA", region="B3", yahoo="ABEV3.SA"),
+            _row(rid="TWO", aid="B", ticker="ABEV3", name="Ambev SA", region="B3", yahoo="ABEV3.SA"),
+        ]
+    )
     report = report_collisions(rows, output_csv=tmp_path / "decision.csv")
     assert report["collision_groups"] == 1
     assert report["proposed_actions"] == {"PROPOSE_EXCLUSION": 1}
@@ -128,13 +163,14 @@ def test_report_writes_only_audit_csv(tmp_path):
     assert report["ledger_mutations"] == 0
     assert set(tmp_path.iterdir()) == {tmp_path / "decision.csv"}
 
+
 def test_earlier_row_can_be_wrong_provider_mapping():
-    rows = pd.DataFrame([
-        _row(rid="FR", aid="FRID", ticker="ORA", name="Orange SA",
-             region="Cboe Europe", yahoo="ORA"),
-        _row(rid="US", aid="USID", ticker="ORA", name="Ormat Technologies Inc.",
-             region="NYSE", yahoo="ORA"),
-    ])
+    rows = pd.DataFrame(
+        [
+            _row(rid="FR", aid="FRID", ticker="ORA", name="Orange SA", region="Cboe Europe", yahoo="ORA"),
+            _row(rid="US", aid="USID", ticker="ORA", name="Ormat Technologies Inc.", region="NYSE", yahoo="ORA"),
+        ]
+    )
     called = []
 
     def resolver(raw, **kwargs):
@@ -142,7 +178,8 @@ def test_earlier_row_can_be_wrong_provider_mapping():
         return "ORA.PA", {"verified": True}
 
     result = identify_collisions(
-        rows, provider_resolver=resolver,
+        rows,
+        provider_resolver=resolver,
         provider_metadata_fetcher=lambda symbol: {
             "yahoo_ok": True,
             "longName": "Ormat Technologies Inc.",
@@ -158,18 +195,19 @@ def test_earlier_row_can_be_wrong_provider_mapping():
 
 
 def test_provider_ambiguity_does_not_propose_override():
-    rows = pd.DataFrame([
-        _row(rid="FR", aid="FRID", ticker="ORA", name="Orange SA",
-             region="Cboe Europe", yahoo="ORA"),
-        _row(rid="US", aid="USID", ticker="ORA", name="Ormat Technologies Inc.",
-             region="NYSE", yahoo="ORA"),
-    ])
+    rows = pd.DataFrame(
+        [
+            _row(rid="FR", aid="FRID", ticker="ORA", name="Orange SA", region="Cboe Europe", yahoo="ORA"),
+            _row(rid="US", aid="USID", ticker="ORA", name="Ormat Technologies Inc.", region="NYSE", yahoo="ORA"),
+        ]
+    )
 
     def fail_resolver(*args, **kwargs):
         raise AssertionError("Ambiguous metadata must prevent resolver attempts")
 
     result = identify_collisions(
-        rows, provider_resolver=fail_resolver,
+        rows,
+        provider_resolver=fail_resolver,
         provider_metadata_fetcher=lambda symbol: {"yahoo_ok": False},
     )
     assert result.iloc[0]["proposed_action"] == "REVIEW_PROVIDER_MAPPING"
@@ -181,16 +219,14 @@ def test_provider_name_normalization_handles_accents():
 
 
 def test_symbol_filter_limits_online_checks_to_selected_pair():
-    rows = pd.DataFrame([
-        _row(rid="US", aid="A", ticker="ADP", name="Automatic Data Processing Inc.",
-             region="NASDAQ", yahoo="ADP"),
-        _row(rid="FR", aid="B", ticker="ADP", name="Aeroports de Paris SA",
-             region="Cboe Europe", yahoo="ADP"),
-        _row(rid="X1", aid="C", ticker="ABEV3", name="Ambev SA",
-             region="B3", yahoo="ABEV3.SA"),
-        _row(rid="X2", aid="D", ticker="ABEV3", name="Ambev S.A.",
-             region="B3", yahoo="ABEV3.SA"),
-    ])
+    rows = pd.DataFrame(
+        [
+            _row(rid="US", aid="A", ticker="ADP", name="Automatic Data Processing Inc.", region="NASDAQ", yahoo="ADP"),
+            _row(rid="FR", aid="B", ticker="ADP", name="Aeroports de Paris SA", region="Cboe Europe", yahoo="ADP"),
+            _row(rid="X1", aid="C", ticker="ABEV3", name="Ambev SA", region="B3", yahoo="ABEV3.SA"),
+            _row(rid="X2", aid="D", ticker="ABEV3", name="Ambev S.A.", region="B3", yahoo="ABEV3.SA"),
+        ]
+    )
     result = identify_collisions(rows, symbols={"ADP"})
     assert result["shared_yahoo_symbol"].tolist() == ["ADP"]
     assert result.iloc[0]["proposed_action"] == "REVIEW_PROVIDER_MAPPING"
@@ -207,12 +243,18 @@ def test_french_home_listing_preferred_over_verified_german_cross_listing(monkey
         fetched.append(symbol)
         if symbol == "ADP":
             return {
-                "yahoo_ok": True, "longName": "Automatic Data Processing Inc.",
-                "country": "United States", "quoteType": "EQUITY", "exchange": "NMS",
+                "yahoo_ok": True,
+                "longName": "Automatic Data Processing Inc.",
+                "country": "United States",
+                "quoteType": "EQUITY",
+                "exchange": "NMS",
             }
         return {
-            "yahoo_ok": True, "longName": "Aéroports de Paris SA",
-            "country": "France", "currency": "EUR", "quoteType": "EQUITY",
+            "yahoo_ok": True,
+            "longName": "Aéroports de Paris SA",
+            "country": "France",
+            "currency": "EUR",
+            "quoteType": "EQUITY",
             "exchange": "PAR" if symbol.endswith(".PA") else "FRA",
             "fullExchangeName": "Paris" if symbol.endswith(".PA") else "Frankfurt",
         }
@@ -220,8 +262,11 @@ def test_french_home_listing_preferred_over_verified_german_cross_listing(monkey
     monkeypatch.setattr(provider, "fetch_yahoo_meta", get_meta)
     monkeypatch.setattr(provider, "_has_price_history", lambda symbol: True)
     ticker, debug = resolve_ticker_strict(
-        "ADP", expected_name="Aeroports de Paris SA",
-        expected_region="Cboe Europe", asset_class="equity", role="stock",
+        "ADP",
+        expected_name="Aeroports de Paris SA",
+        expected_region="Cboe Europe",
+        asset_class="equity",
+        role="stock",
     )
     assert ticker == "ADP.PA"
     assert debug["best_meta_country"] == "France"
@@ -234,14 +279,24 @@ def test_country_hint_does_not_override_wrong_company(monkeypatch):
     from alpha_edge.universe import universe as provider
 
     monkeypatch.setattr(provider, "_candidate_symbols", lambda raw, region: ["ADP.PA", "ADP.F"])
-    monkeypatch.setattr(provider, "fetch_yahoo_meta", lambda symbol: {
-        "yahoo_ok": True, "longName": "Automatic Data Processing Inc.",
-        "country": "United States", "quoteType": "EQUITY", "exchange": "FRA",
-    })
+    monkeypatch.setattr(
+        provider,
+        "fetch_yahoo_meta",
+        lambda symbol: {
+            "yahoo_ok": True,
+            "longName": "Automatic Data Processing Inc.",
+            "country": "United States",
+            "quoteType": "EQUITY",
+            "exchange": "FRA",
+        },
+    )
     monkeypatch.setattr(provider, "_has_price_history", lambda symbol: True)
     ticker, debug = resolve_ticker_strict(
-        "ADP", expected_name="Aeroports de Paris SA",
-        expected_region="Cboe Europe", asset_class="equity", role="stock",
+        "ADP",
+        expected_name="Aeroports de Paris SA",
+        expected_region="Cboe Europe",
+        asset_class="equity",
+        role="stock",
         preferred_country="France",
     )
     assert ticker is None

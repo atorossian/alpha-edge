@@ -152,3 +152,7 @@ BD9D686E9238158B,ADP,ADP.PA,1,Aeroports de Paris SA,2026-11-12 verified identity
 E8CF4A6C0C43E0CE,AMP,AMP.MI,1,Amplifon S.p.A.,2026-11-12 verified identity review; preserve broker ticker and original asset_id
 5BA2A53B86ED9411,BB,BB.PA,1,Societe BIC SA,2026-11-12 verified identity review; preserve broker ticker and original asset_id
 78D0D5C2400AADC3,COP,COP.HM,1,CompuGroup Medical SE & Co. KGaA,2026-11-12 verified identity review; preserve broker ticker and original asset_id
+0B3D635B62AC1858,BKH,HZN,1,Bright Horizon Energy Corporation,BKH changed Yahoo symbol to HZN on 2026-11-16 after merger; preserve canonical asset_id and do not merge NWE history
+B0B143289BE1D8CA,USD-CNY,CNY=X,1,US Dollar Chinese Yuan,Yahoo USD/CNY quote symbol CNY=X; quote currency CNY
+FB5F6F7AE7CEFFCA,USD-BRL,BRL=X,1,US Dollar Brazilian Real,Yahoo USD/BRL quote symbol BRL=X; quote currency BRL
+3D20B0C5C5F2AFF5,USD-JPY,JPY=X,1,US Dollar Japanese Yen,Yahoo USD/JPY quote symbol JPY=X; quote currency JPY

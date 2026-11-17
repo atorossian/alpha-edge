@@ -469,8 +469,8 @@ def test_current_universe_acquisition_and_fx_corrections_do_not_change_identity(
     }
     universe = {row["ticker"]: row for row in sources["universe.csv"]}
     assert len(sources["universe.csv"]) == 2207
-    assert sum(row["include"] == "1" for row in universe.values()) == 2032
-    assert sum(row["include"] == "0" for row in universe.values()) == 175
+    assert sum(row["include"] == "1" for row in sources["universe.csv"]) == 2032
+    assert sum(row["include"] == "0" for row in sources["universe.csv"]) == 175
     for ticker in ("ATKR", "NWE", "ACVA"):
         assert universe[ticker]["include"] == "0"
         assert any(row["ticker"] == ticker for row in sources["asset_excluded.csv"])

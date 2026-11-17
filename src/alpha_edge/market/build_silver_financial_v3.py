@@ -84,17 +84,13 @@ def build(
         if fx_direction not in {"direct", "inverse"}:
             raise SilverEvidenceError("Explicit FX quote direction must be direct or inverse")
     active, source = load_universe(s3, bucket, fingerprint)
-    selected = [
-        row for row in active
-        if selector in (row["asset_id"], row["ticker"], row["yahoo_ticker"])
-    ]
+    selected = [row for row in active if selector in (row["asset_id"], row["ticker"], row["yahoo_ticker"])]
     if len(selected) != 1:
         raise SilverEvidenceError("Exactly one included canonical asset must match")
     record = selected[0]
     config = json.loads(_read(s3, bucket, f"{BRONZE_ROOT}/runs/{bronze_run_id}/run.json"))
-    if (
-        config.get("source_fingerprint") != fingerprint
-        or record["asset_id"] not in config.get("requested_asset_ids", [])
+    if config.get("source_fingerprint") != fingerprint or record["asset_id"] not in config.get(
+        "requested_asset_ids", []
     ):
         raise SilverEvidenceError("Bronze configuration/asset selection mismatch")
     receipt = _completed(s3, bucket, run_id=bronze_run_id, record=record, verify_hash=True)
@@ -189,10 +185,15 @@ def main() -> None:
     args = parser.parse_args()
     s3 = boto3.client("s3", region_name=args.region)
     report = build(
-        s3, args.bucket, fingerprint=args.source_fingerprint,
-        bronze_run_id=args.bronze_run_id, silver_run_id=args.silver_run_id,
-        selector=args.only, fx_currency=args.fx_currency,
-        fx_direction=args.fx_direction, execute=args.execute,
+        s3,
+        args.bucket,
+        fingerprint=args.source_fingerprint,
+        bronze_run_id=args.bronze_run_id,
+        silver_run_id=args.silver_run_id,
+        selector=args.only,
+        fx_currency=args.fx_currency,
+        fx_direction=args.fx_direction,
+        execute=args.execute,
     )
     print(json.dumps(report, indent=2))
 

@@ -252,3 +252,44 @@ If S3 auditing itself fails, the script reports an exception rather than
 silently declaring un-audited work complete. For any pre-update assets
 that already committed successfully, the original immutable S3
 manifests remain the authoritative ingestion evidence.
+
+
+## Post-run remediation — 2026-11-17
+
+The original run `bronze-full-20261116` is immutable and remains a
+correctly preserved historical acquisition attempt:
+`expected=2035`, `committed=2026`, `missing=9`, `corrupt=0`.
+Its five-file source fingerprint is pinned; changing Git-tracked
+configuration **does not change that snapshot or run's included assets**.
+
+Updated only the five authoritative current universe CSV files on this
+feature branch:
+
+- `ATKR`, `NWE`, `ACVA`: `include=0`, with explicit acquisition/
+  merger exclusion reasons; keep their stable IDs and any prior data.
+- `BKH`: retain `include=1` and the existing stable asset ID, but
+  resolve the **current Yahoo symbol** to `HZN`. Do not join the former
+  NWE source history or assume an economically continuous BKH/HZN price
+  series without verifying the corporate action and historical provider
+  semantics.
+- `USD-CNY`, `USD-BRL`, `USD-JPY`: resolve Yahoo tickers to
+  `CNY=X`, `BRL=X`, `JPY=X`, with quote currencies
+  `CNY`, `BRL`, `JPY`, respectively. Keep source pairs and FX
+  conversions separate; Bronze records raw provider quote values only.
+- `EMBJ`: leave active and **do not apply or reverse a split in
+  Bronze**. Preserve the Yahoo splits/actions column for inspection
+  (reported 4:1 ADS split effective November 16, 2026).
+  Live data acquisition should be verified separately; seeing prices
+  in the Yahoo UI does not itself prove the API response will work.
+- `PSKY`: **deferred** pending a separate instrument review. No change
+  to its included status or identity has been made.
+
+**Important:** after deciding PSKY and approving the updated config,
+capture a **new immutable S3 snapshot** from the five edited files,
+generate a **new run ID**, and ingest the unresolved eligible assets
+using the new fingerprint. The old run cannot be resumed with different
+ticker mappings or new eligibility flags. Never edit or overwrite the
+old run's S3 manifests and raw Parquet observations. Reconcile the old
+and new per-run asset receipts explicitly before judging overall Bronze
+coverage. The snapshot and next-run command must be generated using a
+tested version-controlled script, not an improvised direct S3 upload.

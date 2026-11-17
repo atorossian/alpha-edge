@@ -10,7 +10,6 @@ from __future__ import annotations
 import argparse
 import io
 import json
-import uuid
 from typing import Any
 
 import boto3

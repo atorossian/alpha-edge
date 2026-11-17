@@ -31,6 +31,7 @@ from alpha_edge.market.ingest_bronze_full_history import (
     _read,
     load_universe,
 )
+from alpha_edge.market.calendar_registry_v3 import load_registry
 from alpha_edge.market.standardize_bronze_v2 import audit_asset_sessions
 
 SILVER_ROOT = "market/lake_v3/silver/session_candidates"
@@ -87,6 +88,36 @@ def _instant(value: Any) -> str | None:
         return stamp.tz_convert("UTC").isoformat()
     except (TypeError, ValueError, OverflowError):
         return None
+
+
+def _special_session_audit(bars: pd.DataFrame, calendar_id: str) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Explicit source DAILY bar conventions, not intraday exchange hours."""
+    if calendar_id not in {"CRYPTO_24_7", "YAHOO_FX_WEEKDAYS"}:
+        raise SilverSessionError(f"Unsupported source-specific daily-session policy: {calendar_id}")
+    observed = pd.to_datetime(bars["session_date"], format="%Y-%m-%d")
+    first, last = observed.min(), observed.max()
+    expected = pd.date_range(first, last, freq="D" if calendar_id == "CRYPTO_24_7" else "B")
+    actual = set(observed)
+    valid = set(expected)
+    preceding = {date: expected[i - 1] if i else None for i, date in enumerate(expected)}
+    flags = bars[["asset_id", "provider_symbol", "session_date"]].copy()
+    flags["session_date"] = observed
+    flags["is_expected_session"] = observed.map(lambda d: d in valid).to_numpy()
+    flags["previous_expected_session_missing"] = observed.map(
+        lambda d: preceding.get(d) is not None and preceding.get(d) not in actual
+    ).to_numpy()
+    issues = [
+        {"asset_id": bars["asset_id"].iloc[0], "provider_symbol": bars["provider_symbol"].iloc[0],
+         "session_date": date, "issue": "missing_expected_session", "calendar_id": calendar_id}
+        for date in sorted(valid - actual)
+    ]
+    issues.extend(
+        {"asset_id": bars["asset_id"].iloc[0], "provider_symbol": bars["provider_symbol"].iloc[0],
+         "session_date": date, "issue": "unexpected_session", "calendar_id": calendar_id}
+        for date in sorted(actual - valid)
+    )
+    columns = ["asset_id", "provider_symbol", "session_date", "issue", "calendar_id"]
+    return flags, pd.DataFrame(issues, columns=columns)
 
 
 def prepare_session_candidate(
@@ -176,10 +207,15 @@ def prepare_session_candidate(
         # existing v2 calendar audit, which expects valid unique sessions.
         if not invalid_date.any() and not dup.any():
             try:
-                flags, gaps = audit_asset_sessions(
-                    out[["asset_id", "provider_symbol", "session_date"]],
-                    calendars={symbol: calendar_id},
-                )
+                if calendar_id in {"CRYPTO_24_7", "YAHOO_FX_WEEKDAYS"}:
+                    flags, gaps = _special_session_audit(
+                        out[["asset_id", "provider_symbol", "session_date"]], calendar_id
+                    )
+                else:
+                    flags, gaps = audit_asset_sessions(
+                        out[["asset_id", "provider_symbol", "session_date"]],
+                        calendars={symbol: calendar_id},
+                    )
             except Exception as exc:
                 raise SilverSessionError(f"Unusable explicitly supplied calendar {calendar_id}: {exc}") from exc
             out["calendar_session_status"] = "checked"
@@ -274,6 +310,7 @@ def build(
     silver_run_id: str,
     only: list[str],
     calendar_id: str | None = None,
+    registry_version: str | None = None,
     execute: bool = False,
 ) -> dict:
     """Process only complete, cryptographically verified Bronze asset receipts."""
@@ -281,6 +318,16 @@ def build(
         raise SilverSessionError("Invalid run ID")
     assets, universe_meta = load_universe(s3, bucket, source_fingerprint)
     selected = _selection(assets, only)
+    if registry_version and calendar_id:
+        raise SilverSessionError("Use either a registry version or explicit manual calendar, not both")
+    registry_rows = {}
+    if registry_version:
+        registry = load_registry(s3, bucket, registry_version, source_fingerprint)
+        registry_rows = {row["asset_id"]: row for row in registry["assets"]}
+        for asset in selected:
+            mapping = registry_rows.get(asset["asset_id"])
+            if not mapping or mapping.get("provider_symbol") != asset["yahoo_ticker"]:
+                raise SilverSessionError(f"Registry asset/provider mismatch: {asset['asset_id']}")
     source_config = json.loads(_read(s3, bucket, f"market/lake_v3/bronze/full_history/runs/{bronze_run_id}/run.json"))
     if source_config.get("source_fingerprint") != source_fingerprint:
         raise SilverSessionError("Bronze run's pinned source snapshot differs")
@@ -296,6 +343,9 @@ def build(
         "calendar_id": calendar_id or "",
         "status": "candidate_only_not_certified",
     }
+    if registry_version:
+        run_config["registry_version"] = registry_version
+        run_config["registry_approval"] = "candidate_not_certified"
     root = f"{SILVER_ROOT}/runs/{silver_run_id}"
     existing = _get_optional(s3, bucket, root + "/run.json")
     if existing is not None and json.loads(existing) != run_config:
@@ -304,6 +354,10 @@ def build(
         _put(s3, bucket, root + "/run.json", _json_bytes(run_config), "application/json")
     rows = []
     for asset in selected:
+        mapping = registry_rows.get(asset["asset_id"])
+        effective_calendar = (mapping.get("calendar_id") if mapping else calendar_id) or None
+        # Unmapped assets may be published as review-required candidates; never
+        # infer calendars or claim completeness on their behalf.
         receipt = _completed(s3, bucket, run_id=bronze_run_id, record=asset, verify_hash=True)
         if receipt is None:
             rows.append(
@@ -322,7 +376,8 @@ def build(
             if (
                 manifest.get("schema") != SILVER_SCHEMA
                 or manifest.get("source_data_sha256") != receipt["data"]["sha256"]
-                or manifest.get("calendar_id") != (calendar_id or "")
+                or manifest.get("calendar_id") != (effective_calendar or "")
+                or manifest.get("registry_version", "") != (registry_version or "")
             ):
                 raise SilverSessionError(f"Existing Silver asset receipt incompatible: {asset['asset_id']}")
             rows.append(
@@ -341,7 +396,7 @@ def build(
             bronze_frame,
             asset_id=asset["asset_id"],
             symbol=asset["yahoo_ticker"],
-            calendar_id=calendar_id,
+            calendar_id=effective_calendar,
         )
         manifest = {
             "schema": SILVER_SCHEMA,
@@ -350,7 +405,7 @@ def build(
             "bronze_run_id": bronze_run_id,
             "asset_id": asset["asset_id"],
             "provider_symbol": asset["yahoo_ticker"],
-            "calendar_id": calendar_id or "",
+            "calendar_id": effective_calendar or "",
             "source_manifest_key": f"market/lake_v3/bronze/full_history/runs/{bronze_run_id}/assets/{_digest(asset['asset_id'].encode('utf-8'))}/manifest.json",
             "source_data_key": receipt["data"]["key"],
             "source_data_sha256": receipt["data"]["sha256"],
@@ -358,6 +413,9 @@ def build(
             "outputs": {},
             "production_eligible": False,
         }
+        if registry_version:
+            manifest["registry_version"] = registry_version
+            manifest["calendar_mapping_status"] = mapping["mapping_status"]
         if execute:
             for name, df in (("candidate", candidate), ("findings", issues)):
                 buffer = io.BytesIO()
@@ -404,7 +462,8 @@ def main() -> None:
     parser.add_argument("--bronze-run-id", required=True)
     parser.add_argument("--silver-run-id", required=True)
     parser.add_argument("--only", required=True, help="Comma-separated pilot selectors")
-    parser.add_argument("--calendar", default=None, help="Explicit approved pandas-market-calendars ID")
+    parser.add_argument("--calendar", default=None, help="Explicit calendar for one manual pilot")
+    parser.add_argument("--registry-version", default=None, help="SHA256-pinned S3 calendar registry proposal")
     parser.add_argument("--execute", action="store_true", help="Write candidate outputs to S3")
     args = parser.parse_args()
     s3 = boto3.client("s3", region_name=args.region)
@@ -416,6 +475,7 @@ def main() -> None:
         silver_run_id=args.silver_run_id,
         only=[x.strip() for x in args.only.split(",") if x.strip()],
         calendar_id=args.calendar,
+        registry_version=args.registry_version,
         execute=args.execute,
     )
     print(json.dumps(result, indent=2, default=str))

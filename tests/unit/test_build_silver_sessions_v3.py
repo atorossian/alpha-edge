@@ -111,7 +111,6 @@ def setup_bronze(s3):
     buf = io.BytesIO()
     bars.to_parquet(buf, index=False)
     data = buf.getvalue()
-    record = {"asset_id": "EQH-SPY", "yahoo_ticker": "SPY"}
     prefix = bronze._target_prefix(BRONZE_RUN, "EQH-SPY")
     data_key = f"{prefix}/objects/{bronze._digest(data)}.parquet"
     s3.put_object(

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import io
 import json
-from datetime import date, timedelta
 
 import boto3
 import pandas as pd
@@ -13,6 +12,7 @@ from moto import mock_aws
 
 from alpha_edge.market import ingest_bronze_full_history as full
 from alpha_edge.market import ingest_bronze_incremental as inc
+from alpha_edge.market.ingest_bronze_full_history import BronzeIngestError
 
 
 BUCKET = "alpha-edge-algo"

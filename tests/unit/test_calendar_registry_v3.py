@@ -128,6 +128,35 @@ def test_registry_proposes_known_exchanges_and_preserves_unknown(snapshot):
     assert "OLD" not in by_symbol
 
 
+def test_explicit_fx_pair_and_crypto_survive_missing_quote_type():
+    fx = calendars._derive(
+        {
+            "asset_id": "EQH-BRL",
+            "ticker": "USD-BRL",
+            "yahoo_ticker": "BRL=X",
+            "calendar_id": "FOREX",
+            "quoteType": "",
+            "asset_class": "fx_pair",
+            "exchange": "",
+        }
+    )
+    crypto = calendars._derive(
+        {
+            "asset_id": "CRYPTO:HYPE-USD",
+            "ticker": "HYPE-USD",
+            "yahoo_ticker": "HYPE-USD",
+            "calendar_id": "24/7",
+            "quoteType": "",
+            "asset_class": "crypto",
+            "exchange": "",
+        }
+    )
+    assert fx["calendar_id"] == "YAHOO_FX_WEEKDAYS"
+    assert crypto["calendar_id"] == "CRYPTO_24_7"
+    assert fx["mapping_status"] == "proposed_review_required"
+    assert crypto["mapping_status"] == "proposed_review_required"
+
+
 def test_publish_registry_is_immutable_replayable_and_s3_only(snapshot):
     s3, fingerprint = snapshot
     registry, version = calendars.make_registry(s3, BUCKET, fingerprint)

@@ -24,7 +24,6 @@ from alpha_edge.market.ingest_bronze_full_history import (
     DEFAULT_BUCKET,
     DEFAULT_REGION,
     SAFE_RUN,
-    BronzeIngestError,
     _completed,
     _digest,
     _get_optional,
@@ -121,14 +120,14 @@ def prepare_session_candidate(
 
     o = pd.to_numeric(out["open"], errors="coerce")
     h = pd.to_numeric(out["high"], errors="coerce")
-    l = pd.to_numeric(out["low"], errors="coerce")
+    low = pd.to_numeric(out["low"], errors="coerce")
     c = pd.to_numeric(out["close"], errors="coerce")
     v = pd.to_numeric(out["volume"], errors="coerce")
     # These are QA flags only: provider price values never change.
     bad_ohlc = (
-        ~np.isfinite(o) | ~np.isfinite(h) | ~np.isfinite(l) | ~np.isfinite(c)
-        | o.le(0) | h.le(0) | l.le(0) | c.le(0)
-        | h.lt(l) | h.lt(o) | h.lt(c) | l.gt(o) | l.gt(c)
+        ~np.isfinite(o) | ~np.isfinite(h) | ~np.isfinite(low) | ~np.isfinite(c)
+        | o.le(0) | h.le(0) | low.le(0) | c.le(0)
+        | h.lt(low) | h.lt(o) | h.lt(c) | low.gt(o) | low.gt(c)
     )
     bad_volume = v.lt(0)
     issues = []

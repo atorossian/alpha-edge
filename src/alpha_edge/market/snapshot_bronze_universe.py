@@ -146,8 +146,12 @@ def main() -> None:
     blobs, commit, fingerprint = collect_sources(repo)
     s3 = boto3.client("s3", region_name=options.region) if options.execute else None
     report = publish_snapshot(
-        s3, options.bucket, blobs=blobs, commit=commit,
-        fingerprint=fingerprint, execute=options.execute,
+        s3,
+        options.bucket,
+        blobs=blobs,
+        commit=commit,
+        fingerprint=fingerprint,
+        execute=options.execute,
     )
     print(json.dumps(report, indent=2))
 

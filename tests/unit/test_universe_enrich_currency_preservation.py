@@ -8,33 +8,60 @@ from alpha_edge.universe import universe as module
 
 
 def _universe_rows() -> pd.DataFrame:
-    return pd.DataFrame([
-        {
-            "row_id": "FX-CNY", "ticker": "USD-CNY", "yahoo_ticker": "CNY=X",
-            "asset_class": "fx", "currency": "", "include": 1,
-            "market": "ccy_market", "shortName": "USD/CNY",
-        },
-        {
-            "row_id": "FX-BRL", "ticker": "USD-BRL", "yahoo_ticker": "BRL=X",
-            "asset_class": "fx_pair", "currency": "BRL", "include": 1,
-            "market": "ccy_market", "shortName": "USD/BRL",
-        },
-        {
-            "row_id": "FX-JPY", "ticker": "USD-JPY", "yahoo_ticker": "JPY=X",
-            "asset_class": "fx", "currency": "JPY", "include": 1,
-            "market": "ccy_market", "shortName": "USD/JPY",
-        },
-        {
-            "row_id": "EQ-SPY", "ticker": "SPY", "yahoo_ticker": "SPY",
-            "asset_class": "equity", "currency": "USD", "include": 1,
-            "market": "us_market", "shortName": "SPDR S&P 500",
-        },
-        {
-            "row_id": "EQ-BKH", "ticker": "BKH", "yahoo_ticker": "HZN",
-            "asset_class": "equity", "currency": "USD", "include": 1,
-            "market": "us_market", "shortName": "Black Hills",
-        },
-    ])
+    return pd.DataFrame(
+        [
+            {
+                "row_id": "FX-CNY",
+                "ticker": "USD-CNY",
+                "yahoo_ticker": "CNY=X",
+                "asset_class": "fx",
+                "currency": "",
+                "include": 1,
+                "market": "ccy_market",
+                "shortName": "USD/CNY",
+            },
+            {
+                "row_id": "FX-BRL",
+                "ticker": "USD-BRL",
+                "yahoo_ticker": "BRL=X",
+                "asset_class": "fx_pair",
+                "currency": "BRL",
+                "include": 1,
+                "market": "ccy_market",
+                "shortName": "USD/BRL",
+            },
+            {
+                "row_id": "FX-JPY",
+                "ticker": "USD-JPY",
+                "yahoo_ticker": "JPY=X",
+                "asset_class": "fx",
+                "currency": "JPY",
+                "include": 1,
+                "market": "ccy_market",
+                "shortName": "USD/JPY",
+            },
+            {
+                "row_id": "EQ-SPY",
+                "ticker": "SPY",
+                "yahoo_ticker": "SPY",
+                "asset_class": "equity",
+                "currency": "USD",
+                "include": 1,
+                "market": "us_market",
+                "shortName": "SPDR S&P 500",
+            },
+            {
+                "row_id": "EQ-BKH",
+                "ticker": "BKH",
+                "yahoo_ticker": "HZN",
+                "asset_class": "equity",
+                "currency": "USD",
+                "include": 1,
+                "market": "us_market",
+                "shortName": "Black Hills",
+            },
+        ]
+    )
 
 
 def test_metadata_refresh_preserves_untouched_rows_and_fx_quote_ccy(monkeypatch, tmp_path):
@@ -56,8 +83,11 @@ def test_metadata_refresh_preserves_untouched_rows_and_fx_quote_ccy(monkeypatch,
     monkeypatch.setattr(module, "fetch_yahoo_meta", fake_fetch)
     monkeypatch.setattr(module.time, "sleep", lambda seconds: None)
     result = module.enrich_universe_csv(
-        universe_csv=str(source), out_csv=str(source), sleep_s=0,
-        ticker_col="row_id", yahoo_col="yahoo_ticker",
+        universe_csv=str(source),
+        out_csv=str(source),
+        sleep_s=0,
+        ticker_col="row_id",
+        yahoo_col="yahoo_ticker",
         tickers_subset=["FX-CNY"],
     )
     assert calls == ["CNY=X"]
@@ -92,8 +122,11 @@ def test_yahoo_currency_overrides_existing_for_equity_but_never_blank(monkeypatc
     monkeypatch.setattr(module, "fetch_yahoo_meta", fake_fetch)
     monkeypatch.setattr(module.time, "sleep", lambda seconds: None)
     result = module.enrich_universe_csv(
-        universe_csv=str(source), out_csv=str(source), sleep_s=0,
-        ticker_col="row_id", yahoo_col="yahoo_ticker",
+        universe_csv=str(source),
+        out_csv=str(source),
+        sleep_s=0,
+        ticker_col="row_id",
+        yahoo_col="yahoo_ticker",
         tickers_subset=["EQ-SPY", "FX-BRL"],
     )
     rows = result.set_index("row_id")
@@ -111,7 +144,11 @@ def test_fx_derivation_does_not_assign_currency_to_unrelated_symbol(monkeypatch,
     monkeypatch.setattr(module, "fetch_yahoo_meta", lambda symbol: {"currency": None})
     monkeypatch.setattr(module.time, "sleep", lambda _: None)
     result = module.enrich_universe_csv(
-        universe_csv=str(source), out_csv=str(source), sleep_s=0,
-        ticker_col="row_id", yahoo_col="yahoo_ticker", tickers_subset=["FX-CNY"],
+        universe_csv=str(source),
+        out_csv=str(source),
+        sleep_s=0,
+        ticker_col="row_id",
+        yahoo_col="yahoo_ticker",
+        tickers_subset=["FX-CNY"],
     )
     assert pd.isna(result.set_index("row_id").loc["FX-CNY", "currency"])

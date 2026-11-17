@@ -34,12 +34,20 @@ def source():
         s3.create_bucket(Bucket=BUCKET, CreateBucketConfiguration={"LocationConstraint": "eu-west-1"})
         universe = [
             {
-                "asset_id": "EQH-SPY", "row_id": "one", "ticker": "SPY",
-                "yahoo_ticker": "SPY", "include": "1", "currency": "USD",
+                "asset_id": "EQH-SPY",
+                "row_id": "one",
+                "ticker": "SPY",
+                "yahoo_ticker": "SPY",
+                "include": "1",
+                "currency": "USD",
             },
             {
-                "asset_id": "EQH-JPY", "row_id": "two", "ticker": "USD-JPY",
-                "yahoo_ticker": "JPY=X", "include": "1", "currency": "JPY",
+                "asset_id": "EQH-JPY",
+                "row_id": "two",
+                "ticker": "USD-JPY",
+                "yahoo_ticker": "JPY=X",
+                "include": "1",
+                "currency": "JPY",
             },
         ]
         sources = {
@@ -49,10 +57,7 @@ def source():
             "ingest_force_refresh.csv": csv_bytes([{"ticker": "SPY"}]),
             "universe_manual_additions.csv": csv_bytes([{"ticker": "SPY"}]),
         }
-        metadata = {
-            name: {"bytes": len(data), "sha256": bronze._digest(data)}
-            for name, data in sources.items()
-        }
+        metadata = {name: {"bytes": len(data), "sha256": bronze._digest(data)} for name, data in sources.items()}
         fingerprint = bronze._digest(bronze._json_bytes(metadata))
         for name, data in sources.items():
             s3.put_object(
@@ -62,22 +67,30 @@ def source():
                 Metadata={"sha256": bronze._digest(data), "source-git-commit": "a" * 40},
             )
         run = {
-            "schema": "alpha_edge_full_history_run_v1", "run_id": BRONZE_RUN,
+            "schema": "alpha_edge_full_history_run_v1",
+            "run_id": BRONZE_RUN,
             "source_fingerprint": fingerprint,
             "requested_asset_ids": ["EQH-SPY", "EQH-JPY"],
         }
-        s3.put_object(Bucket=BUCKET, Key=f"{bronze.BRONZE_ROOT}/runs/{BRONZE_RUN}/run.json", Body=bronze._json_bytes(run))
+        s3.put_object(
+            Bucket=BUCKET, Key=f"{bronze.BRONZE_ROOT}/runs/{BRONZE_RUN}/run.json", Body=bronze._json_bytes(run)
+        )
         for asset, ticker, closes, actions in [
             ("EQH-SPY", "SPY", [100.0, 101.0, 102.0], [0.0, 0.5, 0.0]),
             ("EQH-JPY", "JPY=X", [150.0, 151.0, 152.0], [0.0, 0.0, 0.0]),
         ]:
-            bars = pd.DataFrame({
-                "asset_id": [asset] * 3, "provider_symbol": [ticker] * 3,
-                "currency_original": ["USD" if ticker == "SPY" else "JPY"] * 3,
-                "session_date": ["2026-11-12", "2026-11-13", "2026-11-16"],
-                "close": closes, "adj_close": closes, "dividends": actions,
-                "stock_splits": [0.0] * 3,
-            })
+            bars = pd.DataFrame(
+                {
+                    "asset_id": [asset] * 3,
+                    "provider_symbol": [ticker] * 3,
+                    "currency_original": ["USD" if ticker == "SPY" else "JPY"] * 3,
+                    "session_date": ["2026-11-12", "2026-11-13", "2026-11-16"],
+                    "close": closes,
+                    "adj_close": closes,
+                    "dividends": actions,
+                    "stock_splits": [0.0] * 3,
+                }
+            )
             buf = io.BytesIO()
             bars.to_parquet(buf, index=False)
             blob = buf.getvalue()
@@ -86,8 +99,10 @@ def source():
             s3.put_object(Bucket=BUCKET, Key=key, Body=blob, Metadata={"sha256": bronze._digest(blob)})
             receipt = {
                 "schema": "alpha_edge_full_history_asset_v1",
-                "asset_id": asset, "provider_symbol": ticker,
-                "run_id": BRONZE_RUN, "status": "committed",
+                "asset_id": asset,
+                "provider_symbol": ticker,
+                "run_id": BRONZE_RUN,
+                "status": "committed",
                 "data": {"key": key, "bytes": len(blob), "sha256": bronze._digest(blob)},
                 "validation": {"rows": len(bars)},
             }
@@ -98,8 +113,12 @@ def source():
 def test_spy_actions_dry_run_no_s3_write(source):
     s3, fingerprint = source
     result = silver.build(
-        s3, BUCKET, fingerprint=fingerprint, bronze_run_id=BRONZE_RUN,
-        silver_run_id=SILVER_RUN, selector="SPY",
+        s3,
+        BUCKET,
+        fingerprint=fingerprint,
+        bronze_run_id=BRONZE_RUN,
+        silver_run_id=SILVER_RUN,
+        selector="SPY",
     )
     assert result["status"] == "dry_run"
     assert result["statistics"]["action_statistics"]["reported_dividends"] == 1
@@ -111,9 +130,12 @@ def test_spy_actions_dry_run_no_s3_write(source):
 def test_fx_inverse_rate_source_evidence_and_same_run_resume(source):
     s3, fingerprint = source
     kwargs = {
-        "fingerprint": fingerprint, "bronze_run_id": BRONZE_RUN,
-        "silver_run_id": SILVER_RUN, "selector": "USD-JPY",
-        "fx_currency": "JPY", "fx_direction": "inverse",
+        "fingerprint": fingerprint,
+        "bronze_run_id": BRONZE_RUN,
+        "silver_run_id": SILVER_RUN,
+        "selector": "USD-JPY",
+        "fx_currency": "JPY",
+        "fx_direction": "inverse",
     }
     dry = silver.build(s3, BUCKET, **kwargs)
     assert dry["statistics"]["fx_statistics"]["accepted_rates"] == 3
@@ -135,8 +157,12 @@ def test_missing_hzn_source_does_not_synthesize(source):
     s3, fingerprint = source
     with pytest.raises(silver.SilverEvidenceError, match="Exactly one"):
         silver.build(
-            s3, BUCKET, fingerprint=fingerprint,
-            bronze_run_id=BRONZE_RUN, silver_run_id=SILVER_RUN, selector="HZN",
+            s3,
+            BUCKET,
+            fingerprint=fingerprint,
+            bronze_run_id=BRONZE_RUN,
+            silver_run_id=SILVER_RUN,
+            selector="HZN",
         )
 
 
@@ -144,7 +170,11 @@ def test_invalid_fx_config_fails_before_s3_writes(source):
     s3, fingerprint = source
     with pytest.raises(silver.SilverEvidenceError, match="together"):
         silver.build(
-            s3, BUCKET, fingerprint=fingerprint,
-            bronze_run_id=BRONZE_RUN, silver_run_id=SILVER_RUN,
-            selector="USD-JPY", fx_currency="JPY",
+            s3,
+            BUCKET,
+            fingerprint=fingerprint,
+            bronze_run_id=BRONZE_RUN,
+            silver_run_id=SILVER_RUN,
+            selector="USD-JPY",
+            fx_currency="JPY",
         )

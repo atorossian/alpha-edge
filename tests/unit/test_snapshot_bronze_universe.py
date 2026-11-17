@@ -19,7 +19,6 @@ from alpha_edge.market.ingest_bronze_full_history import (
 )
 
 
-
 BUCKET = "alpha-edge-algo"
 COMMIT = "a" * 40
 
@@ -37,15 +36,42 @@ def _csv(rows):
 @pytest.fixture
 def sources():
     return {
-        "universe.csv": _csv([
-            {"asset_id": "EQH001", "row_id": "id-spy", "ticker": "SPY", "yahoo_ticker": "SPY", "include": "1", "currency": "USD"},
-            {"asset_id": "EQH002", "row_id": "id-excluded", "ticker": "OLD", "yahoo_ticker": "OLD", "include": "0", "currency": "USD"},
-            {"asset_id": "EQH003", "row_id": "id-fx", "ticker": "USD-CNY", "yahoo_ticker": "CNY=X", "include": "1", "currency": "CNY"},
-        ]),
-        "universe_overrides.csv": _csv([{"target_row_id": "id-fx", "ticker": "USD-CNY", "yahoo_ticker": "CNY=X", "lock_yahoo_ticker": "1"}]),
+        "universe.csv": _csv(
+            [
+                {
+                    "asset_id": "EQH001",
+                    "row_id": "id-spy",
+                    "ticker": "SPY",
+                    "yahoo_ticker": "SPY",
+                    "include": "1",
+                    "currency": "USD",
+                },
+                {
+                    "asset_id": "EQH002",
+                    "row_id": "id-excluded",
+                    "ticker": "OLD",
+                    "yahoo_ticker": "OLD",
+                    "include": "0",
+                    "currency": "USD",
+                },
+                {
+                    "asset_id": "EQH003",
+                    "row_id": "id-fx",
+                    "ticker": "USD-CNY",
+                    "yahoo_ticker": "CNY=X",
+                    "include": "1",
+                    "currency": "CNY",
+                },
+            ]
+        ),
+        "universe_overrides.csv": _csv(
+            [{"target_row_id": "id-fx", "ticker": "USD-CNY", "yahoo_ticker": "CNY=X", "lock_yahoo_ticker": "1"}]
+        ),
         "asset_excluded.csv": _csv([{"target_row_id": "id-excluded", "ticker": "OLD", "reason": "retired"}]),
         "ingest_force_refresh.csv": _csv([{"ticker": "SPY"}]),
-        "universe_manual_additions.csv": _csv([{"ticker": "USD-CNY", "yahoo_ticker": "CNY=X", "lock_yahoo_ticker": "1"}]),
+        "universe_manual_additions.csv": _csv(
+            [{"ticker": "USD-CNY", "yahoo_ticker": "CNY=X", "lock_yahoo_ticker": "1"}]
+        ),
     }
 
 
@@ -61,16 +87,19 @@ def s3():
 
 
 def _fingerprint(blobs):
-    return _digest(_json_bytes({
-        name: {"bytes": len(blobs[name]), "sha256": _digest(blobs[name])}
-        for name in SOURCE_NAMES
-    }))
+    return _digest(
+        _json_bytes({name: {"bytes": len(blobs[name]), "sha256": _digest(blobs[name])} for name in SOURCE_NAMES})
+    )
 
 
 def test_dry_run_has_no_s3_writes(s3, sources):
     report = snapshot.publish_snapshot(
-        s3, BUCKET, blobs=sources, commit=COMMIT,
-        fingerprint=_fingerprint(sources), execute=False,
+        s3,
+        BUCKET,
+        blobs=sources,
+        commit=COMMIT,
+        fingerprint=_fingerprint(sources),
+        execute=False,
     )
     assert report["file_count"] == 5
     assert not report["executed"]
@@ -80,8 +109,12 @@ def test_dry_run_has_no_s3_writes(s3, sources):
 def test_snapshot_is_immutable_and_readback_compatible_with_ingestion(s3, sources):
     fingerprint = _fingerprint(sources)
     first = snapshot.publish_snapshot(
-        s3, BUCKET, blobs=sources, commit=COMMIT,
-        fingerprint=fingerprint, execute=True,
+        s3,
+        BUCKET,
+        blobs=sources,
+        commit=COMMIT,
+        fingerprint=fingerprint,
+        execute=True,
     )
     assert first["readback_verified"]
     assert first["included"] == 2
@@ -94,8 +127,12 @@ def test_snapshot_is_immutable_and_readback_compatible_with_ingestion(s3, source
 
     # A retried publish must never alter the canonical snapshot.
     again = snapshot.publish_snapshot(
-        s3, BUCKET, blobs=sources, commit=COMMIT,
-        fingerprint=fingerprint, execute=True,
+        s3,
+        BUCKET,
+        blobs=sources,
+        commit=COMMIT,
+        fingerprint=fingerprint,
+        execute=True,
     )
     assert again["readback_verified"]
     assert again["snapshot_fingerprint"] == first["snapshot_fingerprint"]
@@ -105,13 +142,19 @@ def test_corrupted_existing_object_is_never_overwritten(s3, sources):
     fingerprint = _fingerprint(sources)
     key = f"{SNAPSHOT_ROOT}/{fingerprint}/{SOURCE_NAMES[0]}"
     s3.put_object(
-        Bucket=BUCKET, Key=key, Body=b"other version",
+        Bucket=BUCKET,
+        Key=key,
+        Body=b"other version",
         Metadata={"source-git-commit": COMMIT, "sha256": "0" * 64},
     )
     with pytest.raises(BronzeIngestError, match="incompatible"):
         snapshot.publish_snapshot(
-            s3, BUCKET, blobs=sources, commit=COMMIT,
-            fingerprint=fingerprint, execute=True,
+            s3,
+            BUCKET,
+            blobs=sources,
+            commit=COMMIT,
+            fingerprint=fingerprint,
+            execute=True,
         )
     assert s3.get_object(Bucket=BUCKET, Key=key)["Body"].read() == b"other version"
 
@@ -119,13 +162,21 @@ def test_corrupted_existing_object_is_never_overwritten(s3, sources):
 def test_snapshot_hash_and_git_sha_are_mandatory(s3, sources):
     with pytest.raises(BronzeIngestError, match="fingerprint"):
         snapshot.publish_snapshot(
-            s3, BUCKET, blobs=sources, commit=COMMIT,
-            fingerprint="0" * 64, execute=True,
+            s3,
+            BUCKET,
+            blobs=sources,
+            commit=COMMIT,
+            fingerprint="0" * 64,
+            execute=True,
         )
     with pytest.raises(BronzeIngestError, match="Git SHA"):
         snapshot.publish_snapshot(
-            s3, BUCKET, blobs=sources, commit="invalid",
-            fingerprint=_fingerprint(sources), execute=True,
+            s3,
+            BUCKET,
+            blobs=sources,
+            commit="invalid",
+            fingerprint=_fingerprint(sources),
+            execute=True,
         )
 
 
@@ -166,7 +217,8 @@ def test_collect_sources_does_not_create_local_artifacts(monkeypatch, tmp_path, 
     for name, data in sources.items():
         (root / name).write_bytes(data)
     monkeypatch.setattr(
-        snapshot, "_git",
+        snapshot,
+        "_git",
         lambda _root, *args: "" if "status" in args else COMMIT,
     )
     before = {str(x.relative_to(tmp_path)) for x in tmp_path.rglob("*")}

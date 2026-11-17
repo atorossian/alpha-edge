@@ -145,7 +145,56 @@ exchange-diverse sample (US equities, EU, Asia, FX, 24/7 crypto), audit
 its findings and full byte-level S3 readback before broader Silver
 publication.
 
-## Silver subsequent stages (not implemented in this ticket)
+## Silver continuation — pinned calendar registry and financial evidence (2026-11-17)
+
+**Added on the feature branch (draft PR #18):**
+
+- `src/alpha_edge/market/calendar_registry_v3.py`: derive candidate mappings
+  using the exact five-file Bronze universe snapshot and the pre-existing
+  `exchange_calendar_mapping_v2.csv` policy. Record SHA-256 content version,
+  canonical asset IDs, provider symbols, exchange code, mapping origin and
+  approval status. `--execute` writes a single immutable, readback-verified
+  registry to `market/lake_v3/config/calendar_registries/v1/<sha>/registry.json`.
+  **All mappings remain proposals, not independently verified or approved.**
+- `build_silver_sessions_v3.py`: optional `--registry-version <sha>`
+  uses source-pinned registry calendars *per asset*, including explicit
+  `CRYPTO_24_7` and `YAHOO_FX_WEEKDAYS` daily-label conventions.
+  Unknown mappings stay unverified; no default NYSE fallback.
+  Registry/version and mapping status are recorded in Silver candidate
+  manifests. An existing Silver run is immutable: use a NEW Silver run ID
+  when changing to registry mode.
+- `src/alpha_edge/market/silver_financial_evidence_v3.py`:
+  in-memory, no-I/O provider-reported split/dividend extraction and
+  adjustment-ratio discrepancy flags reusing v2 utilities; explicit
+  direct/inverse FX conversion to **USD per original currency unit** using
+  `normalize_bronze_fx_quotes`. Original Bronze prices remain unchanged.
+  This code does not yet orchestrate/release USD-converted security histories
+  or independently validate action factors and FX timestamp availability.
+- Added CI tests for registry immutability, unresolved/crypto/FX calendar
+  conventions, source actions and direct/inverse FX arithmetic.
+
+**Registry dry run (reads only S3; no writes):**
+
+```bash
+poetry run python -m alpha_edge.market.calendar_registry_v3 \
+  --bucket alpha-edge-algo \
+  --source-fingerprint 87fc22f9c87353b9b3b5c69d816ee18bb2699c2aec501aa8e6be10cedf421179
+```
+
+Inspect the reported `proposed` and `unresolved` counts and representative
+mapping evidence before publishing with `--execute`.
+Use `--registry-version` for subsequent Silver *candidate* pilots.
+This does not authorize a full-universe release.
+
+**Remaining before complete Silver:** independent per-asset calendar
+approval (e.g. valid non-US exchange coverage and effective dating), FX
+quote-unit metadata and observation-time/no-look-ahead policy, independently
+validated split/dividend adjustment semantics (Yahoo `Close` can already
+be adjusted), historical corporate-action revision handling, S3-native
+versioned financial transformation outputs, audit/readback and full-universe
+acceptance gates. None of this is claimed complete by the candidate code.
+
+## Silver subsequent stages (not yet production-ready)
 
 1. **AEA-94:** independently validate split and dividend adjustment factors
    against source corporate-action history; record effective dates and

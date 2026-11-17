@@ -69,19 +69,27 @@ def s3():
 def setup_bronze(s3):
     rows = [
         {
-            "asset_id": "EQH-SPY", "row_id": "one", "ticker": "SPY",
-            "yahoo_ticker": "SPY", "include": "1", "currency": "USD",
+            "asset_id": "EQH-SPY",
+            "row_id": "one",
+            "ticker": "SPY",
+            "yahoo_ticker": "SPY",
+            "include": "1",
+            "currency": "USD",
         },
         {
-            "asset_id": "EQH-HZN", "row_id": "two", "ticker": "BKH",
-            "yahoo_ticker": "HZN", "include": "1", "currency": "USD",
+            "asset_id": "EQH-HZN",
+            "row_id": "two",
+            "ticker": "BKH",
+            "yahoo_ticker": "HZN",
+            "include": "1",
+            "currency": "USD",
         },
     ]
     source = {
         "universe.csv": _csv(rows),
-        "universe_overrides.csv": _csv([
-            {"target_row_id": "two", "ticker": "BKH", "yahoo_ticker": "HZN", "lock_yahoo_ticker": "1"}
-        ]),
+        "universe_overrides.csv": _csv(
+            [{"target_row_id": "two", "ticker": "BKH", "yahoo_ticker": "HZN", "lock_yahoo_ticker": "1"}]
+        ),
         "asset_excluded.csv": _csv([{"target_row_id": "", "ticker": "OLD", "reason": "historical"}]),
         "ingest_force_refresh.csv": _csv([{"ticker": "SPY"}]),
         "universe_manual_additions.csv": _csv([{"ticker": "SPY"}]),
@@ -113,13 +121,13 @@ def setup_bronze(s3):
     data = buf.getvalue()
     prefix = bronze._target_prefix(BRONZE_RUN, "EQH-SPY")
     data_key = f"{prefix}/objects/{bronze._digest(data)}.parquet"
-    s3.put_object(
-        Bucket=BUCKET, Key=data_key, Body=data, Metadata={"sha256": bronze._digest(data)}
-    )
+    s3.put_object(Bucket=BUCKET, Key=data_key, Body=data, Metadata={"sha256": bronze._digest(data)})
     manifest = {
         "schema": "alpha_edge_full_history_asset_v1",
-        "asset_id": "EQH-SPY", "provider_symbol": "SPY",
-        "run_id": BRONZE_RUN, "status": "committed",
+        "asset_id": "EQH-SPY",
+        "provider_symbol": "SPY",
+        "run_id": BRONZE_RUN,
+        "status": "committed",
         "data": {"key": data_key, "bytes": len(data), "sha256": bronze._digest(data)},
         "validation": {"rows": len(bars)},
     }
@@ -149,9 +157,7 @@ def test_calendar_reuses_existing_v2_audit_and_preserves_source_values():
 
 
 def test_missing_calendar_is_review_not_silent_weekdays():
-    frame, findings, report = silver.prepare_session_candidate(
-        raw_frame(), asset_id="EQH-SPY", symbol="SPY"
-    )
+    frame, findings, report = silver.prepare_session_candidate(raw_frame(), asset_id="EQH-SPY", symbol="SPY")
     assert not report["calendar_mapped"]
     assert "calendar_mapping_not_configured" in set(findings["issue"])
     assert frame["calendar_session_status"].eq("not_checked").all()
@@ -222,8 +228,13 @@ def test_pinned_bronze_s3_dry_run_and_candidate_publication(s3):
 def test_hzn_missing_baseline_is_a_reported_exception_not_fabricated(s3):
     fingerprint, _ = setup_bronze(s3)
     report = silver.build(
-        s3, BUCKET, source_fingerprint=fingerprint, bronze_run_id=BRONZE_RUN,
-        silver_run_id=SILVER_RUN, only=["BKH"], calendar_id="NYSE",
+        s3,
+        BUCKET,
+        source_fingerprint=fingerprint,
+        bronze_run_id=BRONZE_RUN,
+        silver_run_id=SILVER_RUN,
+        only=["BKH"],
+        calendar_id="NYSE",
     )
     assert report["missing_bronze"] == 1
     assert report["assets"][0]["status"] == "source_unavailable"
@@ -238,6 +249,11 @@ def test_bronze_provenance_mismatch_blocks_silver(s3):
     s3.put_object(Bucket=BUCKET, Key=run_key, Body=bronze._json_bytes(cfg))
     with pytest.raises(silver.SilverSessionError, match="differs"):
         silver.build(
-            s3, BUCKET, source_fingerprint=fingerprint, bronze_run_id=BRONZE_RUN,
-            silver_run_id=SILVER_RUN, only=["SPY"], calendar_id="NYSE"
+            s3,
+            BUCKET,
+            source_fingerprint=fingerprint,
+            bronze_run_id=BRONZE_RUN,
+            silver_run_id=SILVER_RUN,
+            only=["SPY"],
+            calendar_id="NYSE",
         )

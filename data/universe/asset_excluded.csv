@@ -169,3 +169,6 @@ BC3C953CA6604032,RUM,equity,Reviewed instrument identity resolution,Active dupli
 D8C52DD0D433474D,MPT,equity,Reviewed instrument identity resolution,Active duplicate or historical alias; preserve asset_id and existing history; retained=EQHa70d98e68b7d1378; source_collision=MPT; 2026-11-12
 0497F4311ED6EB65,QBTS,equity,Reviewed instrument identity resolution,Active duplicate or historical alias; preserve asset_id and existing history; retained=EQHc25ab54246a4961f; source_collision=QBTS; 2026-11-12
 627E71FBC7CF701E,VIVT3,equity,Reviewed instrument identity resolution,B3 VIVT3.SA already exists with verified canonical symbol; preserve NYSE VIV separately; retained=EQHcc8433d3724c336a; source_collision=VIV; 2026-11-12
+B76AE0C6E73A562C,ATKR,equity,Acquired and delisted,Prysmian completed acquisition 2026-10-19; retain asset ID and existing Bronze history
+12C1681BE20B6CAF,NWE,equity,Merged and former ticker retired,NWE exchanged into HZN 2026-11-13; do not splice historical NWE and HZN prices
+4E4BDCCF200C09D4,ACVA,equity,Acquired and delisted,Copart completed acquisition 2026-10-16; retain asset ID and existing Bronze history

@@ -5,6 +5,7 @@ on:
     branches:
       - feature/bronze-full-history-s3
     paths:
+      - "data/universe/*.csv"
       - "src/alpha_edge/market/ingest_bronze_full_history.py"
       - "tests/unit/test_ingest_bronze_full_history.py"
       - ".github/workflows/bronze-full-history.yml"

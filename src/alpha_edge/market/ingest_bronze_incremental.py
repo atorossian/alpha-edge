@@ -382,6 +382,15 @@ def ingest(
                     run_id,
                     "success",
                     record=record,
+                    details={
+                        "start": start,
+                        "baseline_session": last_session,
+                        "baseline_run_id": base_run,
+                        "data_key": manifest["data"]["key"],
+                        "rows": manifest["validation"]["rows"],
+                        "new_rows": manifest["validation"]["new_rows_since_baseline"],
+                    },
+                )
         except (KeyboardInterrupt, SystemExit):
             _audit(s3, bucket, run_id, "interrupted", record=record)
             raise

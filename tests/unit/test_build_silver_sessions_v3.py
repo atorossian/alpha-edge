@@ -82,13 +82,11 @@ def setup_bronze(s3):
         "universe_overrides.csv": _csv([
             {"target_row_id": "two", "ticker": "BKH", "yahoo_ticker": "HZN", "lock_yahoo_ticker": "1"}
         ]),
-        "asset_excluded.csv": _csv([{"target_row_id": "one", "ticker": "OLD", "reason": ""}]),
+        "asset_excluded.csv": _csv([{"target_row_id": "", "ticker": "OLD", "reason": "historical"}]),
         "ingest_force_refresh.csv": _csv([{"ticker": "SPY"}]),
         "universe_manual_additions.csv": _csv([{"ticker": "SPY"}]),
     }
-    # Make exclusion support fixture structurally valid without actually
-    # excluding the active SPY security.
-    source["asset_excluded.csv"] = _csv([{"target_row_id": "", "ticker": "OLD", "reason": "historical"}])
+    # No active-asset exclusion is implied by this support-file entry.
     entries = {name: {"bytes": len(blob), "sha256": bronze._digest(blob)} for name, blob in source.items()}
     fingerprint = bronze._digest(bronze._json_bytes(entries))
     for name, blob in source.items():
@@ -235,8 +233,12 @@ def test_hzn_missing_baseline_is_a_reported_exception_not_fabricated(s3):
 
 def test_bronze_provenance_mismatch_blocks_silver(s3):
     fingerprint, _ = setup_bronze(s3)
+    run_key = f"{bronze.BRONZE_ROOT}/runs/{BRONZE_RUN}/run.json"
+    cfg = json.loads(s3.get_object(Bucket=BUCKET, Key=run_key)["Body"].read())
+    cfg["source_fingerprint"] = "b" * 64
+    s3.put_object(Bucket=BUCKET, Key=run_key, Body=bronze._json_bytes(cfg))
     with pytest.raises(silver.SilverSessionError, match="differs"):
         silver.build(
-            s3, BUCKET, source_fingerprint="b" * 64, bronze_run_id=BRONZE_RUN,
+            s3, BUCKET, source_fingerprint=fingerprint, bronze_run_id=BRONZE_RUN,
             silver_run_id=SILVER_RUN, only=["SPY"], calendar_id="NYSE"
         )

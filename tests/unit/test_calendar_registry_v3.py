@@ -32,16 +32,66 @@ def snapshot():
         s3 = boto3.client("s3", region_name="eu-west-1")
         s3.create_bucket(Bucket=BUCKET, CreateBucketConfiguration={"LocationConstraint": "eu-west-1"})
         rows = [
-            dict(asset_id="EQH-SPY", row_id="a", ticker="SPY", yahoo_ticker="SPY", include="1",
-                 currency="USD", exchange="PCX", quoteType="ETF", calendar_id="", asset_class="equity"),
-            dict(asset_id="CRYPTO:BTC-USD", row_id="b", ticker="BTC-USD", yahoo_ticker="BTC-USD", include="1",
-                 currency="USD", exchange="CCC", quoteType="CRYPTOCURRENCY", calendar_id="24/7", asset_class="crypto"),
-            dict(asset_id="EQH-FX", row_id="c", ticker="USD-JPY", yahoo_ticker="JPY=X", include="1",
-                 currency="JPY", exchange="", quoteType="", calendar_id="FOREX", asset_class="fx"),
-            dict(asset_id="EQH-UNRESOLVED", row_id="d", ticker="UNKNOWN", yahoo_ticker="UNKNOWN", include="1",
-                 currency="USD", exchange="TEX", quoteType="EQUITY", calendar_id="", asset_class="equity"),
-            dict(asset_id="EQH-EXCLUDED", row_id="e", ticker="OLD", yahoo_ticker="OLD", include="0",
-                 currency="USD", exchange="NYQ", quoteType="EQUITY", calendar_id="", asset_class="equity"),
+            dict(
+                asset_id="EQH-SPY",
+                row_id="a",
+                ticker="SPY",
+                yahoo_ticker="SPY",
+                include="1",
+                currency="USD",
+                exchange="PCX",
+                quoteType="ETF",
+                calendar_id="",
+                asset_class="equity",
+            ),
+            dict(
+                asset_id="CRYPTO:BTC-USD",
+                row_id="b",
+                ticker="BTC-USD",
+                yahoo_ticker="BTC-USD",
+                include="1",
+                currency="USD",
+                exchange="CCC",
+                quoteType="CRYPTOCURRENCY",
+                calendar_id="24/7",
+                asset_class="crypto",
+            ),
+            dict(
+                asset_id="EQH-FX",
+                row_id="c",
+                ticker="USD-JPY",
+                yahoo_ticker="JPY=X",
+                include="1",
+                currency="JPY",
+                exchange="",
+                quoteType="",
+                calendar_id="FOREX",
+                asset_class="fx",
+            ),
+            dict(
+                asset_id="EQH-UNRESOLVED",
+                row_id="d",
+                ticker="UNKNOWN",
+                yahoo_ticker="UNKNOWN",
+                include="1",
+                currency="USD",
+                exchange="TEX",
+                quoteType="EQUITY",
+                calendar_id="",
+                asset_class="equity",
+            ),
+            dict(
+                asset_id="EQH-EXCLUDED",
+                row_id="e",
+                ticker="OLD",
+                yahoo_ticker="OLD",
+                include="0",
+                currency="USD",
+                exchange="NYQ",
+                quoteType="EQUITY",
+                calendar_id="",
+                asset_class="equity",
+            ),
         ]
         source = {
             "universe.csv": _csv(rows),
@@ -95,8 +145,13 @@ def test_publish_registry_is_immutable_replayable_and_s3_only(snapshot):
 
 def test_registry_cannot_hide_conflicting_explicit_calendar():
     data = {
-        "asset_id": "EQH", "ticker": "A", "yahoo_ticker": "A", "exchange": "PCX",
-        "quoteType": "ETF", "calendar_id": "XMAD", "asset_class": "equity",
+        "asset_id": "EQH",
+        "ticker": "A",
+        "yahoo_ticker": "A",
+        "exchange": "PCX",
+        "quoteType": "ETF",
+        "calendar_id": "XMAD",
+        "asset_class": "equity",
     }
     result = calendars._derive(data)
     assert result["calendar_id"] is None
@@ -104,11 +159,13 @@ def test_registry_cannot_hide_conflicting_explicit_calendar():
 
 
 def test_special_crypto_weekends_are_required():
-    raw = pd.DataFrame({
-        "asset_id": ["CRYPTO:BTC"] * 2,
-        "provider_symbol": ["BTC-USD"] * 2,
-        "session_date": ["2026-11-13", "2026-11-15"],
-    })
+    raw = pd.DataFrame(
+        {
+            "asset_id": ["CRYPTO:BTC"] * 2,
+            "provider_symbol": ["BTC-USD"] * 2,
+            "session_date": ["2026-11-13", "2026-11-15"],
+        }
+    )
     flags, issues = silver._special_session_audit(raw, "CRYPTO_24_7")
     assert flags["previous_expected_session_missing"].iloc[-1]
     assert issues["issue"].tolist() == ["missing_expected_session"]
@@ -116,11 +173,13 @@ def test_special_crypto_weekends_are_required():
 
 
 def test_special_fx_daily_weekday_convention():
-    raw = pd.DataFrame({
-        "asset_id": ["EQH-FX"] * 2,
-        "provider_symbol": ["JPY=X"] * 2,
-        "session_date": ["2026-11-13", "2026-11-16"],
-    })
+    raw = pd.DataFrame(
+        {
+            "asset_id": ["EQH-FX"] * 2,
+            "provider_symbol": ["JPY=X"] * 2,
+            "session_date": ["2026-11-13", "2026-11-16"],
+        }
+    )
     flags, issues = silver._special_session_audit(raw, "YAHOO_FX_WEEKDAYS")
     assert len(issues) == 0
     assert not flags["previous_expected_session_missing"].iloc[-1]
@@ -145,7 +204,9 @@ def test_silver_reads_pinned_registry_mapping_and_keeps_proposal_status(snapshot
         Body=bronze._json_bytes(run),
     )
     result = silver.build(
-        s3, BUCKET, source_fingerprint=fingerprint,
+        s3,
+        BUCKET,
+        source_fingerprint=fingerprint,
         bronze_run_id="bronze-test-20261117",
         silver_run_id="silver-test-20261117",
         only=["SPY", "BTC-USD", "UNKNOWN"],
@@ -156,7 +217,12 @@ def test_silver_reads_pinned_registry_mapping_and_keeps_proposal_status(snapshot
     assert result["production_eligible"] is False
     with pytest.raises(silver.SilverSessionError, match="either"):
         silver.build(
-            s3, BUCKET, source_fingerprint=fingerprint,
-            bronze_run_id="bronze-test-20261117", silver_run_id="silver-test-20261117",
-            only=["SPY"], registry_version=version, calendar_id="NYSE",
+            s3,
+            BUCKET,
+            source_fingerprint=fingerprint,
+            bronze_run_id="bronze-test-20261117",
+            silver_run_id="silver-test-20261117",
+            only=["SPY"],
+            registry_version=version,
+            calendar_id="NYSE",
         )

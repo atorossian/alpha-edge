@@ -71,15 +71,15 @@ def collect_sources(root: Path, *, require_clean: bool = True) -> tuple[dict[str
     return blobs, git_commit, fingerprint
 
 
-def publish_snapshot(s3: Any, bucket: str, *, blobs: dict[str, bytes], commit: str,
-                     fingerprint: str, execute: bool = False) -> dict:
+def publish_snapshot(
+    s3: Any, bucket: str, *, blobs: dict[str, bytes], commit: str, fingerprint: str, execute: bool = False
+) -> dict:
     if set(blobs) != set(SOURCE_NAMES):
         raise BronzeIngestError("Expected precisely the five current universe configurations")
     if not _SHA40.fullmatch(commit):
         raise BronzeIngestError("A single pinned Git SHA is required")
     expected = {
-        filename: {"bytes": len(blobs[filename]), "sha256": _digest(blobs[filename])}
-        for filename in SOURCE_NAMES
+        filename: {"bytes": len(blobs[filename]), "sha256": _digest(blobs[filename])} for filename in SOURCE_NAMES
     }
     if fingerprint != _digest(_json_bytes(expected)):
         raise BronzeIngestError("Source fingerprint does not match input file contents")
@@ -100,7 +100,7 @@ def publish_snapshot(s3: Any, bucket: str, *, blobs: dict[str, bytes], commit: s
         payload = blobs[filename]
         try:
             s3.put_object(
-                Bucket=bucket, Key=key, Body=payload, ContentType="text/csv",
+                Bucket=bucket,
                 IfNoneMatch="*",
                 Metadata={"sha256": _digest(payload), "source-git-commit": commit},
             )

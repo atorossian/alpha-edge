@@ -13,7 +13,7 @@ import io
 import json
 import re
 import uuid
-from datetime import date, datetime, timezone
+from datetime import date
 from typing import Any
 
 import boto3
@@ -29,7 +29,6 @@ from alpha_edge.market.ingest_bronze_full_history import (
     _digest,
     _get_optional,
     _json_bytes,
-    _put_immutable as _bronze_put,
     _read,
     load_universe,
 )
@@ -154,13 +153,23 @@ def prepare_session_candidate(
         # existing v2 calendar audit, which expects valid unique sessions.
         if not invalid_date.any() and not dup.any():
             try:
-                _, gaps = audit_asset_sessions(
+                flags, gaps = audit_asset_sessions(
                     out[["asset_id", "provider_symbol", "session_date"]],
                     calendars={symbol: calendar_id},
                 )
             except Exception as exc:
                 raise SilverSessionError(f"Unusable explicitly supplied calendar {calendar_id}: {exc}") from exc
             out["calendar_session_status"] = "checked"
+            flags = flags.copy()
+            flags["exchange_session_date"] = flags["session_date"].dt.strftime("%Y-%m-%d")
+            out = out.merge(
+                flags[["asset_id", "exchange_session_date", "is_expected_session", "previous_expected_session_missing"]],
+                on=["asset_id", "exchange_session_date"],
+                how="left",
+                validate="one_to_one",
+            )
+            if out["is_expected_session"].isna().any():
+                raise SilverSessionError("Calendar did not cover every source date")
             for row in gaps.itertuples(index=False):
                 issues.append({
                     "asset_id": asset_id, "provider_symbol": symbol,
@@ -179,6 +188,10 @@ def prepare_session_candidate(
     out["session_quality_status"] = np.where(critical, "quarantined", "review_required")
     if calendar_id and not (critical.any() or missing_timezone.any() or calendar_issue_count):
         out["session_quality_status"] = "internally_validated"
+    if "previous_expected_session_missing" not in out:
+        out["previous_expected_session_missing"] = pd.Series(pd.NA, index=out.index, dtype="boolean")
+    if "is_expected_session" not in out:
+        out["is_expected_session"] = pd.Series(pd.NA, index=out.index, dtype="boolean")
     out["source_row_number"] = np.arange(len(out), dtype="int64")
     out = out.reset_index(drop=True)
     findings = pd.DataFrame(
@@ -193,6 +206,7 @@ def prepare_session_candidate(
         "invalid_ohlc_rows": int(bad_ohlc.sum()),
         "negative_volume_rows": int(bad_volume.sum()),
         "calendar_issue_rows": calendar_issue_count,
+        "missing_prior_expected_session_rows": int(out["previous_expected_session_missing"].fillna(False).sum()),
         "calendar_mapped": bool(calendar_id),
         "issue_rows": len(findings),
         "quarantined_rows": int(critical.sum()),

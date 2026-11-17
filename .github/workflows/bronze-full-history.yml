@@ -8,12 +8,14 @@ on:
       - "data/universe/*.csv"
       - "src/alpha_edge/universe/universe.py"
       - "src/alpha_edge/market/snapshot_bronze_universe.py"
+      - "src/alpha_edge/market/silver_financial_evidence_v3.py"
       - "src/alpha_edge/market/calendar_registry_v3.py"
       - "src/alpha_edge/market/build_silver_sessions_v3.py"
       - "src/alpha_edge/market/ingest_bronze_incremental.py"
       - "src/alpha_edge/market/ingest_bronze_full_history.py"
       - "tests/unit/test_universe_enrich_currency_preservation.py"
       - "tests/unit/test_snapshot_bronze_universe.py"
+      - "tests/unit/test_silver_financial_evidence_v3.py"
       - "tests/unit/test_calendar_registry_v3.py"
       - "tests/unit/test_build_silver_sessions_v3.py"
       - "tests/unit/test_ingest_bronze_incremental.py"
@@ -51,9 +53,9 @@ jobs:
       - name: Install dependencies
         run: poetry install --no-interaction --no-ansi
       - name: Test S3-only Bronze ingestion
-        run: poetry run pytest -q tests/unit/test_ingest_bronze_full_history.py tests/unit/test_ingest_bronze_yahoo_v2.py tests/unit/test_universe_enrich_currency_preservation.py tests/unit/test_snapshot_bronze_universe.py tests/unit/test_ingest_bronze_incremental.py tests/unit/test_build_silver_sessions_v3.py tests/unit/test_calendar_registry_v3.py
+        run: poetry run pytest -q tests/unit/test_ingest_bronze_full_history.py tests/unit/test_ingest_bronze_yahoo_v2.py tests/unit/test_universe_enrich_currency_preservation.py tests/unit/test_snapshot_bronze_universe.py tests/unit/test_ingest_bronze_incremental.py tests/unit/test_build_silver_sessions_v3.py tests/unit/test_calendar_registry_v3.py tests/unit/test_silver_financial_evidence_v3.py
       - name: Lint and format
         run: |
-          poetry run ruff check --no-fix src/alpha_edge/market/ingest_bronze_full_history.py tests/unit/test_ingest_bronze_full_history.py src/alpha_edge/universe/universe.py tests/unit/test_universe_enrich_currency_preservation.py src/alpha_edge/market/snapshot_bronze_universe.py tests/unit/test_snapshot_bronze_universe.py src/alpha_edge/market/ingest_bronze_incremental.py tests/unit/test_ingest_bronze_incremental.py src/alpha_edge/market/build_silver_sessions_v3.py tests/unit/test_build_silver_sessions_v3.py src/alpha_edge/market/calendar_registry_v3.py tests/unit/test_calendar_registry_v3.py
-          poetry run ruff format --diff src/alpha_edge/market/ingest_bronze_full_history.py tests/unit/test_ingest_bronze_full_history.py src/alpha_edge/universe/universe.py tests/unit/test_universe_enrich_currency_preservation.py src/alpha_edge/market/snapshot_bronze_universe.py tests/unit/test_snapshot_bronze_universe.py src/alpha_edge/market/ingest_bronze_incremental.py tests/unit/test_ingest_bronze_incremental.py src/alpha_edge/market/build_silver_sessions_v3.py tests/unit/test_build_silver_sessions_v3.py src/alpha_edge/market/calendar_registry_v3.py tests/unit/test_calendar_registry_v3.py
-          poetry run ruff format --check src/alpha_edge/market/ingest_bronze_full_history.py tests/unit/test_ingest_bronze_full_history.py src/alpha_edge/universe/universe.py tests/unit/test_universe_enrich_currency_preservation.py src/alpha_edge/market/snapshot_bronze_universe.py tests/unit/test_snapshot_bronze_universe.py src/alpha_edge/market/ingest_bronze_incremental.py tests/unit/test_ingest_bronze_incremental.py src/alpha_edge/market/build_silver_sessions_v3.py tests/unit/test_build_silver_sessions_v3.py src/alpha_edge/market/calendar_registry_v3.py tests/unit/test_calendar_registry_v3.py
+          poetry run ruff check --no-fix src/alpha_edge/market/ingest_bronze_full_history.py tests/unit/test_ingest_bronze_full_history.py src/alpha_edge/universe/universe.py tests/unit/test_universe_enrich_currency_preservation.py src/alpha_edge/market/snapshot_bronze_universe.py tests/unit/test_snapshot_bronze_universe.py src/alpha_edge/market/ingest_bronze_incremental.py tests/unit/test_ingest_bronze_incremental.py src/alpha_edge/market/build_silver_sessions_v3.py tests/unit/test_build_silver_sessions_v3.py src/alpha_edge/market/calendar_registry_v3.py tests/unit/test_calendar_registry_v3.py src/alpha_edge/market/silver_financial_evidence_v3.py tests/unit/test_silver_financial_evidence_v3.py
+          poetry run ruff format --diff src/alpha_edge/market/ingest_bronze_full_history.py tests/unit/test_ingest_bronze_full_history.py src/alpha_edge/universe/universe.py tests/unit/test_universe_enrich_currency_preservation.py src/alpha_edge/market/snapshot_bronze_universe.py tests/unit/test_snapshot_bronze_universe.py src/alpha_edge/market/ingest_bronze_incremental.py tests/unit/test_ingest_bronze_incremental.py src/alpha_edge/market/build_silver_sessions_v3.py tests/unit/test_build_silver_sessions_v3.py src/alpha_edge/market/calendar_registry_v3.py tests/unit/test_calendar_registry_v3.py src/alpha_edge/market/silver_financial_evidence_v3.py tests/unit/test_silver_financial_evidence_v3.py
+          poetry run ruff format --check src/alpha_edge/market/ingest_bronze_full_history.py tests/unit/test_ingest_bronze_full_history.py src/alpha_edge/universe/universe.py tests/unit/test_universe_enrich_currency_preservation.py src/alpha_edge/market/snapshot_bronze_universe.py tests/unit/test_snapshot_bronze_universe.py src/alpha_edge/market/ingest_bronze_incremental.py tests/unit/test_ingest_bronze_incremental.py src/alpha_edge/market/build_silver_sessions_v3.py tests/unit/test_build_silver_sessions_v3.py src/alpha_edge/market/calendar_registry_v3.py tests/unit/test_calendar_registry_v3.py src/alpha_edge/market/silver_financial_evidence_v3.py tests/unit/test_silver_financial_evidence_v3.py

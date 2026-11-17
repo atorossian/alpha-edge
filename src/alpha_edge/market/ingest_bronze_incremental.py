@@ -51,12 +51,19 @@ def _put_immutable(s3: Any, bucket: str, key: str, payload: bytes, content_type:
         raise BronzeIngestError(f"Refusing incremental S3 write outside {INCREMENTAL_ROOT}: {key}")
     try:
         s3.put_object(
-            Bucket=bucket, Key=key, Body=payload, ContentType=content_type,
-            Metadata={"sha256": _digest(payload)}, IfNoneMatch="*",
+            Bucket=bucket,
+            Key=key,
+            Body=payload,
+            ContentType=content_type,
+            Metadata={"sha256": _digest(payload)},
+            IfNoneMatch="*",
         )
     except ClientError as exc:
         if exc.response.get("Error", {}).get("Code") not in {
-            "PreconditionFailed", "412", "ConditionalRequestConflict", "409",
+            "PreconditionFailed",
+            "412",
+            "ConditionalRequestConflict",
+            "409",
         }:
             raise
         if _read(s3, bucket, key) != payload:
@@ -67,8 +74,7 @@ def _asset_prefix(run_id: str, asset_id: str) -> str:
     return f"{INCREMENTAL_ROOT}/runs/{run_id}/assets/{_digest(asset_id.encode('utf-8'))}"
 
 
-def _incremental_commit(s3: Any, bucket: str, run_id: str, record: dict,
-                        *, verify_hash: bool = False) -> dict | None:
+def _incremental_commit(s3: Any, bucket: str, run_id: str, record: dict, *, verify_hash: bool = False) -> dict | None:
     prefix = _asset_prefix(run_id, record["asset_id"])
     blob = _get_optional(s3, bucket, prefix + "/manifest.json")
     if blob is None:
@@ -136,8 +142,7 @@ def _find_parent(s3: Any, bucket: str, parent_run_id: str, record: dict) -> tupl
     raise BronzeIngestError(f"No committed Bronze parent for {record['asset_id']}")
 
 
-def _window(parent_manifest: dict, *, end: str, overlap_days: int,
-            max_staleness_days: int) -> tuple[str, str]:
+def _window(parent_manifest: dict, *, end: str, overlap_days: int, max_staleness_days: int) -> tuple[str, str]:
     session = parent_manifest.get("validation", {}).get("last_session")
     try:
         last = date.fromisoformat(str(session))
@@ -154,8 +159,9 @@ def _window(parent_manifest: dict, *, end: str, overlap_days: int,
     return (last - timedelta(days=overlap_days)).isoformat(), last.isoformat()
 
 
-def _audit(s3: Any, bucket: str, run_id: str, status: str, *,
-           record: dict | None = None, details: dict | None = None) -> None:
+def _audit(
+    s3: Any, bucket: str, run_id: str, status: str, *, record: dict | None = None, details: dict | None = None
+) -> None:
     stamp = datetime.now(timezone.utc)
     key = f"{INCREMENTAL_ROOT}/runs/{run_id}/audit/dt={stamp:%Y-%m-%d}/{stamp:%H%M%S}-{uuid.uuid4().hex}.json"
     payload = {
@@ -172,18 +178,33 @@ def _audit(s3: Any, bucket: str, run_id: str, status: str, *,
     _put_immutable(s3, bucket, key, _json_bytes(payload), "application/json")
 
 
-def _acquire(s3: Any, bucket: str, record: dict, *, run_id: str, start: str,
-             end: str, baseline_session: str, baseline_run_id: str,
-             retry_count: int, retry_delay: float, sleep: Callable[[float], None],
-             ticker_factory: Callable | None) -> dict:
+def _acquire(
+    s3: Any,
+    bucket: str,
+    record: dict,
+    *,
+    run_id: str,
+    start: str,
+    end: str,
+    baseline_session: str,
+    baseline_run_id: str,
+    retry_count: int,
+    retry_delay: float,
+    sleep: Callable[[float], None],
+    ticker_factory: Callable | None,
+) -> dict:
     failure = None
     for attempt in range(retry_count + 1):
         try:
             bars, provenance = acquire_yahoo_bars(
-                record["asset_id"], record["yahoo_ticker"],
-                start=start, end=end, batch_id=run_id,
+                record["asset_id"],
+                record["yahoo_ticker"],
+                start=start,
+                end=end,
+                batch_id=run_id,
                 currency_hint=record["currency_hint"],
-                full_history=False, ticker_factory=ticker_factory,
+                full_history=False,
+                ticker_factory=ticker_factory,
             )
             validation = _check_bars(bars, record)
             sessions = bars["session_date"].astype(str)
@@ -203,12 +224,14 @@ def _acquire(s3: Any, bucket: str, record: dict, *, run_id: str, start: str,
             _put_immutable(s3, bucket, data_key, payload, "application/vnd.apache.parquet")
             manifest = {
                 "schema": SCHEMA_ASSET,
-                "run_id": run_id, "asset_id": record["asset_id"],
+                "run_id": run_id,
+                "asset_id": record["asset_id"],
                 "broker_ticker": record["ticker"],
                 "provider_symbol": record["yahoo_ticker"],
                 "status": "committed",
                 "mode": "incremental",
-                "start_inclusive": start, "end_exclusive": end,
+                "start_inclusive": start,
+                "end_exclusive": end,
                 "baseline_session": baseline_session,
                 "baseline_run_id": baseline_run_id,
                 "overlap_is_raw_revision_evidence": True,
@@ -225,19 +248,28 @@ def _acquire(s3: Any, bucket: str, record: dict, *, run_id: str, start: str,
         except Exception as exc:
             failure = exc
             if attempt < retry_count:
-                sleep(retry_delay * (2 ** attempt))
-    raise BronzeIngestError(
-        f"{record['asset_id']} ({record['yahoo_ticker']}): {type(failure).__name__}: {failure}"
-    )
+                sleep(retry_delay * (2**attempt))
+    raise BronzeIngestError(f"{record['asset_id']} ({record['yahoo_ticker']}): {type(failure).__name__}: {failure}")
 
 
-def ingest(s3: Any, bucket: str, *, fingerprint: str, run_id: str,
-           parent_run_id: str, end: str, overlap_days: int = 10,
-           max_staleness_days: int = 60, only: list[str] | None = None,
-           execute: bool = False, retry_count: int = 2,
-           pause_seconds: float = 0.5, progress_every: int = 10,
-           ticker_factory: Callable | None = None,
-           sleep: Callable[[float], None] = time.sleep) -> dict:
+def ingest(
+    s3: Any,
+    bucket: str,
+    *,
+    fingerprint: str,
+    run_id: str,
+    parent_run_id: str,
+    end: str,
+    overlap_days: int = 10,
+    max_staleness_days: int = 60,
+    only: list[str] | None = None,
+    execute: bool = False,
+    retry_count: int = 2,
+    pause_seconds: float = 0.5,
+    progress_every: int = 10,
+    ticker_factory: Callable | None = None,
+    sleep: Callable[[float], None] = time.sleep,
+) -> dict:
     """Acquire only bounded Yahoo windows; no 'period=max' code path."""
     if not SAFE_RUN.fullmatch(run_id) or not SAFE_RUN.fullmatch(parent_run_id) or run_id == parent_run_id:
         raise BronzeIngestError("Invalid or identical run and parent-run IDs")
@@ -250,7 +282,9 @@ def ingest(s3: Any, bucket: str, *, fingerprint: str, run_id: str,
     all_assets, source = load_universe(s3, bucket, fingerprint)
     if only:
         wanted = {x.strip() for x in only}
-        selection = [a for a in all_assets if a["asset_id"] in wanted or a["ticker"] in wanted or a["yahoo_ticker"] in wanted]
+        selection = [
+            a for a in all_assets if a["asset_id"] in wanted or a["ticker"] in wanted or a["yahoo_ticker"] in wanted
+        ]
         matched = {x for a in selection for x in (a["asset_id"], a["ticker"], a["yahoo_ticker"])}
         if wanted - matched:
             raise BronzeIngestError(f"Unknown or excluded asset selector: {sorted(wanted - matched)}")
@@ -260,14 +294,22 @@ def ingest(s3: Any, bucket: str, *, fingerprint: str, run_id: str,
     else:
         selection = all_assets
     config = {
-        "schema": SCHEMA_RUN, "run_id": run_id, "parent_run_id": parent_run_id,
-        "source_fingerprint": fingerprint, "source_git_commit": source["source_git_commit"],
-        "end_exclusive": end, "overlap_days": overlap_days,
+        "schema": SCHEMA_RUN,
+        "run_id": run_id,
+        "parent_run_id": parent_run_id,
+        "source_fingerprint": fingerprint,
+        "source_git_commit": source["source_git_commit"],
+        "end_exclusive": end,
+        "overlap_days": overlap_days,
         "max_staleness_days": max_staleness_days,
         "requested_asset_ids": [a["asset_id"] for a in selection],
         "provider_parameters": {
-            "provider": "yahoo_finance", "interval": "1d",
-            "mode": "date_range", "auto_adjust": False, "actions": True, "repair": False,
+            "provider": "yahoo_finance",
+            "interval": "1d",
+            "mode": "date_range",
+            "auto_adjust": False,
+            "actions": True,
+            "repair": False,
         },
     }
     key = f"{INCREMENTAL_ROOT}/runs/{run_id}/run.json"
@@ -279,9 +321,13 @@ def ingest(s3: Any, bucket: str, *, fingerprint: str, run_id: str,
         _put_immutable(s3, bucket, key, _json_bytes(config), "application/json")
     if not execute:
         return {
-            "state": "dry_run", "selected": len(selection), "writes": 0,
-            "parent_run_id": parent_run_id, "end_exclusive": end,
-            "overlap_days": overlap_days, "source_fingerprint": fingerprint,
+            "state": "dry_run",
+            "selected": len(selection),
+            "writes": 0,
+            "parent_run_id": parent_run_id,
+            "end_exclusive": end,
+            "overlap_days": overlap_days,
+            "source_fingerprint": fingerprint,
         }
 
     ok, skipped, failed = [], [], []
@@ -303,27 +349,39 @@ def ingest(s3: Any, bucket: str, *, fingerprint: str, run_id: str,
             else:
                 base, base_run = _find_parent(s3, bucket, parent_run_id, record)
                 start, last_session = _window(
-                    base, end=end, overlap_days=overlap_days,
+                    base,
+                    end=end,
+                    overlap_days=overlap_days,
                     max_staleness_days=max_staleness_days,
                 )
                 manifest = _acquire(
-                    s3, bucket, record, run_id=run_id, start=start,
-                    end=end, baseline_session=last_session,
-                    baseline_run_id=base_run, retry_count=retry_count,
-                    retry_delay=2.0, ticker_factory=ticker_factory, sleep=sleep,
+                    s3,
+                    bucket,
+                    record,
+                    run_id=run_id,
+                    start=start,
+                    end=end,
+                    baseline_session=last_session,
+                    baseline_run_id=base_run,
+                    retry_count=retry_count,
+                    retry_delay=2.0,
+                    ticker_factory=ticker_factory,
+                    sleep=sleep,
                 )
-                ok.append({
-                    "asset_id": record["asset_id"],
-                    "start_inclusive": start,
-                    "baseline_session": last_session,
-                    **manifest["validation"],
-                })
-                _audit(s3, bucket, run_id, "success", record=record, details={
-                    "start": start, "baseline_session": last_session,
-                    "baseline_run_id": base_run, "data_key": manifest["data"]["key"],
-                    "rows": manifest["validation"]["rows"],
-                    "new_rows": manifest["validation"]["new_rows_since_baseline"],
-                })
+                ok.append(
+                    {
+                        "asset_id": record["asset_id"],
+                        "start_inclusive": start,
+                        "baseline_session": last_session,
+                        **manifest["validation"],
+                    }
+                )
+                _audit(
+                    s3,
+                    bucket,
+                    run_id,
+                    "success",
+                    record=record,
         except (KeyboardInterrupt, SystemExit):
             _audit(s3, bucket, run_id, "interrupted", record=record)
             raise

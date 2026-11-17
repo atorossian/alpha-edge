@@ -131,8 +131,6 @@ def test_silver_reads_pinned_registry_mapping_and_keeps_proposal_status(snapshot
     registry, version = calendars.make_registry(s3, BUCKET, fingerprint)
     calendars.publish(s3, BUCKET, registry=registry, version=version, execute=True)
 
-    captured = []
-
     def fake_complete(s3, bucket, *, run_id, record, verify_hash):
         return None
 

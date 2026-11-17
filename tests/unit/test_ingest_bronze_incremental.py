@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import json
+from datetime import datetime, timezone
 
 import boto3
 import pandas as pd
@@ -13,6 +14,17 @@ from moto import mock_aws
 from alpha_edge.market import ingest_bronze_full_history as full
 from alpha_edge.market import ingest_bronze_incremental as inc
 from alpha_edge.market.ingest_bronze_full_history import BronzeIngestError
+
+
+@pytest.fixture(autouse=True)
+def frozen_utc_clock(monkeypatch):
+    """Future end-exclusive test dates must not depend on CI's actual date."""
+    class TestClock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return datetime(2026, 11, 20, tzinfo=timezone.utc).astimezone(tz or timezone.utc)
+
+    monkeypatch.setattr(inc, "datetime", TestClock)
 
 
 BUCKET = "alpha-edge-algo"

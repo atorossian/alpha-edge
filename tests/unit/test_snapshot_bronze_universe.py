@@ -17,16 +17,36 @@ from alpha_edge.market.ingest_bronze_full_history import (
     _digest,
     _json_bytes,
 )
-from tests.unit.test_ingest_bronze_full_history import _sources
+
 
 
 BUCKET = "alpha-edge-algo"
 COMMIT = "a" * 40
 
 
+def _csv(rows):
+    import csv
+
+    output = io.StringIO(newline="")
+    writer = csv.DictWriter(output, fieldnames=list(rows[0]))
+    writer.writeheader()
+    writer.writerows(rows)
+    return output.getvalue().encode("utf-8")
+
+
 @pytest.fixture
 def sources():
-    return _sources()
+    return {
+        "universe.csv": _csv([
+            {"asset_id": "EQH001", "row_id": "id-spy", "ticker": "SPY", "yahoo_ticker": "SPY", "include": "1", "currency": "USD"},
+            {"asset_id": "EQH002", "row_id": "id-excluded", "ticker": "OLD", "yahoo_ticker": "OLD", "include": "0", "currency": "USD"},
+            {"asset_id": "EQH003", "row_id": "id-fx", "ticker": "USD-CNY", "yahoo_ticker": "CNY=X", "include": "1", "currency": "CNY"},
+        ]),
+        "universe_overrides.csv": _csv([{"target_row_id": "id-fx", "ticker": "USD-CNY", "yahoo_ticker": "CNY=X", "lock_yahoo_ticker": "1"}]),
+        "asset_excluded.csv": _csv([{"target_row_id": "id-excluded", "ticker": "OLD", "reason": "retired"}]),
+        "ingest_force_refresh.csv": _csv([{"ticker": "SPY"}]),
+        "universe_manual_additions.csv": _csv([{"ticker": "USD-CNY", "yahoo_ticker": "CNY=X", "lock_yahoo_ticker": "1"}]),
+    }
 
 
 @pytest.fixture
@@ -64,7 +84,7 @@ def test_snapshot_is_immutable_and_readback_compatible_with_ingestion(s3, source
         fingerprint=fingerprint, execute=True,
     )
     assert first["readback_verified"]
-    assert first["included"] == 4
+    assert first["included"] == 2
     assert first["excluded"] == 1
     for name in SOURCE_NAMES:
         entry = s3.get_object(Bucket=BUCKET, Key=f"{SNAPSHOT_ROOT}/{fingerprint}/{name}")

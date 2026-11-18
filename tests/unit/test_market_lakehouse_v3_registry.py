@@ -16,6 +16,7 @@ from alpha_edge.market.lakehouse_v3.registry_v3 import (
     load_active,
     read_registry,
     registry_key,
+    resolve_source_fingerprint,
     stage_registry,
     validate_registry,
 )
@@ -244,9 +245,13 @@ def test_configuration_activation_requires_complete_sources_and_never_approves_p
         assert preview["market_prices_approved"] is False
         with pytest.raises(LakehouseError):
             load_active(s3, "alpha-edge-algo")
+        with pytest.raises(LakehouseError, match="Cannot resolve the active universe"):
+            resolve_source_fingerprint(s3, "alpha-edge-algo")
+        assert resolve_source_fingerprint(s3, "alpha-edge-algo", "a" * 64) == "a" * 64
         activated = activate_registry(s3, "alpha-edge-algo", **options, execute=True)
         assert activated["writes"] == 1
         data, pointer = load_active(s3, "alpha-edge-algo")
+        assert resolve_source_fingerprint(s3, "alpha-edge-algo") == data["source_fingerprint"]
         assert data["summary"]["included"] == 4
         assert pointer["market_prices_approved"] is False
         assert activated["blocked"] == 2

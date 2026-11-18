@@ -29,6 +29,7 @@ import pandas as pd
 from botocore.exceptions import ClientError
 
 from alpha_edge.market.ingest_bronze_yahoo_v2 import acquire_yahoo_bars
+from alpha_edge.market.lakehouse_v3.registry_v3 import resolve_source_fingerprint
 from alpha_edge.market.lakehouse_v3.storage import LakehouseError, parquet_bytes, put_immutable
 
 DEFAULT_BUCKET = "alpha-edge-algo"
@@ -748,7 +749,7 @@ def main() -> None:
         p = sub.add_parser(name)
         p.add_argument("--bucket", default=DEFAULT_BUCKET)
         p.add_argument("--region", default=DEFAULT_REGION)
-        p.add_argument("--source-fingerprint", required=True, help="Five-file S3 snapshot SHA256")
+        p.add_argument("--source-fingerprint", help="Override the active S3 universe with a pinned snapshot SHA256")
         p.add_argument("--run-id", required=True)
         p.add_argument("--only", default="", help="Comma-separated pilot selectors; omit for ALL included assets")
         if name == "ingest":
@@ -761,6 +762,7 @@ def main() -> None:
             p.add_argument("--verbose-yahoo", action="store_true", help="Show raw yfinance diagnostics")
     args = parser.parse_args()
     s3 = boto3.client("s3", region_name=args.region)
+    fingerprint = resolve_source_fingerprint(s3, args.bucket, args.source_fingerprint)
     selectors = [x.strip() for x in args.only.split(",") if x.strip()] or None
     if args.command == "ingest":
         if not args.verbose_yahoo:
@@ -771,7 +773,7 @@ def main() -> None:
         output = ingest(
             s3,
             args.bucket,
-            fingerprint=args.source_fingerprint,
+            fingerprint=fingerprint,
             run_id=args.run_id,
             end=args.end,
             execute=args.execute,
@@ -785,7 +787,7 @@ def main() -> None:
         output = verify(
             s3,
             args.bucket,
-            fingerprint=args.source_fingerprint,
+            fingerprint=fingerprint,
             run_id=args.run_id,
             only=selectors,
         )

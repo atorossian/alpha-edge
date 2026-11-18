@@ -175,12 +175,16 @@ publication.
 
 **Observed mapping coverage from the pinned 2,032-asset source snapshot (pre-approval):** the first registry scan identified 2,023 proposed and 9 unresolved mappings. Two of the nine were confirmed metadata edge cases—not unsupported calendars: `HYPE-USD` has an explicit `24/7` calendar but empty `quoteType`, and `USD-BRL` has an explicit `FOREX` calendar with `asset_class=fx_pair`. The resolver now checks the explicit calendar and source asset class instead of requiring complete Yahoo quote-type metadata. This gives an *expected* 2,025 proposed / 7 unresolved proposals, subject to the actual registry dry run. The remaining unresolved asset tickers are `COP`, `DB1`, `DDS`, `IBOC`, `KMB`, `CFR`, `ET`. Their exchange metadata (`HAM`, `MUN`, `TEX`, or empty) is not automatically mapped. Do not infer their calendars from ticker symbols or mark mappings approved. A proposed mapping is not a calendar-quality pass.
 
-**Registry dry run (reads only S3; no writes):**
+**Registry dry run against the active AEA-91 universe (read-only):**
+
+The calendar builder, Bronze full-history CLI and Silver session CLI default
+to the snapshot in the active S3 registry. Use `--source-fingerprint` for
+historical replays and to verify an earlier run after the active registry has
+changed. Use the same fingerprint throughout a multi-step run. The Silver
+session builder rejects a Bronze run pinned to a different snapshot.
 
 ```bash
-poetry run python -m alpha_edge.market.calendar_registry_v3 \
-  --bucket alpha-edge-algo \
-  --source-fingerprint 87fc22f9c87353b9b3b5c69d816ee18bb2699c2aec501aa8e6be10cedf421179
+poetry run python -m alpha_edge.market.calendar_registry_v3 --bucket alpha-edge-algo
 ```
 
 Inspect the reported `proposed` and `unresolved` counts and representative

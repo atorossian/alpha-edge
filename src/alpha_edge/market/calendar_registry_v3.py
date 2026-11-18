@@ -24,6 +24,7 @@ from alpha_edge.market.ingest_bronze_full_history import (
     _source_records,
     load_universe,
 )
+from alpha_edge.market.lakehouse_v3.registry_v3 import resolve_source_fingerprint
 from alpha_edge.market.lakehouse_v3.storage import LakehouseError, put_immutable
 
 REGISTRY_ROOT = "market/lake_v3/config/calendar_registries/v1"
@@ -144,6 +145,7 @@ def publish(s3: Any, bucket: str, *, registry: dict, version: str, execute: bool
     key = _path(version)
     report = {
         "registry_version": version,
+        "source_fingerprint": registry["source_fingerprint"],
         "s3_uri": f"s3://{bucket}/{key}",
         "counts": registry["counts"],
         "executed": execute,
@@ -178,11 +180,12 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Version immutable S3 calendar mapping proposals")
     parser.add_argument("--bucket", default=DEFAULT_BUCKET)
     parser.add_argument("--region", default=DEFAULT_REGION)
-    parser.add_argument("--source-fingerprint", required=True)
+    parser.add_argument("--source-fingerprint", help="Override the active S3 universe with a pinned snapshot SHA256")
     parser.add_argument("--execute", action="store_true")
     args = parser.parse_args()
     s3 = boto3.client("s3", region_name=args.region)
-    mapping, version = make_registry(s3, args.bucket, args.source_fingerprint)
+    fingerprint = resolve_source_fingerprint(s3, args.bucket, args.source_fingerprint)
+    mapping, version = make_registry(s3, args.bucket, fingerprint)
     print(json.dumps(publish(s3, args.bucket, registry=mapping, version=version, execute=args.execute), indent=2))
 
 

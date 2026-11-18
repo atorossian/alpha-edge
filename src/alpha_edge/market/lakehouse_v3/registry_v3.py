@@ -221,7 +221,11 @@ def build_registry(files: dict[str, bytes]) -> dict:
         if not candidates:
             raise LakehouseError(f"universe_manual_additions.csv: not materialized {x['ticker']}")
         matched = [r for r in candidates if r["yahoo_ticker"] == x["yahoo_ticker"]]
-        if len(matched) == 1:
+        if x.get("target_row_id"):
+            r = _resolve(x, by_id, by_ticker, "universe_manual_additions.csv")
+            if r["ticker"] != x["ticker"]:
+                raise LakehouseError(f"Manual addition ticker disagrees with target row: {x['target_row_id']}")
+        elif len(matched) == 1:
             r = matched[0]
         elif len(candidates) == 1:
             r = candidates[0]

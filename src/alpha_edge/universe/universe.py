@@ -269,11 +269,30 @@ def enrich_universe_csv(
     _assert_unique_key_or_raise(meta_df, ticker_col, context="meta_df")
     meta_df = meta_df.set_index(ticker_col)
 
-    overlap = [c for c in meta_df.columns if c in df.columns]
-    if overlap:
-        df = df.drop(columns=overlap)
+    # Enrichment often targets only a subset of the universe. Dropping
+    # overlapping columns from the ENTIRE frame would wipe metadata (including
+    # currency) on every untouched row. An incomplete Yahoo response must
+    # also not erase previously verified values for the refreshed row.
+    out = df.set_index(ticker_col)
+    for col in meta_df.columns:
+        updated = meta_df[col].reindex(out.index)
+        present = updated.notna() & updated.astype(str).str.strip().ne("")
+        if col not in out.columns:
+            out[col] = pd.Series(index=out.index, dtype="object")
+        out[col] = updated.where(present, out[col])
+    out = out.reset_index()
 
-    out = df.set_index(ticker_col).join(meta_df, how="left").reset_index()
+    # Yahoo currency metadata is not always available for FX pairs. For
+    # USD/XXX quoted by Yahoo as XXX=X, the price unit is unambiguously XXX.
+    # This is a symbol/quote convention, not a conversion of market prices.
+    if {"ticker", "yahoo_ticker", "asset_class", "currency"}.issubset(out.columns):
+        labels = out["ticker"].fillna("").astype(str).str.upper()
+        quotes = labels.str.extract(r"^USD-([A-Z]{3})$", expand=False)
+        yahoo_symbols = out["yahoo_ticker"].fillna("").astype(str).str.upper()
+        fx_class = out["asset_class"].fillna("").astype(str).str.lower().isin({"fx", "fx_pair"})
+        matches = fx_class & quotes.notna() & yahoo_symbols.eq(quotes + "=X")
+        out.loc[matches, "currency"] = quotes.loc[matches]
+
     _assert_unique_key_or_raise(out, ticker_col, context="output")
 
     Path(out_csv).parent.mkdir(parents=True, exist_ok=True)
@@ -480,12 +499,13 @@ def resolve_ticker_strict(
 
         # Strong matching identity is required before a home-market preference
         # can outrank a cross-listing with a slightly different name score.
-        if best is None or (
-            score >= 0.75 and best_score >= 0.75
-            and is_home_listing and not best_home
-        ) or (
-            is_home_listing == best_home
-            and (score > best_score or (abs(score - best_score) < 1e-12 and rank < best_rank))
+        if (
+            best is None
+            or (score >= 0.75 and best_score >= 0.75 and is_home_listing and not best_home)
+            or (
+                is_home_listing == best_home
+                and (score > best_score or (abs(score - best_score) < 1e-12 and rank < best_rank))
+            )
         ):
             best = cand
             best_score = score

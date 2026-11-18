@@ -157,6 +157,48 @@ def _metadata(ticker: Any) -> dict:
     return result
 
 
+class _YahooMemoryCache:
+    """Implement the lookup/store interface of the pinned Yahoo client."""
+
+    def __init__(self, *, cookies: bool = False):
+        self._values: dict[str, Any] = {}
+        self._cookies = cookies
+
+    def lookup(self, key: str) -> Any:
+        return self._values.get(key)
+
+    def store(self, key: str, value: Any) -> None:
+        if value is None:
+            self._values.pop(key, None)
+        else:
+            self._values[key] = {"cookie": value} if self._cookies else value
+
+
+_YAHOO_TIMEZONES = _YahooMemoryCache()
+_YAHOO_COOKIES = _YahooMemoryCache(cookies=True)
+
+
+def _yahoo_timezone_cache() -> _YahooMemoryCache:
+    return _YAHOO_TIMEZONES
+
+
+def _yahoo_cookie_cache() -> _YahooMemoryCache:
+    return _YAHOO_COOKIES
+
+
+def _default_yahoo_ticker(symbol: str) -> Any:
+    import yfinance as yf
+    from yfinance import cache
+
+    # yfinance 0.2.66 exposes a cache directory setting, but no memory backend.
+    # Its price and HTTP layers resolve these hooks from the shared cache module.
+    if yf.__version__ != "0.2.66":
+        raise RuntimeError("Verify the diskless Bronze cache adapter against this yfinance version")
+    cache.get_tz_cache = _yahoo_timezone_cache
+    cache.get_cookie_cache = _yahoo_cookie_cache
+    return yf.Ticker(symbol)
+
+
 def acquire_yahoo_bars(
     asset_id: str,
     symbol: str,
@@ -170,9 +212,7 @@ def acquire_yahoo_bars(
 ) -> tuple[pd.DataFrame, dict]:
     """Read single-symbol Yahoo history WITHOUT auto-adjust or repair."""
     if ticker_factory is None:
-        import yfinance as yf
-
-        ticker_factory = yf.Ticker
+        ticker_factory = _default_yahoo_ticker
     ticker = ticker_factory(symbol)
     meta = _metadata(ticker)
     provider_currency = str(meta.get("currency") or "").strip()
@@ -229,9 +269,7 @@ def acquire_yahoo_fx_quote(
 ) -> tuple[pd.DataFrame, dict]:
     """Preserve Yahoo FX quotes, not normalized USD-per-currency rates."""
     if ticker_factory is None:
-        import yfinance as yf
-
-        ticker_factory = yf.Ticker
+        ticker_factory = _default_yahoo_ticker
     if not symbol.upper().endswith("=X"):
         raise ValueError("FX ticker must be a Yahoo =X quote")
     query = {"period": "max", "end": end} if full_history else {"start": start, "end": end}

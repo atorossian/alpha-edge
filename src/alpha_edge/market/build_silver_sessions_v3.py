@@ -32,6 +32,7 @@ from alpha_edge.market.ingest_bronze_full_history import (
     _read,
     load_universe,
 )
+from alpha_edge.market.lakehouse_v3.registry_v3 import resolve_source_fingerprint
 from alpha_edge.market.lakehouse_v3.storage import LakehouseError, parquet_bytes, put_immutable
 from alpha_edge.market.standardize_bronze_v2 import audit_asset_sessions
 
@@ -450,7 +451,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="S3-only Silver v3 session/date QA candidate pilot")
     parser.add_argument("--bucket", default=DEFAULT_BUCKET)
     parser.add_argument("--region", default=DEFAULT_REGION)
-    parser.add_argument("--source-fingerprint", required=True)
+    parser.add_argument("--source-fingerprint", help="Override the active S3 universe with a pinned snapshot SHA256")
     parser.add_argument("--bronze-run-id", required=True)
     parser.add_argument("--silver-run-id", required=True)
     parser.add_argument("--only", required=True, help="Comma-separated pilot selectors")
@@ -459,10 +460,11 @@ def main() -> None:
     parser.add_argument("--execute", action="store_true", help="Write candidate outputs to S3")
     args = parser.parse_args()
     s3 = boto3.client("s3", region_name=args.region)
+    fingerprint = resolve_source_fingerprint(s3, args.bucket, args.source_fingerprint)
     result = build(
         s3,
         args.bucket,
-        source_fingerprint=args.source_fingerprint,
+        source_fingerprint=fingerprint,
         bronze_run_id=args.bronze_run_id,
         silver_run_id=args.silver_run_id,
         only=[x.strip() for x in args.only.split(",") if x.strip()],

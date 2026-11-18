@@ -159,3 +159,4 @@ FB5F6F7AE7CEFFCA,USD-BRL,BRL=X,1,US Dollar Brazilian Real,Yahoo USD/BRL quote sy
 3D20B0C5C5F2AFF5,USD-JPY,JPY=X,1,US Dollar Japanese Yen,Yahoo USD/JPY quote symbol JPY=X; quote currency JPY
 0085B9556A5FA7F7,DB1,DB1.DE,1,Deutsche Boerse AG,Use Xetra for all new acquisitions; retain old Munich Bronze only as provenance
 A9CAA1775869EBE9,INBR32,INBR34.SA,1,"Inter & Co, Inc.",Successor BDR began trading 2026-10-19; retain old source history and validate successor coverage before downstream use
+4642989A7E0C8649,AUD-USD,AUDUSD=X,1,AUD/USD,Use Yahoo AUD/USD spot FX; AUD-USD resolves to Aussie Digital USD

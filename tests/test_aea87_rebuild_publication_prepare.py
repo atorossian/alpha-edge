@@ -83,6 +83,7 @@ def test_hae_legacy_price_fields_are_derived_exactly_from_usd_candidate():
             "close_adjusted_usd": [32.0],
             "close_usd": [33.0],
             "adj_close_usd": [32.0],
+            "volume": [1000],
         }
     )
     out = align_verified_metadata(source, active, "ohlcv_usd", provider_symbol="HAE", provider_currency="USD")

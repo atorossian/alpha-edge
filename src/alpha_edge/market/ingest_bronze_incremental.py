@@ -22,7 +22,6 @@ from typing import Any, Callable
 
 import boto3
 import pandas as pd
-from botocore.exceptions import ClientError
 
 from alpha_edge.market.ingest_bronze_full_history import (
     BRONZE_ROOT,
@@ -40,6 +39,7 @@ from alpha_edge.market.ingest_bronze_full_history import (
     load_universe,
 )
 from alpha_edge.market.ingest_bronze_yahoo_v2 import acquire_yahoo_bars
+from alpha_edge.market.lakehouse_v3.storage import LakehouseError, parquet_bytes, put_immutable
 
 INCREMENTAL_ROOT = "market/lake_v3/bronze/incremental"
 SCHEMA_RUN = "alpha_edge_bronze_incremental_run_v1"
@@ -47,27 +47,10 @@ SCHEMA_ASSET = "alpha_edge_bronze_incremental_asset_v1"
 
 
 def _put_immutable(s3: Any, bucket: str, key: str, payload: bytes, content_type: str) -> None:
-    if not key.startswith(INCREMENTAL_ROOT + "/"):
-        raise BronzeIngestError(f"Refusing incremental S3 write outside {INCREMENTAL_ROOT}: {key}")
     try:
-        s3.put_object(
-            Bucket=bucket,
-            Key=key,
-            Body=payload,
-            ContentType=content_type,
-            Metadata={"sha256": _digest(payload)},
-            IfNoneMatch="*",
-        )
-    except ClientError as exc:
-        if exc.response.get("Error", {}).get("Code") not in {
-            "PreconditionFailed",
-            "412",
-            "ConditionalRequestConflict",
-            "409",
-        }:
-            raise
-        if _read(s3, bucket, key) != payload:
-            raise BronzeIngestError(f"Immutable incremental S3 collision: {key}") from exc
+        put_immutable(s3, bucket, key, payload, content_type=content_type, scope=INCREMENTAL_ROOT)
+    except LakehouseError as exc:
+        raise BronzeIngestError(str(exc)) from exc
 
 
 def _asset_prefix(run_id: str, asset_id: str) -> str:
@@ -215,9 +198,7 @@ def _acquire(
                     f"{record['asset_id']}: Yahoo response lacks last committed "
                     f"session {baseline_session} in required overlap"
                 )
-            buf = io.BytesIO()
-            bars.to_parquet(buf, engine="pyarrow", compression="snappy", index=False)
-            payload = buf.getvalue()
+            payload = parquet_bytes(bars)
             prefix = _asset_prefix(run_id, record["asset_id"])
             sha = _digest(payload)
             data_key = f"{prefix}/objects/{sha}.parquet"

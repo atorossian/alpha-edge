@@ -20,6 +20,7 @@ import boto3
 import numpy as np
 import pandas as pd
 
+from alpha_edge.market.calendar_registry_v3 import load_registry
 from alpha_edge.market.ingest_bronze_full_history import (
     DEFAULT_BUCKET,
     DEFAULT_REGION,
@@ -31,7 +32,7 @@ from alpha_edge.market.ingest_bronze_full_history import (
     _read,
     load_universe,
 )
-from alpha_edge.market.calendar_registry_v3 import load_registry
+from alpha_edge.market.lakehouse_v3.storage import LakehouseError, parquet_bytes, put_immutable
 from alpha_edge.market.standardize_bronze_v2 import audit_asset_sessions
 
 SILVER_ROOT = "market/lake_v3/silver/session_candidates"
@@ -45,27 +46,10 @@ class SilverSessionError(RuntimeError):
 
 
 def _put(s3: Any, bucket: str, key: str, data: bytes, content_type: str) -> None:
-    """Append-only S3 publication; no overwrites or writes to Bronze."""
-    if not key.startswith(SILVER_ROOT + "/"):
-        raise SilverSessionError("Refusing writes outside Silver session-candidate prefix")
-    # Bronze helper enforces a different namespace; keep its immutability
-    # semantics but give Silver a distinct explicit S3 namespace.
-    from botocore.exceptions import ClientError
-
     try:
-        s3.put_object(
-            Bucket=bucket,
-            Key=key,
-            Body=data,
-            ContentType=content_type,
-            Metadata={"sha256": _digest(data)},
-            IfNoneMatch="*",
-        )
-    except ClientError as exc:
-        if exc.response.get("Error", {}).get("Code") not in {"PreconditionFailed", "412"}:
-            raise
-        if _read(s3, bucket, key) != data:
-            raise SilverSessionError(f"Existing Silver object has different bytes: {key}") from exc
+        put_immutable(s3, bucket, key, data, content_type=content_type, scope=SILVER_ROOT)
+    except LakehouseError as exc:
+        raise SilverSessionError(str(exc)) from exc
 
 
 def _day(value: Any) -> str | None:
@@ -428,9 +412,7 @@ def build(
             manifest["calendar_mapping_status"] = mapping["mapping_status"]
         if execute:
             for name, df in (("candidate", candidate), ("findings", issues)):
-                buffer = io.BytesIO()
-                df.to_parquet(buffer, engine="pyarrow", index=False)
-                data = buffer.getvalue()
+                data = parquet_bytes(df)
                 key = f"{prefix}/objects/{name}-{_digest(data)}.parquet"
                 _put(s3, bucket, key, data, "application/vnd.apache.parquet")
                 manifest["outputs"][name] = {"key": key, "sha256": _digest(data), "bytes": len(data)}

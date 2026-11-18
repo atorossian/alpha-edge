@@ -15,7 +15,6 @@ from pathlib import Path
 from typing import Any
 
 import boto3
-from botocore.exceptions import ClientError
 
 from alpha_edge.market.ingest_bronze_full_history import (
     DEFAULT_BUCKET,
@@ -28,6 +27,7 @@ from alpha_edge.market.ingest_bronze_full_history import (
     _source_records,
     load_universe,
 )
+from alpha_edge.market.lakehouse_v3.storage import LakehouseError, put_immutable
 
 _SHA40 = re.compile(r"^[a-f0-9]{40}$")
 
@@ -99,29 +99,17 @@ def publish_snapshot(
         key = f"{prefix}/{filename}"
         payload = blobs[filename]
         try:
-            s3.put_object(
-                Bucket=bucket,
-                Key=key,
-                Body=payload,
-                ContentType="text/csv",
-                IfNoneMatch="*",
-                Metadata={"sha256": _digest(payload), "source-git-commit": commit},
+            put_immutable(
+                s3,
+                bucket,
+                key,
+                payload,
+                content_type="text/csv",
+                scope=SNAPSHOT_ROOT,
+                metadata={"source-git-commit": commit},
             )
-        except ClientError as exc:
-            if exc.response.get("Error", {}).get("Code") not in {
-                "PreconditionFailed",
-                "412",
-                "ConditionalRequestConflict",
-                "409",
-            }:
-                raise
-            previous = s3.get_object(Bucket=bucket, Key=key)
-            if (
-                previous["Body"].read() != payload
-                or previous.get("Metadata", {}).get("source-git-commit") != commit
-                or previous.get("Metadata", {}).get("sha256") != _digest(payload)
-            ):
-                raise BronzeIngestError(f"Existing snapshot entry is incompatible: {key}") from exc
+        except LakehouseError as exc:
+            raise BronzeIngestError(f"Existing snapshot entry is incompatible or failed readback: {key}") from exc
     included, meta = load_universe(s3, bucket, fingerprint)
     result.update(
         {

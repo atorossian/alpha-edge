@@ -14,7 +14,6 @@ from typing import Any
 
 import boto3
 import pandas as pd
-from botocore.exceptions import ClientError
 
 from alpha_edge.market.ingest_bronze_full_history import (
     BRONZE_ROOT,
@@ -28,6 +27,7 @@ from alpha_edge.market.ingest_bronze_full_history import (
     _read,
     load_universe,
 )
+from alpha_edge.market.lakehouse_v3.storage import LakehouseError, parquet_bytes, put_immutable
 from alpha_edge.market.silver_financial_evidence_v3 import (
     extract_source_actions,
     normalize_fx_candidate,
@@ -43,22 +43,10 @@ class SilverEvidenceError(ValueError):
 
 
 def _put(s3: Any, bucket: str, key: str, payload: bytes, content_type: str) -> None:
-    if not key.startswith(ROOT + "/"):
-        raise SilverEvidenceError("Refusing write outside Silver financial evidence")
     try:
-        s3.put_object(
-            Bucket=bucket,
-            Key=key,
-            Body=payload,
-            ContentType=content_type,
-            Metadata={"sha256": _digest(payload)},
-            IfNoneMatch="*",
-        )
-    except ClientError as exc:
-        if exc.response.get("Error", {}).get("Code") not in {"PreconditionFailed", "412"}:
-            raise
-        if _read(s3, bucket, key) != payload:
-            raise SilverEvidenceError(f"Immutable S3 financial evidence differs: {key}") from exc
+        put_immutable(s3, bucket, key, payload, content_type=content_type, scope=ROOT)
+    except LakehouseError as exc:
+        raise SilverEvidenceError(str(exc)) from exc
 
 
 def build(
@@ -153,9 +141,7 @@ def build(
         return result
     published = {}
     for name, data in outputs.items():
-        stream = io.BytesIO()
-        data.to_parquet(stream, index=False)
-        blob = stream.getvalue()
+        blob = parquet_bytes(data)
         key = f"{root}/objects/{name}-{_digest(blob)}.parquet"
         _put(s3, bucket, key, blob, "application/vnd.apache.parquet")
         published[name] = {

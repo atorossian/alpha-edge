@@ -29,6 +29,7 @@ import pandas as pd
 from botocore.exceptions import ClientError
 
 from alpha_edge.market.ingest_bronze_yahoo_v2 import acquire_yahoo_bars
+from alpha_edge.market.lakehouse_v3.storage import LakehouseError, parquet_bytes, put_immutable
 
 DEFAULT_BUCKET = "alpha-edge-algo"
 DEFAULT_REGION = "eu-west-1"
@@ -91,29 +92,10 @@ def _get_optional(s3: Any, bucket: str, key: str) -> bytes | None:
 
 
 def _put_immutable(s3: Any, bucket: str, key: str, payload: bytes, content_type: str) -> None:
-    """S3 conditional creation; only exact byte-identical retries are allowed."""
-    if not key.startswith(BRONZE_ROOT + "/"):
-        raise BronzeIngestError(f"Refusing S3 write outside dedicated Bronze prefix: {key}")
     try:
-        s3.put_object(
-            Bucket=bucket,
-            Key=key,
-            Body=payload,
-            ContentType=content_type,
-            Metadata={"sha256": _digest(payload)},
-            IfNoneMatch="*",
-        )
-    except ClientError as exc:
-        if exc.response.get("Error", {}).get("Code") not in {
-            "PreconditionFailed",
-            "412",
-            "ConditionalRequestConflict",
-            "409",
-        }:
-            raise
-        existing = _read(s3, bucket, key)
-        if existing != payload:
-            raise BronzeIngestError(f"Immutable S3 collision: {key}") from exc
+        put_immutable(s3, bucket, key, payload, content_type=content_type, scope=BRONZE_ROOT)
+    except LakehouseError as exc:
+        raise BronzeIngestError(str(exc)) from exc
 
 
 def _source_records(payload: bytes, filename: str) -> list[dict[str, str]]:
@@ -337,9 +319,7 @@ def _acquire_one(
                 full_history=True,
             )
             validation = _check_bars(bars, record)
-            buffer = io.BytesIO()
-            bars.to_parquet(buffer, engine="pyarrow", compression="snappy", index=False)
-            payload = buffer.getvalue()
+            payload = parquet_bytes(bars)
             prefix = _target_prefix(run_id, asset_id)
             sha = _digest(payload)
             data_key = f"{prefix}/objects/{sha}.parquet"

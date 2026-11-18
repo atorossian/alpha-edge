@@ -13,7 +13,6 @@ from collections import Counter
 from typing import Any
 
 import boto3
-from botocore.exceptions import ClientError
 
 from alpha_edge.market.ingest_bronze_full_history import (
     DEFAULT_BUCKET,
@@ -25,6 +24,7 @@ from alpha_edge.market.ingest_bronze_full_history import (
     _source_records,
     load_universe,
 )
+from alpha_edge.market.lakehouse_v3.storage import LakehouseError, put_immutable
 
 REGISTRY_ROOT = "market/lake_v3/config/calendar_registries/v1"
 SCHEMA = "alpha_edge_calendar_registry_v1"
@@ -152,21 +152,9 @@ def publish(s3: Any, bucket: str, *, registry: dict, version: str, execute: bool
     if not execute:
         return report
     try:
-        s3.put_object(
-            Bucket=bucket,
-            Key=key,
-            Body=payload,
-            ContentType="application/json",
-            Metadata={"sha256": version},
-            IfNoneMatch="*",
-        )
-    except ClientError as exc:
-        if exc.response.get("Error", {}).get("Code") not in {"PreconditionFailed", "412"}:
-            raise
-        if _read(s3, bucket, key) != payload:
-            raise CalendarRegistryError("Immutable calendar registry already differs") from exc
-    if _read(s3, bucket, key) != payload:
-        raise CalendarRegistryError("Registry S3 readback differs")
+        put_immutable(s3, bucket, key, payload, content_type="application/json", scope=REGISTRY_ROOT)
+    except LakehouseError as exc:
+        raise CalendarRegistryError(str(exc)) from exc
     report["readback_verified"] = True
     return report
 

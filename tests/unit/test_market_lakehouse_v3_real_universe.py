@@ -25,21 +25,30 @@ def test_full_current_universe_exactly_five_files_and_membership():
     validate_registry(doc)
     counts = doc["summary"]
     assert counts["universe_total"] == 2207
-    assert counts["included"] == 2032
-    assert counts["excluded"] == 175
-    assert counts["configured"] + counts["blocked"] == 2032
-    assert len(doc["assets"]) == 2032
-    assert len(doc["excluded"]) == 175
-    assert len({a["asset_id"] for a in doc["assets"]}) == 2032
-    assert len({a["yahoo_ticker"] for a in doc["assets"]}) == 2032
+    assert counts["included"] == 2029
+    assert counts["excluded"] == 178
+    assert counts["configured"] + counts["blocked"] == 2029
+    assert len(doc["assets"]) == 2029
+    assert len(doc["excluded"]) == 178
+    assert len({a["asset_id"] for a in doc["assets"]}) == 2029
+    assert len({a["yahoo_ticker"] for a in doc["assets"]}) == 2029
     assert doc["refresh_tickers"] == ["HYPE-USD"]
     by_ticker = {a["ticker"]: a for a in doc["assets"]}
     for ticker in ("SPY", "GLD", "BTC-USD", "RENT3", "TRAXIONA", "LOG", "REY", "EUR-USD"):
         assert ticker in by_ticker
     assert by_ticker["EUR-USD"]["yahoo_ticker"] == "EURUSD=X"
-    assert "manual_locked_yahoo_symbol_conflict" in by_ticker["EUR-USD"]["blockers"]
+    assert not by_ticker["EUR-USD"]["blockers"]
     for ticker in ("HYPE-USD", "KMB"):
-        assert "missing_or_invalid_quote_currency" in by_ticker[ticker]["blockers"]
+        assert by_ticker[ticker]["currency"] == "USD"
+        assert not by_ticker[ticker]["blockers"]
+    assert by_ticker["DB1"]["yahoo_ticker"] == "DB1.DE"
+    assert by_ticker["INBR32"]["yahoo_ticker"] == "INBR34.SA"
+    assert {a["yahoo_ticker"] for a in doc["assets"] if a["blockers"]} == {"COP.HM"}
+    assert {a["asset_id"] for a in doc["excluded"] if a["exclusion_reason"] == "historical_only"} == {
+        "EQH2dea64b7904460c4",
+        "EQH4113c94384740eeb",
+        "EQH50281759392ec254",
+    }
     for ticker, currency in {"USD-CNY": "CNY", "USD-BRL": "BRL", "USD-JPY": "JPY"}.items():
         assert by_ticker[ticker]["currency"] == currency
         assert "missing_or_invalid_quote_currency" not in by_ticker[ticker]["blockers"]

@@ -488,3 +488,90 @@ def test_current_universe_acquisition_and_fx_corrections_do_not_change_identity(
         assert manual[ticker]["yahoo_ticker"] == symbol
         assert manual[ticker]["lock_yahoo_ticker"] == "1"
     assert overrides["BKH"]["yahoo_ticker"] == "HZN"
+
+
+def test_provider_revision_preserves_original_bronze_version(s3_with_snapshot):
+    s3, fingerprint = s3_with_snapshot
+    calls = []
+    source = pd.DataFrame(
+        {
+            "Open": [100.0, 102.0],
+            "High": [104.0, 106.0],
+            "Low": [99.0, 101.0],
+            "Close": [101.0, 103.0],
+            "Adj Close": [50.0, 51.0],
+            "Volume": [20, 30],
+            "Dividends": [0.5, 0.0],
+            "Stock Splits": [0.0, 2.0],
+        },
+        index=pd.date_range("2026-10-01", periods=2, tz="America/New_York"),
+    )
+
+    class YahooTicker:
+        def __init__(self):
+            self.fast_info = {"currency": "USD", "exchange": "NYSE"}
+
+        def history(self, **kwargs):
+            calls.append(kwargs)
+            return source.copy()
+
+    def ingest(run_id, *, already_committed=0):
+        result = bronze.ingest(
+            s3,
+            BUCKET,
+            fingerprint=fingerprint,
+            run_id=run_id,
+            end="2026-10-03",
+            execute=True,
+            only=["SPY"],
+            retry_count=0,
+            pause_seconds=0,
+            ticker_factory=lambda _: YahooTicker(),
+        )
+        assert result["succeeded"] == 1 - already_committed
+        assert result["already_committed"] == already_committed
+
+    def read(run_id):
+        manifest_key = bronze._target_prefix(run_id, "EQH001") + "/manifest.json"
+        manifest_bytes = bronze._read(s3, BUCKET, manifest_key)
+        data = json.loads(manifest_bytes)["data"]
+        payload = bronze._read(s3, BUCKET, data["key"])
+        assert bronze._digest(payload) == data["sha256"]
+        return manifest_bytes, payload
+
+    ingest("provider-original")
+    original = read("provider-original")
+
+    source.loc[source.index[0], ["Close", "Adj Close"]] = [102.0, 50.5]
+    ingest("provider-original", already_committed=1)
+    assert len(calls) == 1
+    assert read("provider-original") == original
+
+    ingest("provider-revised")
+    revised = read("provider-revised")
+    assert read("provider-original") == original
+    expected_request = {
+        "period": "max",
+        "end": "2026-10-03",
+        "interval": "1d",
+        "auto_adjust": False,
+        "actions": True,
+        "repair": False,
+    }
+    assert calls == [expected_request, expected_request]
+    for (manifest_bytes, payload), expected_closes, expected_adjusted in (
+        (original, [101.0, 103.0], [50.0, 51.0]),
+        (revised, [102.0, 103.0], [50.5, 51.0]),
+    ):
+        manifest = json.loads(manifest_bytes)
+        assert manifest["provider_symbol"] == "SPY"
+        assert manifest["provenance"]["currency_metadata_source"] == "provider"
+        bars = pd.read_parquet(io.BytesIO(payload))
+        assert bars["close"].tolist() == expected_closes
+        assert bars["session_date"].tolist() == ["2026-10-01", "2026-10-02"]
+        assert bars["source_timestamp"].str.endswith("-04:00").all()
+        assert bars["currency_original"].eq("USD").all()
+        for column in ("open", "high", "low", "volume", "dividends"):
+            assert bars[column].tolist() == source[column.title()].tolist()
+        assert bars["stock_splits"].tolist() == [0.0, 2.0]
+        assert bars["adj_close"].tolist() == expected_adjusted

@@ -102,9 +102,15 @@ changes to keys, fields, price basis or timestamp meaning. Readers should
 reject unknown versions until they explicitly support them.
 
 The two CI workflows cover the integrated source guard and synthetic S3
-tests. Actual S3 readback and failure injection for the integrated code,
-resolution of the locked yfinance 0.2.66 timezone and cookie disk caches,
+tests. Actual S3 readback and failure injection for the integrated code
 and independent review of AWS write permissions are still required before AEA-90 acceptance.
+
+The shared Bronze Yahoo adapter replaces the locked yfinance 0.2.66 timezone
+and cookie cache hooks with process-memory caches before constructing a ticker.
+The change applies process-wide after the first default Bronze acquisition.
+The offline regression uses the default equity and FX ticker factory in a fresh
+process with an empty cache location. Revalidate the hooks before upgrading
+the locked client.
 
 Integration evidence for the combined PR #17/#18 code state:
 

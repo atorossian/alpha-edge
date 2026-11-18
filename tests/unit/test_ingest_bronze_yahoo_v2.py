@@ -1,6 +1,10 @@
 """Offline contract tests: Yahoo Bronze acquisition must preserve source evidence."""
 
+import os
+import subprocess
+import sys
 from pathlib import Path
+from textwrap import dedent
 
 import pandas as pd
 import pytest
@@ -209,3 +213,40 @@ def test_full_history_fx_uses_yahoo_period_max():
     assert "start" not in fake.calls[0]
     assert meta["full_history_requested"] is True
     assert len(quote) == 2
+
+
+def test_default_yahoo_acquisition_keeps_client_caches_off_disk(tmp_path):
+    script = dedent("""
+        from pathlib import Path
+        from unittest.mock import patch
+
+        import pandas as pd
+        import yfinance as yf
+        from yfinance import cache
+
+        from alpha_edge.market.ingest_bronze_yahoo_v2 import acquire_yahoo_bars, acquire_yahoo_fx_quote
+
+        def history(ticker, **kwargs):
+            assert ticker._get_ticker_tz(timeout=1) == "America/New_York"
+            cookies = cache.get_cookie_cache()
+            cookies.store("curlCffi", {"example": "fixture"})
+            assert cookies.lookup("curlCffi")["cookie"] == {"example": "fixture"}
+            return pd.DataFrame(
+                {"Open": [100.0], "High": [102.0], "Low": [99.0], "Close": [101.0], "Volume": [10]},
+                index=pd.DatetimeIndex(["2026-10-01"], tz="America/New_York"),
+            )
+
+        yf.set_tz_cache_location(str(Path.cwd() / "yahoo-cache"))
+        query = dict(start="2026-10-01", end="2026-10-02", batch_id="test_batch")
+        with (
+            patch.object(yf.Ticker, "history", history),
+            patch.object(yf.Ticker, "_fetch_ticker_tz", return_value="America/New_York"),
+            patch("alpha_edge.market.ingest_bronze_yahoo_v2._metadata", return_value={"currency": "USD"}),
+        ):
+            bars, _ = acquire_yahoo_bars("EQ123", "SPY", **query)
+            fx, _ = acquire_yahoo_fx_quote("JPY=X", **query)
+        assert bars["close"].tolist() == fx["quote_close"].tolist() == [101.0]
+        assert not list(Path.cwd().iterdir()), list(Path.cwd().iterdir())
+        """)
+    env = {**os.environ, "PYTHONPATH": str(Path(__file__).resolve().parents[2] / "src")}
+    subprocess.run([sys.executable, "-c", script], cwd=tmp_path, env=env, check=True)

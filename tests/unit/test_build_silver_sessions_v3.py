@@ -210,6 +210,26 @@ def test_expected_sessions_do_not_bridge_gaps_or_unexpected_bars():
     assert result["available_at_utc"].isna().all()
 
 
+def test_calendar_policy_preserves_review_and_applies_approved_session():
+    frame = raw_frame(("2026-10-02", "2026-10-03", "2026-10-05", "2026-10-07"))
+    exception = {"calendar_id": "NYSE", "session_date": "2026-10-03", "decision": "review"}
+    policy = {"exceptions": [exception]}
+    result, _, _ = silver.prepare_session_candidate(
+        frame, asset_id="EQH-SPY", symbol="SPY", calendar_id="NYSE", calendar_policy=policy
+    )
+    assert result.loc[1, "calendar_exception_review"]
+    assert result.loc[1, "session_quality_status"] == "review_required"
+    assert not result.loc[1, "close_eligible"]
+    assert not result.loc[2, "daily_return_eligible"]
+    exception["decision"] = "expected"
+    result, _, _ = silver.prepare_session_candidate(
+        frame, asset_id="EQH-SPY", symbol="SPY", calendar_id="NYSE", calendar_policy=policy
+    )
+    assert result["close_eligible"].tolist() == [True, True, True, True]
+    assert result["daily_return_eligible"].tolist() == [False, True, True, False]
+    assert pd.isna(result.loc[1, "scheduled_market_close_utc"])
+
+
 def test_close_correction_retains_original_and_restores_candidate_eligibility():
     frame = raw_frame()
     frame.loc[1, "close"] = 200.0

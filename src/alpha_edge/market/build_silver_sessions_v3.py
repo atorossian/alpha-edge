@@ -41,6 +41,7 @@ from alpha_edge.market.standardize_bronze_v2 import audit_asset_sessions
 SILVER_ROOT = "market/lake_v3/silver/session_candidates"
 SILVER_SCHEMA = "alpha_edge_silver_session_candidate_v2"
 CORRECTION_ROOT = f"{SILVER_ROOT}/corrections"
+CALENDAR_POLICY_ROOT = f"{SILVER_ROOT}/calendar_policies"
 ISO_DAY = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 OFFSET = re.compile(r"(?:Z|[+-]\d{2}:\d{2})$")
 
@@ -125,6 +126,7 @@ def prepare_session_candidate(
     symbol: str,
     calendar_id: str | None = None,
     close_correction: dict | None = None,
+    calendar_policy: dict | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame, dict]:
     """Preserve every source observation and emit explicit findings.
 
@@ -245,6 +247,8 @@ def prepare_session_candidate(
                     )
             except Exception as exc:
                 raise SilverSessionError(f"Unusable explicitly supplied calendar {calendar_id}: {exc}") from exc
+            if calendar_policy:
+                flags, gaps = apply_calendar_policy(flags, gaps, calendar_id, calendar_policy)
             out["calendar_session_status"] = "checked"
             flags = flags.copy()
             flags["exchange_session_date"] = flags["session_date"].dt.strftime("%Y-%m-%d")
@@ -284,8 +288,17 @@ def prepare_session_candidate(
             }
         )
     unexpected = out.get("is_expected_session", pd.Series(pd.NA, index=out.index)).eq(False).fillna(False)
-    critical = invalid_date | dup | bad_ohlc | bad_volume | unexpected
+    pending = set()
+    if calendar_policy:
+        pending = {
+            row["session_date"]
+            for row in calendar_policy["exceptions"]
+            if row["calendar_id"] == calendar_id and row["decision"] == "review"
+        }
+    review_calendar = unexpected & out["exchange_session_date"].isin(pending)
+    critical = invalid_date | dup | bad_ohlc | bad_volume | (unexpected & ~review_calendar)
     out["session_quality_status"] = np.where(critical, "quarantined", "review_required")
+    out["calendar_exception_review"] = review_calendar
     if calendar_id and not (critical.any() or missing_timezone.any() or calendar_issue_count):
         out["session_quality_status"] = "internally_validated"
     if "previous_expected_session_missing" not in out:
@@ -317,10 +330,18 @@ def prepare_session_candidate(
     out["volume_eligible"] = session_ok & np.isfinite(v) & v.ge(0)
     out["daily_return_eligible"] = False
     ordered = out.loc[expected].sort_values("exchange_session_date")
+    pending_dates = sorted(pd.to_datetime(out.loc[review_calendar, "exchange_session_date"]))
+    blocked = pd.Series(False, index=ordered.index)
+    if pending_dates:
+        current_dates = pd.to_datetime(ordered["exchange_session_date"])
+        previous_dates = current_dates.shift()
+        for day in pending_dates:
+            blocked |= previous_dates.lt(day) & current_dates.gt(day)
     out.loc[ordered.index, "daily_return_eligible"] = (
         ordered["close_eligible"]
         & ordered["close_eligible"].shift(fill_value=False)
         & ~ordered["previous_expected_session_missing"].fillna(True)
+        & ~blocked
     )
     out["available_at_utc"] = pd.Series(pd.NA, index=out.index, dtype="string")
     out["scheduled_market_close_utc"] = pd.Series(pd.NA, index=out.index, dtype="string")
@@ -356,6 +377,39 @@ def prepare_session_candidate(
     return out, findings, report
 
 
+def apply_calendar_policy(flags, gaps, calendar_id, policy):
+    """Apply approved date-specific rules; review entries leave expected dates intact."""
+    relevant = [row for row in policy["exceptions"] if row["calendar_id"] == calendar_id]
+    observed = set(pd.to_datetime(flags["session_date"]))
+    expected = set(pd.to_datetime(flags.loc[flags["is_expected_session"], "session_date"]))
+    expected.update(pd.to_datetime(gaps.loc[gaps["issue"].eq("missing_expected_session"), "session_date"]))
+    for row in relevant:
+        day = pd.Timestamp(row["session_date"])
+        if not min(observed) <= day <= max(observed):
+            continue
+        if row["decision"] == "expected":
+            expected.add(day)
+        elif row["decision"] == "closed":
+            expected.discard(day)
+    expected = sorted(expected)
+    preceding = {day: expected[index - 1] if index else None for index, day in enumerate(expected)}
+    flags = flags.copy()
+    flags["is_expected_session"] = flags["session_date"].isin(expected)
+    flags["previous_expected_session_missing"] = flags["session_date"].map(
+        lambda day: preceding.get(day) is not None and preceding[day] not in observed
+    )
+    asset_id, symbol = flags.iloc[0][["asset_id", "provider_symbol"]]
+    issues = [
+        (asset_id, symbol, day, issue, calendar_id)
+        for days, issue in (
+            (set(expected) - observed, "missing_expected_session"),
+            (observed - set(expected), "unexpected_session"),
+        )
+        for day in sorted(days)
+    ]
+    return flags, pd.DataFrame(issues, columns=["asset_id", "provider_symbol", "session_date", "issue", "calendar_id"])
+
+
 def _selection(assets: list[dict], selectors: list[str]) -> list[dict]:
     if not selectors:
         raise SilverSessionError("Pilot requires explicit --only selectors (no unrestricted full-universe Silver run)")
@@ -381,6 +435,7 @@ def build(
     calendar_id: str | None = None,
     registry_version: str | None = None,
     correction_version: str | None = None,
+    calendar_policy_version: str | None = None,
     execute: bool = False,
 ) -> dict:
     """Process only complete, cryptographically verified Bronze asset receipts."""
@@ -388,6 +443,28 @@ def build(
         raise SilverSessionError("Invalid run ID")
     assets, universe_meta = load_universe(s3, bucket, source_fingerprint)
     selected = _selection(assets, only)
+    calendar_policy = None
+    if calendar_policy_version:
+        if not re.fullmatch(r"[0-9a-f]{64}", calendar_policy_version):
+            raise SilverSessionError("Invalid calendar policy version")
+        raw_policy = _read(s3, bucket, f"{CALENDAR_POLICY_ROOT}/{calendar_policy_version}.json")
+        if _digest(raw_policy) != calendar_policy_version:
+            raise SilverSessionError("Calendar policy checksum mismatch")
+        calendar_policy = json.loads(raw_policy)
+        if calendar_policy.get("schema") != "alpha_edge_calendar_exception_policy_v1":
+            raise SilverSessionError("Unsupported calendar policy")
+        keys = set()
+        for entry in calendar_policy["exceptions"]:
+            key = (entry["calendar_id"], entry["session_date"])
+            if (
+                key in keys
+                or not _day(key[1])
+                or not entry.get("source_reference")
+                or entry["decision"] not in {"review", "expected", "closed"}
+                or (entry["decision"] != "review" and entry.get("approval") != "approved")
+            ):
+                raise SilverSessionError("Invalid or unapproved calendar exception")
+            keys.add(key)
     correction = None
     if correction_version:
         if not re.fullmatch(r"[0-9a-f]{64}", correction_version):
@@ -435,6 +512,8 @@ def build(
         run_config["registry_approval"] = "candidate_not_certified"
     if correction_version:
         run_config["correction_version"] = correction_version
+    if calendar_policy_version:
+        run_config["calendar_policy_version"] = calendar_policy_version
     root = f"{SILVER_ROOT}/runs/{silver_run_id}"
     existing = _get_optional(s3, bucket, root + "/run.json")
     if existing is not None and json.loads(existing) != run_config:
@@ -490,6 +569,7 @@ def build(
             symbol=asset["yahoo_ticker"],
             calendar_id=effective_calendar,
             close_correction=asset_correction,
+            calendar_policy=calendar_policy,
         )
         manifest = {
             "schema": SILVER_SCHEMA,
@@ -511,6 +591,8 @@ def build(
             manifest["calendar_mapping_status"] = mapping["mapping_status"]
         if asset_correction:
             manifest["correction_version"] = correction_version
+        if calendar_policy_version:
+            manifest["calendar_policy_version"] = calendar_policy_version
         if execute:
             for name, df in (("candidate", candidate), ("findings", issues)):
                 data = parquet_bytes(df)
@@ -558,6 +640,7 @@ def main() -> None:
     parser.add_argument("--calendar", default=None, help="Explicit calendar for one manual pilot")
     parser.add_argument("--registry-version", default=None, help="SHA256-pinned S3 calendar registry proposal")
     parser.add_argument("--correction-version", default=None, help="SHA256-pinned S3 close correction evidence")
+    parser.add_argument("--calendar-policy-version", default=None, help="SHA256-pinned S3 calendar exception policy")
     parser.add_argument("--execute", action="store_true", help="Write candidate outputs to S3")
     args = parser.parse_args()
     s3 = boto3.client("s3", region_name=args.region)
@@ -572,6 +655,7 @@ def main() -> None:
         calendar_id=args.calendar,
         registry_version=args.registry_version,
         correction_version=args.correction_version,
+        calendar_policy_version=args.calendar_policy_version,
         execute=args.execute,
     )
     print(json.dumps(result, indent=2, default=str))

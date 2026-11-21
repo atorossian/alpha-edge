@@ -5,12 +5,13 @@ from __future__ import annotations
 import argparse
 import io
 import json
+from pathlib import Path
 
 import boto3
 import numpy as np
 import pandas as pd
 
-from alpha_edge.market.build_silver_sessions_v3 import CORRECTION_ROOT, prepare_session_candidate
+from alpha_edge.market.build_silver_sessions_v3 import CALENDAR_POLICY_ROOT, CORRECTION_ROOT, prepare_session_candidate
 from alpha_edge.market.ingest_bronze_full_history import (
     DEFAULT_BUCKET,
     DEFAULT_REGION,
@@ -131,20 +132,96 @@ def compare_german_peers(db1, assets):
     dates = findings.loc[
         findings["issue"].isin(["missing_expected_session", "unexpected_session"]), ["session_date", "issue"]
     ].copy()
+    peers = {"DB1.DE": db1}
     for symbol in ("DBK.DE", "DTE.DE"):
         matches = [a for a in assets if a["yahoo_ticker"] == symbol]
         if len(matches) != 1:
             raise ValueError(f"Cannot uniquely resolve {symbol} in the pinned universe")
         peer = yahoo_history(symbol, matches[0]["asset_id"], "EUR")
+        peers[symbol] = peer
         dates[symbol] = dates["session_date"].isin(peer["session_date"])
     print("\nDB1 calendar findings — peer observation present")
     print(dates.to_string(index=False))
+    evidence = []
+    for symbol, frame in peers.items():
+        frame = frame.sort_values("session_date").copy()
+        frame["previous_close"] = frame["close"].shift()
+        frame["flat_ohlc"] = frame[FIELDS].nunique(axis=1).eq(1)
+        frame["same_as_previous_close"] = frame["close"].eq(frame["previous_close"])
+        sample = frame.loc[
+            frame["session_date"].isin(dates["session_date"]),
+            ["session_date", *FIELDS, "volume", "flat_ohlc", "same_as_previous_close"],
+        ]
+        print(f"\n{symbol}: observed exception prices")
+        print(sample.to_string(index=False))
+        evidence.extend(json.loads(sample.assign(provider_symbol=symbol).to_json(orient="records")))
+    return {
+        "schema": "alpha_edge_calendar_exception_policy_v1",
+        "exceptions": [
+            {
+                "calendar_id": "XETR",
+                "session_date": row.session_date,
+                "decision": "review",
+                "source_reference": "Yahoo DB1.DE, DBK.DE, DTE.DE; Deutsche Boerse calendar archive",
+                "finding": row.issue,
+            }
+            for row in dates.itertuples(index=False)
+        ],
+        "peer_presence": json.loads(dates.to_json(orient="records")),
+        "peer_observations": evidence,
+        "approval": "candidate_review_required",
+    }
+
+
+def compare_investing_csv(aud, payload):
+    external = pd.read_csv(io.BytesIO(payload), encoding="utf-8-sig")
+    external = external.rename(
+        columns={"Date": "session_date", "Price": "close", "Open": "open", "High": "high", "Low": "low"}
+    )
+    external["session_date"] = pd.to_datetime(external["session_date"], format="%m/%d/%Y").dt.strftime("%Y-%m-%d")
+    if external["session_date"].duplicated().any():
+        raise ValueError("Duplicate Investing.com dates")
+    prices = external[FIELDS].apply(pd.to_numeric, errors="coerce")
+    external["alternative_valid"] = (
+        np.isfinite(prices).all(axis=1)
+        & prices.gt(0).all(axis=1)
+        & prices["high"].ge(prices[["open", "low", "close"]].max(axis=1))
+        & prices["low"].le(prices[["open", "close"]].min(axis=1))
+    )
+    external[FIELDS] = prices
+    _, findings, _ = prepare_session_candidate(aud, asset_id=AUD, symbol="AUDUSD=X", calendar_id="YAHOO_FX_WEEKDAYS")
+    targets = findings.loc[
+        findings["issue"].isin(["inconsistent_raw_ohlc", "missing_expected_session"]), ["session_date", "issue"]
+    ]
+    compared = targets.merge(aud[["session_date", *FIELDS]], on="session_date", how="left", validate="one_to_one")
+    compared = compared.merge(
+        external[["session_date", *FIELDS, "alternative_valid"]],
+        on="session_date",
+        how="left",
+        suffixes=("_yahoo", "_investing"),
+        validate="one_to_one",
+    )
+    print("\nAUD/USD full exception comparison")
+    print(compared.to_string(index=False))
+    print(compared.groupby(["issue", "alternative_valid"], dropna=False).size().to_string())
+    return {
+        "schema": "alpha_edge_manual_fx_evidence_v1",
+        "asset_id": AUD,
+        "provider_symbol": "AUDUSD=X",
+        "source_reference": "Investing.com historical data supplied by user",
+        "observation_time_status": "unknown",
+        "approval": "candidate_review_required",
+        "source_csv_sha256": _digest(payload),
+        "comparison": json.loads(compared.to_json(orient="records")),
+    }
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--bucket", default=DEFAULT_BUCKET)
     parser.add_argument("--stage-db1-correction", action="store_true")
+    parser.add_argument("--investing-csv", type=Path)
+    parser.add_argument("--stage-exception-evidence", action="store_true")
     args = parser.parse_args()
     s3 = boto3.client("s3", region_name=DEFAULT_REGION)
     assets, _ = load_universe(s3, args.bucket, FINGERPRINT)
@@ -163,9 +240,39 @@ def main():
             scope=CORRECTION_ROOT,
         )
     print(json.dumps({"correction_version": version, "staged": args.stage_db1_correction}, indent=2))
-    aud, _ = read_bronze(s3, args.bucket, by_id[AUD])
+    aud, aud_receipt = read_bronze(s3, args.bucket, by_id[AUD])
+    if args.investing_csv:
+        payload = args.investing_csv.read_bytes()
+        fx_evidence = compare_investing_csv(aud, payload)
+        fx_evidence["source_fingerprint"] = FINGERPRINT
+        fx_evidence["source_data_sha256"] = aud_receipt["data"]["sha256"]
+        body = _json_bytes(fx_evidence)
+        if args.stage_exception_evidence:
+            key = f"{CORRECTION_ROOT}/evidence/{_digest(payload)}.csv"
+            put_immutable(s3, args.bucket, key, payload, content_type="text/csv", scope=CORRECTION_ROOT)
+            put_immutable(
+                s3,
+                args.bucket,
+                f"{CORRECTION_ROOT}/evidence/{_digest(body)}.json",
+                body,
+                content_type="application/json",
+                scope=CORRECTION_ROOT,
+            )
+        print(json.dumps({"fx_evidence_version": _digest(body), "staged": args.stage_exception_evidence}, indent=2))
     compare_fx(aud)
-    compare_german_peers(db1, assets)
+    policy = compare_german_peers(db1, assets)
+    body = _json_bytes(policy)
+    policy_version = _digest(body)
+    if args.stage_exception_evidence:
+        put_immutable(
+            s3,
+            args.bucket,
+            f"{CALENDAR_POLICY_ROOT}/{policy_version}.json",
+            body,
+            content_type="application/json",
+            scope=CALENDAR_POLICY_ROOT,
+        )
+    print(json.dumps({"calendar_policy_version": policy_version, "staged": args.stage_exception_evidence}, indent=2))
 
 
 if __name__ == "__main__":

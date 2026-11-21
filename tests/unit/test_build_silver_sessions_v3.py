@@ -206,7 +206,7 @@ def test_expected_sessions_do_not_bridge_gaps_or_unexpected_bars():
     frame = raw_frame(("2026-10-02", "2026-10-03", "2026-10-05", "2026-10-07"))
     result, _, _ = silver.prepare_session_candidate(frame, asset_id="EQH-SPY", symbol="SPY", calendar_id="NYSE")
     assert result["close_eligible"].tolist() == [True, False, True, True]
-    assert result["daily_return_eligible"].tolist() == [False, False, True, False]
+    assert result["daily_return_eligible"].tolist() == [False, False, False, False]
     assert result["available_at_utc"].isna().all()
 
 
@@ -228,6 +228,36 @@ def test_calendar_policy_preserves_review_and_applies_approved_session():
     assert result["close_eligible"].tolist() == [True, True, True, True]
     assert result["daily_return_eligible"].tolist() == [False, True, True, False]
     assert pd.isna(result.loc[1, "scheduled_market_close_utc"])
+
+
+@pytest.mark.parametrize("calendar", ["NYSE", "XETR", "XLON", "JPX"])
+def test_exchange_placeholder_rule_is_calendar_independent(calendar):
+    frame = raw_frame(("2026-10-02", "2026-10-03", "2026-10-05", "2026-10-06"))
+    frame.loc[1, ["open", "high", "low", "close"]] = frame.loc[0, "close"]
+    frame.loc[1, "volume"] = 0
+    result, findings, report = silver.prepare_session_candidate(
+        frame, asset_id="EQH-SPY", symbol="SPY", calendar_id=calendar
+    )
+    assert result["non_trading_placeholder"].tolist() == [False, True, False, False]
+    assert result["daily_return_eligible"].tolist() == [False, False, True, True]
+    assert report["non_trading_placeholder_rows"] == 1
+    assert "non_trading_placeholder" in set(findings["issue"])
+    pd.testing.assert_series_equal(result["close"], frame["close"])
+    frame.loc[1, "volume"] = 1
+    result, _, _ = silver.prepare_session_candidate(frame, asset_id="EQH-SPY", symbol="SPY", calendar_id=calendar)
+    assert result.loc[1, "calendar_exception_review"]
+    assert not result.loc[2, "daily_return_eligible"]
+
+
+@pytest.mark.parametrize("calendar,weekend_expected", [("YAHOO_FX_WEEKDAYS", False), ("CRYPTO_24_7", True)])
+def test_fx_and_crypto_zero_volume_is_not_exchange_placeholder(calendar, weekend_expected):
+    frame = raw_frame(("2026-10-02", "2026-10-03", "2026-10-04", "2026-10-05"))
+    frame.loc[1, ["open", "high", "low", "close"]] = frame.loc[0, "close"]
+    frame.loc[1, "volume"] = 0
+    result, _, _ = silver.prepare_session_candidate(frame, asset_id="EQH-SPY", symbol="SPY", calendar_id=calendar)
+    assert not result["non_trading_placeholder"].any()
+    assert bool(result.loc[1, "close_eligible"]) == weekend_expected
+    assert bool(result.loc[1, "calendar_exception_review"]) != weekend_expected
 
 
 def test_close_correction_retains_original_and_restores_candidate_eligibility():

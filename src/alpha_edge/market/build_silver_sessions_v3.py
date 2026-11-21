@@ -288,17 +288,46 @@ def prepare_session_candidate(
             }
         )
     unexpected = out.get("is_expected_session", pd.Series(pd.NA, index=out.index)).eq(False).fillna(False)
-    pending = set()
-    if calendar_policy:
-        pending = {
-            row["session_date"]
-            for row in calendar_policy["exceptions"]
-            if row["calendar_id"] == calendar_id and row["decision"] == "review"
-        }
-    review_calendar = unexpected & out["exchange_session_date"].isin(pending)
-    critical = invalid_date | dup | bad_ohlc | bad_volume | (unexpected & ~review_calendar)
+    # A closed exchange date plus a zero-volume, unchanged flat bar is evidence
+    # of a provider placeholder. FX and crypto have different volume/session
+    # conventions, so a zero-volume bar alone cannot establish that conclusion.
+    placeholder = pd.Series(False, index=out.index)
+    if unexpected.any() and calendar_id and calendar_id not in {"CRYPTO_24_7", "YAHOO_FX_WEEKDAYS"}:
+        chronological = out.sort_values("exchange_session_date")
+        scheduled = chronological["is_expected_session"].eq(True).fillna(False)
+        prior_dates = chronological["exchange_session_date"].where(scheduled).ffill().shift()
+        scheduled_rows = chronological.loc[scheduled]
+        valid_close = c.where(~bad_ohlc & ~missing_timezone)
+        scheduled_closes = pd.Series(
+            valid_close.loc[scheduled_rows.index].to_numpy(), index=scheduled_rows["exchange_session_date"]
+        )
+        prior_close = prior_dates.map(scheduled_closes)
+        placeholder = (
+            unexpected
+            & v.eq(0)
+            & o.eq(h)
+            & h.eq(low)
+            & low.eq(c)
+            & c.eq(prior_close.reindex(out.index))
+            & ~bad_ohlc
+            & ~missing_timezone
+        )
+    review_calendar = unexpected & ~placeholder
+    critical = invalid_date | dup | bad_ohlc | bad_volume | placeholder
     out["session_quality_status"] = np.where(critical, "quarantined", "review_required")
     out["calendar_exception_review"] = review_calendar
+    out["non_trading_placeholder"] = placeholder
+    for idx in out.index[placeholder]:
+        issues.append(
+            {
+                "asset_id": asset_id,
+                "provider_symbol": symbol,
+                "source_row": int(idx),
+                "session_date": out.at[idx, "exchange_session_date"],
+                "issue": "non_trading_placeholder",
+                "calendar_id": calendar_id,
+            }
+        )
     if calendar_id and not (critical.any() or missing_timezone.any() or calendar_issue_count):
         out["session_quality_status"] = "internally_validated"
     if "previous_expected_session_missing" not in out:
@@ -369,6 +398,8 @@ def prepare_session_candidate(
         "calendar_mapped": bool(calendar_id),
         "issue_rows": len(findings),
         "quarantined_rows": int(critical.sum()),
+        "non_trading_placeholder_rows": int(placeholder.sum()),
+        "calendar_exception_review_rows": int(review_calendar.sum()),
         "close_eligible_rows": int(out["close_eligible"].sum()),
         "ohlc_eligible_rows": int(out["ohlc_eligible"].sum()),
         "daily_return_eligible_rows": int(out["daily_return_eligible"].sum()),
@@ -503,6 +534,7 @@ def build(
         "source_git_commit": universe_meta["source_git_commit"],
         "calendar_library_version": version("pandas-market-calendars"),
         "exchange_calendars_version": version("exchange-calendars"),
+        "session_eligibility_policy": "exchange_placeholder_v1",
         "selected_asset_ids": [a["asset_id"] for a in selected],
         "calendar_id": calendar_id or "",
         "status": "candidate_only_not_certified",

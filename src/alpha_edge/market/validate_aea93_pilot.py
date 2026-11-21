@@ -216,14 +216,77 @@ def compare_investing_csv(aud, payload):
     }
 
 
+def approved_xetra_policy(policy):
+    """Promote the reviewed three-peer evidence, retaining observed source rows."""
+    if policy.get("schema") != "alpha_edge_calendar_exception_policy_v1":
+        raise ValueError("Invalid calendar policy schema")
+    peers = {"DB1.DE", "DBK.DE", "DTE.DE"}
+    expected_gaps = {"2011-10-03", "2012-10-03", "2013-10-03"}
+    records = policy["exceptions"]
+    if any(row["calendar_id"] != "XETR" or row["decision"] != "review" for row in records):
+        raise ValueError("Expected the original Xetra review policy")
+    closures = {row["session_date"] for row in records if row["finding"] == "unexpected_session"}
+    gaps = {row["session_date"] for row in records if row["finding"] == "missing_expected_session"}
+    if len(records) != 39 or len(closures) != 36 or gaps != expected_gaps:
+        raise ValueError("Peer investigation does not reconcile to 36 placeholders and three gaps")
+    observations = pd.DataFrame(policy["peer_observations"])
+    indexed = observations.set_index(["session_date", "provider_symbol"], verify_integrity=True)
+    if set(indexed.index) != {(day, peer) for day in closures for peer in peers}:
+        raise ValueError("Missing or additional peer observations")
+    if not (
+        indexed["volume"].eq(0)
+        & indexed[FIELDS].nunique(axis=1).eq(1)
+        & indexed["flat_ohlc"].eq(True)
+        & indexed["same_as_previous_close"].eq(True)
+    ).all():
+        raise ValueError("Unresolved non-placeholder peer observations")
+    presence = pd.DataFrame(policy["peer_presence"]).set_index("session_date", verify_integrity=True)
+    if not presence.loc[sorted(gaps), ["DBK.DE", "DTE.DE"]].eq(False).all().all():
+        raise ValueError("Missing session peer evidence differs")
+    return {
+        **policy,
+        "approval": "approved",
+        "approval_reference": "User approved the Xetra decisions conditional on an exchange-independent placeholder rule",
+        "exceptions": [
+            {**row, "decision": "closed" if row["session_date"] in closures else "expected", "approval": "approved"}
+            for row in records
+        ],
+    }
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--bucket", default=DEFAULT_BUCKET)
     parser.add_argument("--stage-db1-correction", action="store_true")
     parser.add_argument("--investing-csv", type=Path)
     parser.add_argument("--stage-exception-evidence", action="store_true")
+    parser.add_argument("--approve-calendar-policy-version")
     args = parser.parse_args()
     s3 = boto3.client("s3", region_name=DEFAULT_REGION)
+    if args.approve_calendar_policy_version:
+        version = args.approve_calendar_policy_version
+        if len(version) != 64 or any(c not in "0123456789abcdef" for c in version):
+            raise ValueError("Invalid calendar policy version")
+        evidence = _read(s3, args.bucket, f"{CALENDAR_POLICY_ROOT}/{version}.json")
+        if _digest(evidence) != version:
+            raise ValueError("Calendar policy evidence checksum mismatch")
+        approved = approved_xetra_policy(json.loads(evidence))
+        approved["review_policy_version"] = version
+        body = _json_bytes(approved)
+        approved_version = _digest(body)
+        if args.stage_exception_evidence:
+            put_immutable(
+                s3,
+                args.bucket,
+                f"{CALENDAR_POLICY_ROOT}/{approved_version}.json",
+                body,
+                content_type="application/json",
+                scope=CALENDAR_POLICY_ROOT,
+            )
+        print(
+            json.dumps({"calendar_policy_version": approved_version, "staged": args.stage_exception_evidence}, indent=2)
+        )
+        return
     assets, _ = load_universe(s3, args.bucket, FINGERPRINT)
     by_id = {asset["asset_id"]: asset for asset in assets}
     db1, receipt = read_bronze(s3, args.bucket, by_id[DB1])

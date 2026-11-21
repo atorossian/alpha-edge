@@ -10,9 +10,7 @@ import pandas as pd
 import pytest
 from moto import mock_aws
 
-from alpha_edge.market import build_silver_sessions_v3 as silver
-from alpha_edge.market import ingest_bronze_full_history as bronze
-
+from alpha_edge.market import build_silver_sessions_v3 as silver, ingest_bronze_full_history as bronze
 
 BUCKET = "alpha-edge-algo"
 BRONZE_RUN = "bronze-test-20261117"
@@ -200,6 +198,43 @@ def test_unusual_ohlc_is_flagged_not_rewritten():
     assert result.loc[1, "high"] == 1.0
     assert result.loc[1, "session_quality_status"] == "quarantined"
     assert "inconsistent_raw_ohlc" in set(issues["issue"])
+    assert result["close_eligible"].tolist() == [True, False, True]
+    assert result["daily_return_eligible"].tolist() == [False, False, False]
+
+
+def test_expected_sessions_do_not_bridge_gaps_or_unexpected_bars():
+    frame = raw_frame(("2026-10-02", "2026-10-03", "2026-10-05", "2026-10-07"))
+    result, _, _ = silver.prepare_session_candidate(frame, asset_id="EQH-SPY", symbol="SPY", calendar_id="NYSE")
+    assert result["close_eligible"].tolist() == [True, False, True, True]
+    assert result["daily_return_eligible"].tolist() == [False, False, True, False]
+    assert result["available_at_utc"].isna().all()
+
+
+def test_close_correction_retains_original_and_restores_candidate_eligibility():
+    frame = raw_frame()
+    frame.loc[1, "close"] = 200.0
+    correction = {
+        "asset_id": "EQH-SPY",
+        "provider_symbol": "SPY",
+        "currency_original": "USD",
+        "session_date": "2026-10-06",
+        "original_close": 200.0,
+        "corrected_close": float(frame.loc[0, "close"]),
+        "correction_id": "test-correction",
+    }
+    result, _, _ = silver.prepare_session_candidate(
+        frame, asset_id="EQH-SPY", symbol="SPY", calendar_id="NYSE", close_correction=correction
+    )
+    assert result.loc[1, "close"] == 200.0
+    assert result.loc[1, "effective_close"] == frame.loc[0, "close"]
+    assert result.loc[1, "close_correction_id"] == "test-correction"
+    assert result["daily_return_eligible"].tolist() == [False, True, True]
+    correction.update(kind="close_corroboration", corrected_close=200.0)
+    result, _, _ = silver.prepare_session_candidate(
+        frame, asset_id="EQH-SPY", symbol="SPY", calendar_id="NYSE", close_correction=correction
+    )
+    assert result.loc[1, "close_eligible"]
+    assert not result.loc[1, "ohlc_eligible"]
 
 
 def test_pinned_bronze_s3_dry_run_and_candidate_publication(s3):

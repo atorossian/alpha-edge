@@ -14,11 +14,13 @@ import json
 import re
 import uuid
 from datetime import date
+from importlib.metadata import version
 from typing import Any
 
 import boto3
 import numpy as np
 import pandas as pd
+import pandas_market_calendars as mcal
 
 from alpha_edge.market.calendar_registry_v3 import load_registry
 from alpha_edge.market.ingest_bronze_full_history import (
@@ -37,7 +39,8 @@ from alpha_edge.market.lakehouse_v3.storage import LakehouseError, parquet_bytes
 from alpha_edge.market.standardize_bronze_v2 import audit_asset_sessions
 
 SILVER_ROOT = "market/lake_v3/silver/session_candidates"
-SILVER_SCHEMA = "alpha_edge_silver_session_candidate_v1"
+SILVER_SCHEMA = "alpha_edge_silver_session_candidate_v2"
+CORRECTION_ROOT = f"{SILVER_ROOT}/corrections"
 ISO_DAY = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 OFFSET = re.compile(r"(?:Z|[+-]\d{2}:\d{2})$")
 
@@ -116,7 +119,12 @@ def _special_session_audit(bars: pd.DataFrame, calendar_id: str) -> tuple[pd.Dat
 
 
 def prepare_session_candidate(
-    bronze: pd.DataFrame, *, asset_id: str, symbol: str, calendar_id: str | None = None
+    bronze: pd.DataFrame,
+    *,
+    asset_id: str,
+    symbol: str,
+    calendar_id: str | None = None,
+    close_correction: dict | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame, dict]:
     """Preserve every source observation and emit explicit findings.
 
@@ -144,7 +152,7 @@ def prepare_session_candidate(
     if bronze.empty or not bronze["asset_id"].eq(asset_id).all() or not bronze["provider_symbol"].eq(symbol).all():
         raise SilverSessionError("Empty Bronze input or wrong canonical asset/provider identity")
 
-    out = bronze.copy(deep=True)
+    out = bronze.copy(deep=True).reset_index(drop=True)
     out["exchange_session_date"] = out["session_date"].map(_day)
     out["source_timestamp_utc"] = out["source_timestamp"].map(_instant)
     out["timestamp_semantics"] = "provider_daily_bar_label_not_verified_market_close"
@@ -158,6 +166,30 @@ def prepare_session_candidate(
     h = pd.to_numeric(out["high"], errors="coerce")
     low = pd.to_numeric(out["low"], errors="coerce")
     c = pd.to_numeric(out["close"], errors="coerce")
+    out["effective_close"] = c
+    out["close_correction_id"] = ""
+    if close_correction is not None:
+        if (
+            close_correction["asset_id"] != asset_id
+            or close_correction["provider_symbol"] != symbol
+            or not out["currency_original"].eq(close_correction["currency_original"]).all()
+        ):
+            raise SilverSessionError("Close correction identity mismatch")
+        mask = out["session_date"].eq(close_correction["session_date"])
+        if mask.sum() != 1 or not np.isclose(
+            c.loc[mask].iloc[0], close_correction["original_close"], rtol=0, atol=1e-5
+        ):
+            raise SilverSessionError("Close correction does not match the original observation")
+        replacement = float(close_correction["corrected_close"])
+        if not np.isfinite(replacement) or replacement <= 0:
+            raise SilverSessionError("Invalid corrected closing price")
+        if close_correction.get("kind") == "close_corroboration":
+            if not np.isclose(c.loc[mask].iloc[0], replacement, rtol=0, atol=1e-5):
+                raise SilverSessionError("Corroboration cannot change the closing price")
+        elif not low.loc[mask].iloc[0] <= replacement <= h.loc[mask].iloc[0]:
+            raise SilverSessionError("Corrected closing price is outside the reported range")
+        out.loc[mask, "effective_close"] = replacement
+        out.loc[mask, "close_correction_id"] = close_correction["correction_id"]
     v = pd.to_numeric(out["volume"], errors="coerce")
     # These are QA flags only: provider price values never change.
     bad_ohlc = (
@@ -251,7 +283,8 @@ def prepare_session_candidate(
                 "calendar_id": "",
             }
         )
-    critical = invalid_date | dup | bad_ohlc | bad_volume
+    unexpected = out.get("is_expected_session", pd.Series(pd.NA, index=out.index)).eq(False).fillna(False)
+    critical = invalid_date | dup | bad_ohlc | bad_volume | unexpected
     out["session_quality_status"] = np.where(critical, "quarantined", "review_required")
     if calendar_id and not (critical.any() or missing_timezone.any() or calendar_issue_count):
         out["session_quality_status"] = "internally_validated"
@@ -259,6 +292,44 @@ def prepare_session_candidate(
         out["previous_expected_session_missing"] = pd.Series(pd.NA, index=out.index, dtype="boolean")
     if "is_expected_session" not in out:
         out["is_expected_session"] = pd.Series(pd.NA, index=out.index, dtype="boolean")
+    # Eligibility is per field and conditional on a known, valid session.
+    # An inconsistent range does not establish which raw price is wrong.
+    expected = out["is_expected_session"].eq(True).fillna(False)
+    session_ok = expected & ~invalid_date & ~dup & ~missing_timezone
+    corrected = out["close_correction_id"].ne("")
+    effective_close = out["effective_close"]
+    valid_range = (
+        np.isfinite(o)
+        & np.isfinite(h)
+        & np.isfinite(low)
+        & np.isfinite(effective_close)
+        & o.gt(0)
+        & low.gt(0)
+        & effective_close.gt(0)
+        & h.ge(low)
+        & h.ge(o)
+        & h.ge(effective_close)
+        & low.le(o)
+        & low.le(effective_close)
+    )
+    out["close_eligible"] = session_ok & ((valid_range & ~bad_ohlc) | corrected)
+    out["ohlc_eligible"] = out["close_eligible"] & valid_range
+    out["volume_eligible"] = session_ok & np.isfinite(v) & v.ge(0)
+    out["daily_return_eligible"] = False
+    ordered = out.loc[expected].sort_values("exchange_session_date")
+    out.loc[ordered.index, "daily_return_eligible"] = (
+        ordered["close_eligible"]
+        & ordered["close_eligible"].shift(fill_value=False)
+        & ~ordered["previous_expected_session_missing"].fillna(True)
+    )
+    out["available_at_utc"] = pd.Series(pd.NA, index=out.index, dtype="string")
+    out["scheduled_market_close_utc"] = pd.Series(pd.NA, index=out.index, dtype="string")
+    if calendar_id and calendar_id not in {"CRYPTO_24_7", "YAHOO_FX_WEEKDAYS"} and expected.any():
+        dates = out.loc[expected, "exchange_session_date"]
+        schedule = mcal.get_calendar(calendar_id).schedule(start_date=dates.min(), end_date=dates.max())
+        closes = schedule["market_close"].map(lambda value: value.isoformat())
+        closes.index = closes.index.strftime("%Y-%m-%d")
+        out.loc[expected, "scheduled_market_close_utc"] = dates.map(closes)
     out["source_row_number"] = np.arange(len(out), dtype="int64")
     out = out.reset_index(drop=True)
     findings = pd.DataFrame(
@@ -277,6 +348,9 @@ def prepare_session_candidate(
         "calendar_mapped": bool(calendar_id),
         "issue_rows": len(findings),
         "quarantined_rows": int(critical.sum()),
+        "close_eligible_rows": int(out["close_eligible"].sum()),
+        "ohlc_eligible_rows": int(out["ohlc_eligible"].sum()),
+        "daily_return_eligible_rows": int(out["daily_return_eligible"].sum()),
         "production_eligible": False,
     }
     return out, findings, report
@@ -306,6 +380,7 @@ def build(
     only: list[str],
     calendar_id: str | None = None,
     registry_version: str | None = None,
+    correction_version: str | None = None,
     execute: bool = False,
 ) -> dict:
     """Process only complete, cryptographically verified Bronze asset receipts."""
@@ -313,6 +388,21 @@ def build(
         raise SilverSessionError("Invalid run ID")
     assets, universe_meta = load_universe(s3, bucket, source_fingerprint)
     selected = _selection(assets, only)
+    correction = None
+    if correction_version:
+        if not re.fullmatch(r"[0-9a-f]{64}", correction_version):
+            raise SilverSessionError("Invalid correction version")
+        raw_correction = _read(s3, bucket, f"{CORRECTION_ROOT}/{correction_version}.json")
+        if _digest(raw_correction) != correction_version:
+            raise SilverSessionError("Correction evidence checksum mismatch")
+        correction = json.loads(raw_correction)
+        if (
+            correction.get("schema") != "alpha_edge_silver_close_correction_v1"
+            or correction.get("source_fingerprint") != source_fingerprint
+            or correction.get("asset_id") not in {a["asset_id"] for a in selected}
+            or not correction.get("source_reference")
+        ):
+            raise SilverSessionError("Correction evidence is incompatible with selected inputs")
     if registry_version and calendar_id:
         raise SilverSessionError("Use either a registry version or explicit manual calendar, not both")
     registry_rows = {}
@@ -326,14 +416,16 @@ def build(
     source_config = json.loads(_read(s3, bucket, f"market/lake_v3/bronze/full_history/runs/{bronze_run_id}/run.json"))
     if source_config.get("source_fingerprint") != source_fingerprint:
         raise SilverSessionError("Bronze run's pinned source snapshot differs")
-    if not set(a["asset_id"] for a in selected).issubset(source_config["requested_asset_ids"]):
+    if not {a["asset_id"] for a in selected}.issubset(source_config["requested_asset_ids"]):
         raise SilverSessionError("Selected asset not in pinned Bronze run")
     run_config = {
-        "schema": "alpha_edge_silver_session_run_v1",
+        "schema": "alpha_edge_silver_session_run_v2",
         "silver_run_id": silver_run_id,
         "bronze_run_id": bronze_run_id,
         "source_fingerprint": source_fingerprint,
         "source_git_commit": universe_meta["source_git_commit"],
+        "calendar_library_version": version("pandas-market-calendars"),
+        "exchange_calendars_version": version("exchange-calendars"),
         "selected_asset_ids": [a["asset_id"] for a in selected],
         "calendar_id": calendar_id or "",
         "status": "candidate_only_not_certified",
@@ -341,6 +433,8 @@ def build(
     if registry_version:
         run_config["registry_version"] = registry_version
         run_config["registry_approval"] = "candidate_not_certified"
+    if correction_version:
+        run_config["correction_version"] = correction_version
     root = f"{SILVER_ROOT}/runs/{silver_run_id}"
     existing = _get_optional(s3, bucket, root + "/run.json")
     if existing is not None and json.loads(existing) != run_config:
@@ -365,6 +459,9 @@ def build(
             )
             continue
         prefix = f"{root}/assets/{_digest(asset['asset_id'].encode('utf-8'))}"
+        asset_correction = correction if correction and correction["asset_id"] == asset["asset_id"] else None
+        if asset_correction and asset_correction["source_data_sha256"] != receipt["data"]["sha256"]:
+            raise SilverSessionError("Correction evidence does not match the Bronze receipt")
         prior = _get_optional(s3, bucket, prefix + "/manifest.json")
         if prior is not None:
             manifest = json.loads(prior)
@@ -392,6 +489,7 @@ def build(
             asset_id=asset["asset_id"],
             symbol=asset["yahoo_ticker"],
             calendar_id=effective_calendar,
+            close_correction=asset_correction,
         )
         manifest = {
             "schema": SILVER_SCHEMA,
@@ -411,6 +509,8 @@ def build(
         if registry_version:
             manifest["registry_version"] = registry_version
             manifest["calendar_mapping_status"] = mapping["mapping_status"]
+        if asset_correction:
+            manifest["correction_version"] = correction_version
         if execute:
             for name, df in (("candidate", candidate), ("findings", issues)):
                 data = parquet_bytes(df)
@@ -457,6 +557,7 @@ def main() -> None:
     parser.add_argument("--only", required=True, help="Comma-separated pilot selectors")
     parser.add_argument("--calendar", default=None, help="Explicit calendar for one manual pilot")
     parser.add_argument("--registry-version", default=None, help="SHA256-pinned S3 calendar registry proposal")
+    parser.add_argument("--correction-version", default=None, help="SHA256-pinned S3 close correction evidence")
     parser.add_argument("--execute", action="store_true", help="Write candidate outputs to S3")
     args = parser.parse_args()
     s3 = boto3.client("s3", region_name=args.region)
@@ -470,6 +571,7 @@ def main() -> None:
         only=[x.strip() for x in args.only.split(",") if x.strip()],
         calendar_id=args.calendar,
         registry_version=args.registry_version,
+        correction_version=args.correction_version,
         execute=args.execute,
     )
     print(json.dumps(result, indent=2, default=str))

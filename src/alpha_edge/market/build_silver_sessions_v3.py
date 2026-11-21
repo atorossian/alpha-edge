@@ -12,6 +12,7 @@ import argparse
 import io
 import json
 import re
+import sys
 import uuid
 from datetime import date
 from importlib.metadata import version
@@ -27,6 +28,7 @@ from alpha_edge.market.ingest_bronze_full_history import (
     DEFAULT_BUCKET,
     DEFAULT_REGION,
     SAFE_RUN,
+    BronzeIngestError,
     _completed,
     _digest,
     _get_optional,
@@ -35,7 +37,7 @@ from alpha_edge.market.ingest_bronze_full_history import (
     load_universe,
 )
 from alpha_edge.market.lakehouse_v3.registry_v3 import resolve_source_fingerprint
-from alpha_edge.market.lakehouse_v3.storage import LakehouseError, parquet_bytes, put_immutable
+from alpha_edge.market.lakehouse_v3.storage import LakehouseError, parquet_bytes, put_immutable, verified_bytes
 from alpha_edge.market.standardize_bronze_v2 import audit_asset_sessions
 
 SILVER_ROOT = "market/lake_v3/silver/session_candidates"
@@ -127,6 +129,7 @@ def prepare_session_candidate(
     calendar_id: str | None = None,
     close_correction: dict | None = None,
     calendar_policy: dict | None = None,
+    end_exclusive: str | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame, dict]:
     """Preserve every source observation and emit explicit findings.
 
@@ -380,6 +383,37 @@ def prepare_session_candidate(
         closes = schedule["market_close"].map(lambda value: value.isoformat())
         closes.index = closes.index.strftime("%Y-%m-%d")
         out.loc[expected, "scheduled_market_close_utc"] = dates.map(closes)
+    trailing_missing = 0
+    if end_exclusive and calendar_id and expected.any():
+        last = pd.Timestamp(out.loc[expected, "exchange_session_date"].max())
+        cutoff = pd.Timestamp(end_exclusive)
+        start, end = last + pd.Timedelta(days=1), cutoff - pd.Timedelta(days=1)
+        if start <= end:
+            if calendar_id in {"CRYPTO_24_7", "YAHOO_FX_WEEKDAYS"}:
+                days = pd.date_range(start, end, freq="D" if calendar_id == "CRYPTO_24_7" else "B")
+            else:
+                days = mcal.get_calendar(calendar_id).valid_days(start_date=start, end_date=end).tz_localize(None)
+            missing_dates = {day.date().isoformat() for day in days}
+            for entry in (calendar_policy or {}).get("exceptions", []):
+                day = entry["session_date"]
+                if entry["calendar_id"] != calendar_id or not start <= pd.Timestamp(day) <= end:
+                    continue
+                if entry["decision"] == "closed":
+                    missing_dates.discard(day)
+                elif entry["decision"] == "expected":
+                    missing_dates.add(day)
+            trailing_missing = len(missing_dates)
+            for day in sorted(missing_dates):
+                issues.append(
+                    {
+                        "asset_id": asset_id,
+                        "provider_symbol": symbol,
+                        "source_row": None,
+                        "session_date": day,
+                        "issue": "missing_endpoint_session",
+                        "calendar_id": calendar_id,
+                    }
+                )
     out["source_row_number"] = np.arange(len(out), dtype="int64")
     out = out.reset_index(drop=True)
     findings = pd.DataFrame(
@@ -394,6 +428,7 @@ def prepare_session_candidate(
         "invalid_ohlc_rows": int(bad_ohlc.sum()),
         "negative_volume_rows": int(bad_volume.sum()),
         "calendar_issue_rows": calendar_issue_count,
+        "missing_endpoint_sessions": trailing_missing,
         "missing_prior_expected_session_rows": int(out["previous_expected_session_missing"].fillna(False).sum()),
         "calendar_mapped": bool(calendar_id),
         "issue_rows": len(findings),
@@ -463,6 +498,8 @@ def build(
     bronze_run_id: str,
     silver_run_id: str,
     only: list[str],
+    all_assets: bool = False,
+    fallback_bronze_run_ids: list[str] | None = None,
     calendar_id: str | None = None,
     registry_version: str | None = None,
     correction_version: str | None = None,
@@ -473,7 +510,9 @@ def build(
     if not SAFE_RUN.fullmatch(silver_run_id) or not SAFE_RUN.fullmatch(bronze_run_id):
         raise SilverSessionError("Invalid run ID")
     assets, universe_meta = load_universe(s3, bucket, source_fingerprint)
-    selected = _selection(assets, only)
+    if all_assets and (only or not registry_version or calendar_id):
+        raise SilverSessionError("Full-universe processing requires a registry version and no manual selectors")
+    selected = sorted(assets, key=lambda a: a["asset_id"]) if all_assets else _selection(assets, only)
     calendar_policy = None
     if calendar_policy_version:
         if not re.fullmatch(r"[0-9a-f]{64}", calendar_policy_version):
@@ -524,8 +563,21 @@ def build(
     source_config = json.loads(_read(s3, bucket, f"market/lake_v3/bronze/full_history/runs/{bronze_run_id}/run.json"))
     if source_config.get("source_fingerprint") != source_fingerprint:
         raise SilverSessionError("Bronze run's pinned source snapshot differs")
-    if not {a["asset_id"] for a in selected}.issubset(source_config["requested_asset_ids"]):
+    if (
+        not all_assets
+        and not fallback_bronze_run_ids
+        and not {a["asset_id"] for a in selected}.issubset(source_config["requested_asset_ids"])
+    ):
         raise SilverSessionError("Selected asset not in pinned Bronze run")
+    sources = [(bronze_run_id, source_config, {a["asset_id"]: a for a in assets})]
+    for fallback in fallback_bronze_run_ids or []:
+        if not SAFE_RUN.fullmatch(fallback) or fallback in {run for run, _, _ in sources}:
+            raise SilverSessionError("Invalid or repeated fallback Bronze run ID")
+        config = json.loads(_read(s3, bucket, f"market/lake_v3/bronze/full_history/runs/{fallback}/run.json"))
+        previous_assets, _ = load_universe(s3, bucket, config["source_fingerprint"])
+        if config.get("end_exclusive", "") > source_config.get("end_exclusive", ""):
+            raise SilverSessionError("Fallback Bronze run extends past the primary cutoff")
+        sources.append((fallback, config, {a["asset_id"]: a for a in previous_assets}))
     run_config = {
         "schema": "alpha_edge_silver_session_run_v2",
         "silver_run_id": silver_run_id,
@@ -538,6 +590,14 @@ def build(
         "selected_asset_ids": [a["asset_id"] for a in selected],
         "calendar_id": calendar_id or "",
         "status": "candidate_only_not_certified",
+        "bronze_sources": [
+            {
+                "run_id": run,
+                "source_fingerprint": cfg["source_fingerprint"],
+                "run_config_sha256": _digest(_json_bytes(cfg)),
+            }
+            for run, cfg, _ in sources
+        ],
     }
     if registry_version:
         run_config["registry_version"] = registry_version
@@ -553,12 +613,42 @@ def build(
     if execute and existing is None:
         _put(s3, bucket, root + "/run.json", _json_bytes(run_config), "application/json")
     rows = []
-    for asset in selected:
+    for index, asset in enumerate(selected, 1):
+        if all_assets and (index == 1 or index % 50 == 0):
+            print(f"[silver] asset {index}/{len(selected)}", file=sys.stderr, flush=True)
         mapping = registry_rows.get(asset["asset_id"])
         effective_calendar = (mapping.get("calendar_id") if mapping else calendar_id) or None
         # Unmapped assets may be published as review-required candidates; never
         # infer calendars or claim completeness on their behalf.
-        receipt = _completed(s3, bucket, run_id=bronze_run_id, record=asset, verify_hash=True)
+        receipt = None
+        source_run = None
+        selected_config = None
+        try:
+            for run, cfg, records in sources:
+                old = records.get(asset["asset_id"])
+                if (
+                    asset["asset_id"] not in cfg["requested_asset_ids"]
+                    or old is None
+                    or any(old[field] != asset[field] for field in ("row_id", "yahoo_ticker", "currency_hint"))
+                ):
+                    continue
+                receipt = _completed(s3, bucket, run_id=run, record=asset, verify_hash=True)
+                if receipt is not None:
+                    source_run, selected_config = run, cfg
+                    break
+        except BronzeIngestError as exc:
+            if not all_assets:
+                raise
+            rows.append(
+                {
+                    "asset_id": asset["asset_id"],
+                    "ticker": asset["ticker"],
+                    "calendar_id": effective_calendar,
+                    "status": "source_invalid",
+                    "error": str(exc),
+                }
+            )
+            continue
         if receipt is None:
             rows.append(
                 {
@@ -566,6 +656,8 @@ def build(
                     "ticker": asset["ticker"],
                     "status": "source_unavailable",
                     "source": None,
+                    "calendar_id": effective_calendar,
+                    "reason": "no_compatible_committed_bronze",
                 }
             )
             continue
@@ -581,6 +673,7 @@ def build(
                 or manifest.get("source_data_sha256") != receipt["data"]["sha256"]
                 or manifest.get("calendar_id") != (effective_calendar or "")
                 or manifest.get("registry_version", "") != (registry_version or "")
+                or manifest.get("bronze_run_id") != source_run
             ):
                 raise SilverSessionError(f"Existing Silver asset receipt incompatible: {asset['asset_id']}")
             rows.append(
@@ -590,28 +683,46 @@ def build(
                     "status": "already_committed",
                     "source": receipt["data"]["key"],
                     "quality": manifest["quality"],
+                    "calendar_id": effective_calendar,
+                    "bronze_run_id": source_run,
                 }
             )
             continue
         payload = _read(s3, bucket, receipt["data"]["key"])
         bronze_frame = pd.read_parquet(io.BytesIO(payload), engine="pyarrow")
-        candidate, issues, quality = prepare_session_candidate(
-            bronze_frame,
-            asset_id=asset["asset_id"],
-            symbol=asset["yahoo_ticker"],
-            calendar_id=effective_calendar,
-            close_correction=asset_correction,
-            calendar_policy=calendar_policy,
-        )
+        try:
+            candidate, issues, quality = prepare_session_candidate(
+                bronze_frame,
+                asset_id=asset["asset_id"],
+                symbol=asset["yahoo_ticker"],
+                calendar_id=effective_calendar,
+                close_correction=asset_correction,
+                calendar_policy=calendar_policy,
+                end_exclusive=source_config.get("end_exclusive"),
+            )
+        except SilverSessionError as exc:
+            if not all_assets:
+                raise
+            rows.append(
+                {
+                    "asset_id": asset["asset_id"],
+                    "ticker": asset["ticker"],
+                    "calendar_id": effective_calendar,
+                    "status": "processing_failed",
+                    "error": str(exc),
+                }
+            )
+            continue
         manifest = {
             "schema": SILVER_SCHEMA,
             "status": "candidate_only",
             "silver_run_id": silver_run_id,
-            "bronze_run_id": bronze_run_id,
+            "bronze_run_id": source_run,
+            "bronze_source_fingerprint": selected_config["source_fingerprint"],
             "asset_id": asset["asset_id"],
             "provider_symbol": asset["yahoo_ticker"],
             "calendar_id": effective_calendar or "",
-            "source_manifest_key": f"market/lake_v3/bronze/full_history/runs/{bronze_run_id}/assets/{_digest(asset['asset_id'].encode('utf-8'))}/manifest.json",
+            "source_manifest_key": f"market/lake_v3/bronze/full_history/runs/{source_run}/assets/{_digest(asset['asset_id'].encode('utf-8'))}/manifest.json",
             "source_data_key": receipt["data"]["key"],
             "source_data_sha256": receipt["data"]["sha256"],
             "quality": quality,
@@ -639,6 +750,8 @@ def build(
                 "status": "candidate_written" if execute else "dry_run",
                 "source": receipt["data"]["key"],
                 "quality": quality,
+                "calendar_id": effective_calendar,
+                "bronze_run_id": source_run,
             }
         )
     report = {
@@ -649,11 +762,44 @@ def build(
         "selected": len(selected),
         "processed": sum(x["status"] in {"candidate_written", "already_committed", "dry_run"} for x in rows),
         "missing_bronze": sum(x["status"] == "source_unavailable" for x in rows),
+        "failed": sum(x["status"] in {"source_invalid", "processing_failed"} for x in rows),
         "assets": rows,
         "state": "candidate_only",
         "executed": execute,
         "production_eligible": False,
     }
+    report["summary"] = {
+        "unmapped_assets": sum(not row.get("calendar_id") for row in rows),
+        "assets_with_findings": sum(bool(row.get("quality", {}).get("issue_rows")) for row in rows),
+        "processed_by_bronze_run": {run: sum(row.get("bronze_run_id") == run for row in rows) for run, _, _ in sources},
+        "quality_totals": {
+            field: sum(row.get("quality", {}).get(field, 0) for row in rows)
+            for field in (
+                "rows",
+                "issue_rows",
+                "quarantined_rows",
+                "non_trading_placeholder_rows",
+                "calendar_exception_review_rows",
+                "close_eligible_rows",
+                "ohlc_eligible_rows",
+                "daily_return_eligible_rows",
+                "missing_prior_expected_session_rows",
+                "missing_endpoint_sessions",
+            )
+        },
+    }
+    report["summary"]["by_calendar"] = {}
+    for row in rows:
+        calendar = row.get("calendar_id") or "UNRESOLVED"
+        group = report["summary"]["by_calendar"].setdefault(
+            calendar, {"assets": 0, "processed": 0, "finding_rows": 0, "missing_endpoint_sessions": 0}
+        )
+        group["assets"] += 1
+        quality = row.get("quality")
+        if quality:
+            group["processed"] += 1
+            group["finding_rows"] += quality["issue_rows"]
+            group["missing_endpoint_sessions"] += quality.get("missing_endpoint_sessions", 0)
     if execute:
         key = f"{root}/reports/{uuid.uuid4().hex}.json"
         _put(s3, bucket, key, _json_bytes(report), "application/json")
@@ -661,14 +807,82 @@ def build(
     return report
 
 
+def verify_candidate_run(s3: Any, bucket: str, silver_run_id: str) -> dict:
+    """Independently verify candidate and findings bytes against their manifests."""
+    if not SAFE_RUN.fullmatch(silver_run_id):
+        raise SilverSessionError("Invalid run ID")
+    root = f"{SILVER_ROOT}/runs/{silver_run_id}"
+    config = json.loads(_read(s3, bucket, f"{root}/run.json"))
+    ids = config["selected_asset_ids"]
+    stats = {"selected": len(ids), "verified": 0, "missing": 0, "corrupt": 0}
+    exceptions = []
+    for asset_id in ids:
+        prefix = f"{root}/assets/{_digest(asset_id.encode('utf-8'))}"
+        try:
+            manifest_bytes = _get_optional(s3, bucket, f"{prefix}/manifest.json")
+            if manifest_bytes is None:
+                stats["missing"] += 1
+                exceptions.append({"asset_id": asset_id, "status": "missing"})
+                continue
+            head = s3.head_object(Bucket=bucket, Key=f"{prefix}/manifest.json")
+            if head["Metadata"].get("sha256") != _digest(manifest_bytes):
+                raise SilverSessionError("Candidate manifest hash mismatch")
+            manifest = json.loads(manifest_bytes)
+            if (
+                manifest["asset_id"] != asset_id
+                or manifest["silver_run_id"] != silver_run_id
+                or manifest["production_eligible"]
+                or manifest.get("registry_version") != config.get("registry_version")
+                or manifest.get("calendar_policy_version") != config.get("calendar_policy_version")
+            ):
+                raise SilverSessionError("Candidate manifest identity or release status mismatch")
+            outputs = {}
+            for name in ("candidate", "findings"):
+                ref = manifest["outputs"][name]
+                if not ref["key"].startswith(f"{prefix}/objects/{name}-"):
+                    raise SilverSessionError("Candidate artifact reference mismatch")
+                blob = verified_bytes(s3, bucket, ref)
+                if len(blob) != ref["bytes"]:
+                    raise SilverSessionError("Candidate artifact length mismatch")
+                outputs[name] = pd.read_parquet(io.BytesIO(blob))
+            source = _read(s3, bucket, manifest["source_data_key"])
+            if _digest(source) != manifest["source_data_sha256"]:
+                raise SilverSessionError("Source hash mismatch")
+            bronze = pd.read_parquet(io.BytesIO(source))
+            candidate = outputs["candidate"]
+            pd.testing.assert_frame_equal(
+                bronze.reset_index(drop=True), candidate[bronze.columns].reset_index(drop=True), check_dtype=False
+            )
+            quality = manifest["quality"]
+            if len(candidate) != quality["rows"] or len(outputs["findings"]) != quality["issue_rows"]:
+                raise SilverSessionError("Candidate or finding row count mismatch")
+            for field in ("close_eligible", "ohlc_eligible", "daily_return_eligible"):
+                if int(candidate[field].sum()) != quality[f"{field}_rows"]:
+                    raise SilverSessionError(f"Eligibility count mismatch: {field}")
+            stats["verified"] += 1
+        except (AssertionError, KeyError, ValueError, LakehouseError, SilverSessionError) as exc:
+            stats["corrupt"] += 1
+            exceptions.append({"asset_id": asset_id, "status": "corrupt", "error": str(exc)[:500]})
+    return {**stats, "exceptions": exceptions, "state": "pass" if stats["verified"] == len(ids) else "incomplete"}
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="S3-only Silver v3 session/date QA candidate pilot")
     parser.add_argument("--bucket", default=DEFAULT_BUCKET)
     parser.add_argument("--region", default=DEFAULT_REGION)
     parser.add_argument("--source-fingerprint", help="Override the active S3 universe with a pinned snapshot SHA256")
-    parser.add_argument("--bronze-run-id", required=True)
+    parser.add_argument("--bronze-run-id")
     parser.add_argument("--silver-run-id", required=True)
-    parser.add_argument("--only", required=True, help="Comma-separated pilot selectors")
+    selection = parser.add_mutually_exclusive_group(required=True)
+    selection.add_argument("--only", help="Comma-separated asset selectors")
+    selection.add_argument("--all", action="store_true", help="Process the pinned full universe")
+    selection.add_argument("--verify", action="store_true", help="Read back an existing Silver candidate run")
+    parser.add_argument(
+        "--fallback-bronze-run-id",
+        action="append",
+        default=[],
+        help="Explicit historical Bronze run to reuse for compatible assets",
+    )
     parser.add_argument("--calendar", default=None, help="Explicit calendar for one manual pilot")
     parser.add_argument("--registry-version", default=None, help="SHA256-pinned S3 calendar registry proposal")
     parser.add_argument("--correction-version", default=None, help="SHA256-pinned S3 close correction evidence")
@@ -676,6 +890,16 @@ def main() -> None:
     parser.add_argument("--execute", action="store_true", help="Write candidate outputs to S3")
     args = parser.parse_args()
     s3 = boto3.client("s3", region_name=args.region)
+    if args.verify:
+        if args.execute:
+            parser.error("--verify is read-only")
+        result = verify_candidate_run(s3, args.bucket, args.silver_run_id)
+        print(json.dumps(result, indent=2))
+        if result["state"] != "pass":
+            raise SystemExit(2)
+        return
+    if not args.bronze_run_id:
+        parser.error("--bronze-run-id is required when building candidates")
     fingerprint = resolve_source_fingerprint(s3, args.bucket, args.source_fingerprint)
     result = build(
         s3,
@@ -683,15 +907,25 @@ def main() -> None:
         source_fingerprint=fingerprint,
         bronze_run_id=args.bronze_run_id,
         silver_run_id=args.silver_run_id,
-        only=[x.strip() for x in args.only.split(",") if x.strip()],
+        only=[x.strip() for x in (args.only or "").split(",") if x.strip()],
+        all_assets=args.all,
+        fallback_bronze_run_ids=args.fallback_bronze_run_id,
         calendar_id=args.calendar,
         registry_version=args.registry_version,
         correction_version=args.correction_version,
         calendar_policy_version=args.calendar_policy_version,
         execute=args.execute,
     )
-    print(json.dumps(result, indent=2, default=str))
-    if result["missing_bronze"]:
+    display = result if not args.all else {k: v for k, v in result.items() if k != "assets"}
+    if args.all:
+        display["blocked_assets"] = [
+            row
+            for row in result["assets"]
+            if row["status"] in {"source_unavailable", "source_invalid", "processing_failed"}
+            or not row.get("calendar_id")
+        ]
+    print(json.dumps(display, indent=2, default=str))
+    if result["missing_bronze"] or result["failed"]:
         raise SystemExit(2)
 
 

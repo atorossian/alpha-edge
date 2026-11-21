@@ -308,6 +308,7 @@ def test_pinned_bronze_s3_dry_run_and_candidate_publication(s3):
     assert not committed["production_eligible"]
     same = silver.build(s3, BUCKET, **kwargs, execute=True)
     assert same["assets"][0]["status"] == "already_committed"
+    assert silver.verify_candidate_run(s3, BUCKET, SILVER_RUN)["state"] == "pass"
 
 
 def test_hzn_missing_baseline_is_a_reported_exception_not_fabricated(s3):
@@ -342,3 +343,68 @@ def test_bronze_provenance_mismatch_blocks_silver(s3):
             only=["SPY"],
             calendar_id="NYSE",
         )
+
+
+def test_full_universe_reuses_compatible_fallback_and_reports_missing(s3, monkeypatch):
+    historical_fingerprint, _ = setup_bronze(s3)
+    current_fingerprint = "b" * 64
+    records, metadata = bronze.load_universe(s3, BUCKET, historical_fingerprint)
+    primary_run = "bronze-new-snapshot"
+    config = {
+        "source_fingerprint": current_fingerprint,
+        "requested_asset_ids": ["EQH-HZN"],
+        "end_exclusive": "2026-10-09",
+    }
+    s3.put_object(
+        Bucket=BUCKET, Key=f"{bronze.BRONZE_ROOT}/runs/{primary_run}/run.json", Body=bronze._json_bytes(config)
+    )
+    monkeypatch.setattr(silver, "load_universe", lambda *args: (records, metadata))
+    monkeypatch.setattr(
+        silver,
+        "load_registry",
+        lambda *args: {
+            "assets": [
+                {
+                    "asset_id": a["asset_id"],
+                    "provider_symbol": a["yahoo_ticker"],
+                    "calendar_id": "NYSE",
+                    "mapping_status": "proposed_review_required",
+                }
+                for a in records
+            ]
+        },
+    )
+    result = silver.build(
+        s3,
+        BUCKET,
+        source_fingerprint=current_fingerprint,
+        bronze_run_id=primary_run,
+        silver_run_id="silver-full-test",
+        only=[],
+        all_assets=True,
+        registry_version="c" * 64,
+        fallback_bronze_run_ids=[BRONZE_RUN],
+        execute=True,
+    )
+    assert result["selected"] == 2
+    assert result["processed"] == 1
+    assert result["missing_bronze"] == 1
+    assert result["summary"]["quality_totals"]["missing_endpoint_sessions"] == 1
+    spy = next(row for row in result["assets"] if row["ticker"] == "SPY")
+    assert spy["bronze_run_id"] == BRONZE_RUN
+    manifest_key = f"{silver.SILVER_ROOT}/runs/silver-full-test/assets/{bronze._digest(b'EQH-SPY')}/manifest.json"
+    manifest = json.loads(s3.get_object(Bucket=BUCKET, Key=manifest_key)["Body"].read())
+    assert manifest["bronze_source_fingerprint"] == historical_fingerprint
+    assert result["production_eligible"] is False
+    verification = silver.verify_candidate_run(s3, BUCKET, "silver-full-test")
+    assert verification["verified"] == 1
+    assert verification["missing"] == 1
+
+
+def test_endpoint_completeness_distinguishes_weekend_from_missing_session():
+    frame = raw_frame(("2026-10-01", "2026-10-02"))
+    _, findings, report = silver.prepare_session_candidate(
+        frame, asset_id="EQH-SPY", symbol="SPY", calendar_id="NYSE", end_exclusive="2026-10-06"
+    )
+    assert report["missing_endpoint_sessions"] == 1
+    assert findings.loc[findings["issue"].eq("missing_endpoint_session"), "session_date"].tolist() == ["2026-10-05"]

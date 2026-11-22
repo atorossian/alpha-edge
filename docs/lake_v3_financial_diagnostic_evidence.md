@@ -21,10 +21,16 @@ independent proof of the underlying event. These events extend the historical
 quarantine until reviewed. Same-day split/dividend cases and invalid factors
 remain non-evaluable. None of these flags automatically suppresses a payment.
 
-The duplicate correction registry holds the exact source asset, source hash,
-source date and value, retained event date and value, currency, evidence URL,
-reason, status, and (for approval) reviewer. Its immutable content-addressed
+The strict v2 duplicate correction registry holds the exact source asset, source hash,
+source date and value, retained event date and value, currency, independently
+documented issuer ex-date, amount and currency, evidence URL, reason, status,
+and (for approval) reviewer. Its immutable content-addressed
 versions can be explicitly pinned in the Silver financial evidence builder.
+The source and retained amounts must be equal, the retained event must match
+issuer documentation, and both distinct events must exist exactly once in
+the pinned Bronze evidence. The candidate values must also be unchanged and
+positive. Differing amounts or absent retained events fail closed. The prior
+v1 registry remains historical evidence only and is not accepted by v2.
 Only approved entries set the candidate normalized dividend to zero; original
 source actions remain unchanged. No source price or adjusted close is changed.
 Quarantine is still assessed from the original source evidence until a separate
@@ -44,9 +50,20 @@ The pilot is selected coverage, not a full-universe diagnostic.
 
 Pinned quarantine registry `c6e3faad73e3c364710829bb1c3aef78dc090a56792fd84caee3388f05b9c425`.
 Proposed duplicate registry `7adb0935d0e9b7925b3c7f78806e3301a3387d368c76dd63afbc96e8e3028f33`.
-Both are immutable S3 objects. Neither is implicitly activated. The duplicate
-registry proposes suppressing Recordati 2005-04-22 (retain 2005-04-25) and
-Wendel 2008-05-09 and 2008-05-14 (retain issuer-confirmed 2008-06-11).
+Both are immutable S3 objects. Neither is implicitly activated. The historical
+v1 proposal included Recordati and Wendel; the latter does not meet the strict
+equal-amount criterion and remains unresolved.
+
+The approved strict v2 registry is
+`b61ca1f64a5a8c1966bd56b8829914884d646a22c47f66d238c438cb44241b32`,
+under `market/lake_v3/config/dividend_duplicate_registries/v2/`.
+It contains only Recordati 2005-04-22 (suppress EUR 0.11), retaining the
+issuer-confirmed EUR 0.11 event on 2005-04-25. Both events were verified against
+the exact Bronze checksum and the currency-corrected candidate; the separate
+validation receipt is stored at
+`market/lake_v3/silver/financial_diagnostics/v1/duplicate_validation/78ab41e0ff23d7f84fbbff442201c33b95574e5282fd9d0d1a97435adae05c88/receipt.json`.
+Both S3 objects were read back and checksum-verified. The registry is available
+for explicit pinning, not implicitly active or a production price correction.
 
 ## Reproduce and scale
 

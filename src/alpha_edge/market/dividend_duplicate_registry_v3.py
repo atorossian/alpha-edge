@@ -1,4 +1,4 @@
-"""Explicit reviewed suppression of duplicate or spurious provider-reported dividends."""
+"""Explicit reviewed suppression of proven duplicate provider dividends only."""
 
 from __future__ import annotations
 
@@ -10,8 +10,8 @@ import pandas as pd
 
 from alpha_edge.market.lakehouse_v3.storage import ROOT, digest, json_bytes, put_immutable, verified_bytes
 
-SCHEMA = "alpha_edge_dividend_duplicate_registry_v1"
-REGISTRY_ROOT = f"{ROOT}/config/dividend_duplicate_registries/v1"
+SCHEMA = "alpha_edge_dividend_duplicate_registry_v2"
+REGISTRY_ROOT = f"{ROOT}/config/dividend_duplicate_registries/v2"
 
 
 def validate_registry(doc):
@@ -30,6 +30,9 @@ def validate_registry(doc):
             "source_value",
             "retained_source_value",
             "source_currency",
+            "issuer_ex_date",
+            "issuer_amount",
+            "issuer_currency",
             "evidence_url",
             "reason",
             "status",
@@ -38,18 +41,26 @@ def validate_registry(doc):
                 raise ValueError(f"Missing correction field {key}")
         if not re.fullmatch(r"[0-9a-f]{64}", entry["bronze_sha256"]):
             raise ValueError("Invalid Bronze checksum")
-        for key in ("effective_date", "retained_date"):
+        for key in ("effective_date", "retained_date", "issuer_ex_date"):
             if pd.Timestamp(entry[key]).date().isoformat() != entry[key]:
                 raise ValueError("Invalid correction date")
         if entry["effective_date"] == entry["retained_date"]:
             raise ValueError("Cannot suppress retained event")
-        for key in ("source_value", "retained_source_value"):
+        for key in ("source_value", "retained_source_value", "issuer_amount"):
             try:
                 value = Decimal(entry[key])
             except InvalidOperation as exc:
                 raise ValueError("Invalid exact amount") from exc
             if not value.is_finite() or value <= 0:
                 raise ValueError("Expected positive finite source amount")
+        if Decimal(entry["source_value"]) != Decimal(entry["retained_source_value"]):
+            raise ValueError("Duplicate suppression requires equal source amounts")
+        if (
+            entry["issuer_ex_date"] != entry["retained_date"]
+            or Decimal(entry["issuer_amount"]) != Decimal(entry["retained_source_value"])
+            or entry["issuer_currency"] != entry["source_currency"]
+        ):
+            raise ValueError("Retained dividend must match independently documented issuer date, amount and currency")
         if not entry["evidence_url"].startswith("https://") or entry["status"] not in {"proposed", "approved"}:
             raise ValueError("Invalid correction evidence or status")
         if entry["status"] == "approved" and not str(entry.get("approved_by", "")).strip():
@@ -113,6 +124,8 @@ def apply_suppressions(actions, doc, *, asset_id, provider_symbol, bronze_sha256
                 or candidate.at[i, "source_currency"] != entry["source_currency"]
             ):
                 raise ValueError("Duplicate correction source amount or currency changed")
+            if Decimal(str(candidate.at[i, "normalized_value"])) != Decimal(value):
+                raise ValueError("Duplicate correction requires unchanged positive candidate amounts")
             if (
                 "currency_correction_status" in candidate
                 and candidate.at[i, "currency_correction_status"] != "not_corrected"

@@ -24,6 +24,7 @@ import pandas as pd
 import pandas_market_calendars as mcal
 
 from alpha_edge.market.calendar_registry_v3 import load_registry
+from alpha_edge.market.effective_exchange_calendars import calendar_on, effective_schedule
 from alpha_edge.market.ingest_bronze_full_history import (
     DEFAULT_BUCKET,
     DEFAULT_REGION,
@@ -81,13 +82,13 @@ def _instant(value: Any) -> str | None:
         return None
 
 
-def _special_session_audit(bars: pd.DataFrame, calendar_id: str) -> tuple[pd.DataFrame, pd.DataFrame]:
+def _special_session_audit(bars: pd.DataFrame, calendar_id: str, expected_days=None) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Explicit source DAILY bar conventions, not intraday exchange hours."""
-    if calendar_id not in {"CRYPTO_24_7", "YAHOO_FX_WEEKDAYS"}:
+    if expected_days is None and calendar_id not in {"CRYPTO_24_7", "YAHOO_FX_WEEKDAYS"}:
         raise SilverSessionError(f"Unsupported source-specific daily-session policy: {calendar_id}")
     observed = pd.to_datetime(bars["session_date"], format="%Y-%m-%d")
     first, last = observed.min(), observed.max()
-    expected = pd.date_range(first, last, freq="D" if calendar_id == "CRYPTO_24_7" else "B")
+    expected = expected_days if expected_days is not None else pd.date_range(first, last, freq="D" if calendar_id == "CRYPTO_24_7" else "B")
     actual = set(observed)
     valid = set(expected)
     preceding = {date: expected[i - 1] if i else None for i, date in enumerate(expected)}
@@ -130,6 +131,8 @@ def prepare_session_candidate(
     close_correction: dict | None = None,
     calendar_policy: dict | None = None,
     end_exclusive: str | None = None,
+    calendar_history: list[dict] | None = None,
+    txse_policy: dict | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame, dict]:
     """Preserve every source observation and emit explicit findings.
 
@@ -162,6 +165,17 @@ def prepare_session_candidate(
     out["source_timestamp_utc"] = out["source_timestamp"].map(_instant)
     out["timestamp_semantics"] = "provider_daily_bar_label_not_verified_market_close"
     out["calendar_id"] = calendar_id or ""
+    if calendar_history:
+        out["effective_calendar_id"] = out["exchange_session_date"].map(
+            lambda day: calendar_on(calendar_history, day) if day else ""
+        )
+        # Filter exception decisions by the actual historical exchange, then
+        # apply them to the joined schedule under the candidate's registry ID.
+        if calendar_policy:
+            calendar_policy = {**calendar_policy, "exceptions": [
+                {**entry, "calendar_id": calendar_id} for entry in calendar_policy["exceptions"]
+                if entry["calendar_id"] == calendar_on(calendar_history, entry["session_date"])
+            ]}
     original = out["session_date"].astype(str)
     dup = original.duplicated(keep=False) & out["exchange_session_date"].notna()
     invalid_date = out["exchange_session_date"].isna()
@@ -239,7 +253,11 @@ def prepare_session_candidate(
         # existing v2 calendar audit, which expects valid unique sessions.
         if not invalid_date.any() and not dup.any():
             try:
-                if calendar_id in {"CRYPTO_24_7", "YAHOO_FX_WEEKDAYS"}:
+                if calendar_history:
+                    dates = out["exchange_session_date"]
+                    schedule = effective_schedule(calendar_history, dates.min(), dates.max(), txse_policy or {})
+                    flags, gaps = _special_session_audit(out[["asset_id", "provider_symbol", "session_date"]], calendar_id, schedule.index)
+                elif calendar_id in {"CRYPTO_24_7", "YAHOO_FX_WEEKDAYS"}:
                     flags, gaps = _special_session_audit(
                         out[["asset_id", "provider_symbol", "session_date"]], calendar_id
                     )
@@ -379,7 +397,8 @@ def prepare_session_candidate(
     out["scheduled_market_close_utc"] = pd.Series(pd.NA, index=out.index, dtype="string")
     if calendar_id and calendar_id not in {"CRYPTO_24_7", "YAHOO_FX_WEEKDAYS"} and expected.any():
         dates = out.loc[expected, "exchange_session_date"]
-        schedule = mcal.get_calendar(calendar_id).schedule(start_date=dates.min(), end_date=dates.max())
+        schedule = (effective_schedule(calendar_history, dates.min(), dates.max(), txse_policy or {})
+                    if calendar_history else mcal.get_calendar(calendar_id).schedule(start_date=dates.min(), end_date=dates.max()))
         closes = schedule["market_close"].map(lambda value: value.isoformat())
         closes.index = closes.index.strftime("%Y-%m-%d")
         out.loc[expected, "scheduled_market_close_utc"] = dates.map(closes)
@@ -389,7 +408,9 @@ def prepare_session_candidate(
         cutoff = pd.Timestamp(end_exclusive)
         start, end = last + pd.Timedelta(days=1), cutoff - pd.Timedelta(days=1)
         if start <= end:
-            if calendar_id in {"CRYPTO_24_7", "YAHOO_FX_WEEKDAYS"}:
+            if calendar_history:
+                days = effective_schedule(calendar_history, start, end, txse_policy or {}).index
+            elif calendar_id in {"CRYPTO_24_7", "YAHOO_FX_WEEKDAYS"}:
                 days = pd.date_range(start, end, freq="D" if calendar_id == "CRYPTO_24_7" else "B")
             else:
                 days = mcal.get_calendar(calendar_id).valid_days(start_date=start, end_date=end).tz_localize(None)
@@ -500,6 +521,7 @@ def build(
     only: list[str],
     all_assets: bool = False,
     fallback_bronze_run_ids: list[str] | None = None,
+    reuse_historical_primary: bool = False,
     calendar_id: str | None = None,
     registry_version: str | None = None,
     correction_version: str | None = None,
@@ -561,15 +583,18 @@ def build(
             if not mapping or mapping.get("provider_symbol") != asset["yahoo_ticker"]:
                 raise SilverSessionError(f"Registry asset/provider mismatch: {asset['asset_id']}")
     source_config = json.loads(_read(s3, bucket, f"market/lake_v3/bronze/full_history/runs/{bronze_run_id}/run.json"))
+    primary_assets = assets
     if source_config.get("source_fingerprint") != source_fingerprint:
-        raise SilverSessionError("Bronze run's pinned source snapshot differs")
+        if not reuse_historical_primary or not registry_version:
+            raise SilverSessionError("Bronze run's pinned source snapshot differs")
+        primary_assets, _ = load_universe(s3, bucket, source_config["source_fingerprint"])
     if (
         not all_assets
         and not fallback_bronze_run_ids
         and not {a["asset_id"] for a in selected}.issubset(source_config["requested_asset_ids"])
     ):
         raise SilverSessionError("Selected asset not in pinned Bronze run")
-    sources = [(bronze_run_id, source_config, {a["asset_id"]: a for a in assets})]
+    sources = [(bronze_run_id, source_config, {a["asset_id"]: a for a in primary_assets})]
     for fallback in fallback_bronze_run_ids or []:
         if not SAFE_RUN.fullmatch(fallback) or fallback in {run for run, _, _ in sources}:
             raise SilverSessionError("Invalid or repeated fallback Bronze run ID")
@@ -699,6 +724,8 @@ def build(
                 close_correction=asset_correction,
                 calendar_policy=calendar_policy,
                 end_exclusive=source_config.get("end_exclusive"),
+                calendar_history=mapping.get("calendar_history") if mapping else None,
+                txse_policy=mapping.get("txse_policy") if mapping else None,
             )
         except SilverSessionError as exc:
             if not all_assets:
@@ -732,6 +759,8 @@ def build(
         if registry_version:
             manifest["registry_version"] = registry_version
             manifest["calendar_mapping_status"] = mapping["mapping_status"]
+            if mapping.get("calendar_history"):
+                manifest["calendar_history"] = mapping["calendar_history"]
         if asset_correction:
             manifest["correction_version"] = correction_version
         if calendar_policy_version:
@@ -884,6 +913,7 @@ def main() -> None:
         help="Explicit historical Bronze run to reuse for compatible assets",
     )
     parser.add_argument("--calendar", default=None, help="Explicit calendar for one manual pilot")
+    parser.add_argument("--reuse-historical-primary", action="store_true", help="Explicitly reuse compatible prior-snapshot Bronze with a pinned current registry")
     parser.add_argument("--registry-version", default=None, help="SHA256-pinned S3 calendar registry proposal")
     parser.add_argument("--correction-version", default=None, help="SHA256-pinned S3 close correction evidence")
     parser.add_argument("--calendar-policy-version", default=None, help="SHA256-pinned S3 calendar exception policy")
@@ -910,6 +940,7 @@ def main() -> None:
         only=[x.strip() for x in (args.only or "").split(",") if x.strip()],
         all_assets=args.all,
         fallback_bronze_run_ids=args.fallback_bronze_run_id,
+        reuse_historical_primary=args.reuse_historical_primary,
         calendar_id=args.calendar,
         registry_version=args.registry_version,
         correction_version=args.correction_version,

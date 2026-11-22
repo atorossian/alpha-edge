@@ -408,3 +408,24 @@ def test_endpoint_completeness_distinguishes_weekend_from_missing_session():
     )
     assert report["missing_endpoint_sessions"] == 1
     assert findings.loc[findings["issue"].eq("missing_endpoint_session"), "session_date"].tolist() == ["2026-10-05"]
+
+
+def test_effective_exchange_transfer_gap_and_early_close():
+    from alpha_edge.market.effective_exchange_calendars import TXSE_POLICY, transfer_history
+
+    aid = "EQH272fff4855629062"
+    history = transfer_history(aid, "DDS")
+    frame = raw_frame(("2026-10-02", "2026-10-06"), asset_id=aid, symbol="DDS")
+    candidate, issues, quality = silver.prepare_session_candidate(
+        frame, asset_id=aid, symbol="DDS", calendar_id="TXSE", calendar_history=history, txse_policy=TXSE_POLICY
+    )
+    assert candidate["effective_calendar_id"].tolist() == ["NYSE", "TXSE"]
+    assert not candidate["daily_return_eligible"].any()
+    assert issues.loc[issues["issue"].eq("missing_expected_session"), "session_date"].tolist() == ["2026-10-05"]
+    assert quality["source_rows_preserved"]
+    frame = raw_frame(("2026-11-25", "2026-11-27"), asset_id=aid, symbol="DDS")
+    candidate, _, _ = silver.prepare_session_candidate(
+        frame, asset_id=aid, symbol="DDS", calendar_id="TXSE", calendar_history=history, txse_policy=TXSE_POLICY
+    )
+    assert candidate["daily_return_eligible"].tolist() == [False, True]
+    assert candidate["scheduled_market_close_utc"].iloc[-1].startswith("2026-11-27T18:00")

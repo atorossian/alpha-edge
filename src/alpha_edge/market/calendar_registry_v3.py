@@ -14,6 +14,7 @@ from typing import Any
 
 import boto3
 
+from alpha_edge.market.effective_exchange_calendars import TXSE_POLICY, transfer_history
 from alpha_edge.market.ingest_bronze_full_history import (
     DEFAULT_BUCKET,
     DEFAULT_REGION,
@@ -83,7 +84,7 @@ def _derive(row: dict) -> dict:
         calendar, origin = EXCHANGE_CALENDAR_V2[exchange], "v2_exchange_mapping"
     else:
         calendar, origin = None, "unresolved_or_conflicting_source"
-    return {
+    result = {
         "asset_id": row["asset_id"].strip(),
         "ticker": row["ticker"].strip(),
         "provider_symbol": row["yahoo_ticker"].strip(),
@@ -95,6 +96,11 @@ def _derive(row: dict) -> dict:
         "mapping_status": "proposed_review_required" if calendar else "unresolved",
         "calendar_validation_approved": False,
     }
+    history = transfer_history(result["asset_id"], result["provider_symbol"])
+    if history and exchange == "TEX" and quote_type == "EQUITY" and asset_class == "equity" and explicit in {"", "TXSE"}:
+        result.update(calendar_id="TXSE", mapping_source="effective_dated_listing_evidence",
+                      mapping_status="proposed_review_required", calendar_history=history, txse_policy=TXSE_POLICY)
+    return result
 
 
 def make_registry(s3: Any, bucket: str, fingerprint: str) -> tuple[dict, str]:

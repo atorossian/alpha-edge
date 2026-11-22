@@ -466,8 +466,11 @@ def test_current_universe_acquisition_and_fx_corrections_do_not_change_identity(
     sources = {name: bronze._source_records((root / name).read_bytes(), name) for name in bronze.SOURCE_NAMES}
     universe = {row["ticker"]: row for row in sources["universe.csv"]}
     assert len(sources["universe.csv"]) == 2207
-    assert sum(row["include"] == "1" for row in sources["universe.csv"]) == 2029
-    assert sum(row["include"] == "0" for row in sources["universe.csv"]) == 178
+    assert sum(row["include"] == "1" for row in sources["universe.csv"]) == 2028
+    assert sum(row["include"] == "0" for row in sources["universe.csv"]) == 179
+    by_id = {row["asset_id"]: row for row in sources["universe.csv"]}
+    assert by_id["EQH0816028bb3741194"]["include"] == "0"
+    assert by_id["EQH341782fd07d43832"]["include"] == "1"
     for ticker in ("ATKR", "NWE", "ACVA"):
         assert universe[ticker]["include"] == "0"
         assert any(row["ticker"] == ticker for row in sources["asset_excluded.csv"])

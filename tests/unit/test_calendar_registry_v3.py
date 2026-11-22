@@ -172,6 +172,24 @@ def test_publish_registry_is_immutable_replayable_and_s3_only(snapshot):
         calendars.load_registry(s3, BUCKET, version, "b" * 64)
 
 
+@pytest.mark.parametrize(("exchange", "calendar"), [("GER", "XETR"), ("SAO", "BMF")])
+def test_registry_proposes_matching_explicit_equity_calendar(exchange, calendar):
+    result = calendars._derive(
+        {
+            "asset_id": "EQH",
+            "ticker": "A",
+            "yahoo_ticker": "A",
+            "exchange": exchange,
+            "quoteType": "EQUITY",
+            "calendar_id": calendar,
+            "asset_class": "equity",
+        }
+    )
+    assert result["calendar_id"] == calendar
+    assert result["mapping_status"] == "proposed_review_required"
+    assert result["calendar_validation_approved"] is False
+
+
 def test_registry_cannot_hide_conflicting_explicit_calendar():
     data = {
         "asset_id": "EQH",

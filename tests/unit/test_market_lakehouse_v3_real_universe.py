@@ -25,13 +25,13 @@ def test_full_current_universe_exactly_five_files_and_membership():
     validate_registry(doc)
     counts = doc["summary"]
     assert counts["universe_total"] == 2207
-    assert counts["included"] == 2029
-    assert counts["excluded"] == 178
-    assert counts["configured"] + counts["blocked"] == 2029
-    assert len(doc["assets"]) == 2029
-    assert len(doc["excluded"]) == 178
-    assert len({a["asset_id"] for a in doc["assets"]}) == 2029
-    assert len({a["yahoo_ticker"] for a in doc["assets"]}) == 2029
+    assert counts["included"] == 2028
+    assert counts["excluded"] == 179
+    assert counts["configured"] + counts["blocked"] == 2028
+    assert len(doc["assets"]) == 2028
+    assert len(doc["excluded"]) == 179
+    assert len({a["asset_id"] for a in doc["assets"]}) == 2028
+    assert len({a["yahoo_ticker"] for a in doc["assets"]}) == 2028
     assert doc["refresh_tickers"] == ["HYPE-USD"]
     by_ticker = {a["ticker"]: a for a in doc["assets"]}
     for ticker in ("SPY", "GLD", "BTC-USD", "RENT3", "TRAXIONA", "LOG", "REY", "EUR-USD"):
@@ -43,11 +43,12 @@ def test_full_current_universe_exactly_five_files_and_membership():
         assert not by_ticker[ticker]["blockers"]
     assert by_ticker["DB1"]["yahoo_ticker"] == "DB1.DE"
     assert by_ticker["INBR32"]["yahoo_ticker"] == "INBR34.SA"
-    assert {a["yahoo_ticker"] for a in doc["assets"] if a["blockers"]} == {"COP.HM"}
+    assert not {a["yahoo_ticker"] for a in doc["assets"] if a["blockers"]}
     assert {a["asset_id"] for a in doc["excluded"] if a["exclusion_reason"] == "historical_only"} == {
         "EQH2dea64b7904460c4",
         "EQH4113c94384740eeb",
         "EQH50281759392ec254",
+        "EQH0816028bb3741194",
     }
     for ticker, currency in {"USD-CNY": "CNY", "USD-BRL": "BRL", "USD-JPY": "JPY"}.items():
         assert by_ticker[ticker]["currency"] == currency

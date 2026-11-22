@@ -14,6 +14,7 @@ from typing import Any
 
 import boto3
 
+from alpha_edge.market.effective_exchange_calendars import TXSE_POLICY, transfer_history
 from alpha_edge.market.ingest_bronze_full_history import (
     DEFAULT_BUCKET,
     DEFAULT_REGION,
@@ -24,6 +25,7 @@ from alpha_edge.market.ingest_bronze_full_history import (
     _source_records,
     load_universe,
 )
+from alpha_edge.market.lakehouse_v3.registry_v3 import resolve_source_fingerprint
 from alpha_edge.market.lakehouse_v3.storage import LakehouseError, put_immutable
 
 REGISTRY_ROOT = "market/lake_v3/config/calendar_registries/v1"
@@ -74,15 +76,15 @@ def _derive(row: dict) -> dict:
     elif not explicit and exchange == "CCY" and quote_type == "CURRENCY" and asset_class in {"fx", "fx_pair"}:
         calendar, origin = "YAHOO_FX_WEEKDAYS", "universe_exchange"
     elif (
-        not explicit
-        and exchange in EXCHANGE_CALENDAR_V2
+        exchange in EXCHANGE_CALENDAR_V2
+        and (not explicit or explicit == EXCHANGE_CALENDAR_V2[exchange])
         and quote_type in {"ETF", "EQUITY"}
         and asset_class == "equity"
     ):
         calendar, origin = EXCHANGE_CALENDAR_V2[exchange], "v2_exchange_mapping"
     else:
         calendar, origin = None, "unresolved_or_conflicting_source"
-    return {
+    result = {
         "asset_id": row["asset_id"].strip(),
         "ticker": row["ticker"].strip(),
         "provider_symbol": row["yahoo_ticker"].strip(),
@@ -94,6 +96,22 @@ def _derive(row: dict) -> dict:
         "mapping_status": "proposed_review_required" if calendar else "unresolved",
         "calendar_validation_approved": False,
     }
+    history = transfer_history(result["asset_id"], result["provider_symbol"])
+    if (
+        history
+        and exchange == "TEX"
+        and quote_type == "EQUITY"
+        and asset_class == "equity"
+        and explicit in {"", "TXSE"}
+    ):
+        result.update(
+            calendar_id="TXSE",
+            mapping_source="effective_dated_listing_evidence",
+            mapping_status="proposed_review_required",
+            calendar_history=history,
+            txse_policy=TXSE_POLICY,
+        )
+    return result
 
 
 def make_registry(s3: Any, bucket: str, fingerprint: str) -> tuple[dict, str]:
@@ -144,6 +162,7 @@ def publish(s3: Any, bucket: str, *, registry: dict, version: str, execute: bool
     key = _path(version)
     report = {
         "registry_version": version,
+        "source_fingerprint": registry["source_fingerprint"],
         "s3_uri": f"s3://{bucket}/{key}",
         "counts": registry["counts"],
         "executed": execute,
@@ -178,11 +197,12 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Version immutable S3 calendar mapping proposals")
     parser.add_argument("--bucket", default=DEFAULT_BUCKET)
     parser.add_argument("--region", default=DEFAULT_REGION)
-    parser.add_argument("--source-fingerprint", required=True)
+    parser.add_argument("--source-fingerprint", help="Override the active S3 universe with a pinned snapshot SHA256")
     parser.add_argument("--execute", action="store_true")
     args = parser.parse_args()
     s3 = boto3.client("s3", region_name=args.region)
-    mapping, version = make_registry(s3, args.bucket, args.source_fingerprint)
+    fingerprint = resolve_source_fingerprint(s3, args.bucket, args.source_fingerprint)
+    mapping, version = make_registry(s3, args.bucket, fingerprint)
     print(json.dumps(publish(s3, args.bucket, registry=mapping, version=version, execute=args.execute), indent=2))
 
 

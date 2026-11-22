@@ -10,9 +10,7 @@ import pandas as pd
 import pytest
 from moto import mock_aws
 
-from alpha_edge.market import build_silver_sessions_v3 as silver
-from alpha_edge.market import ingest_bronze_full_history as bronze
-
+from alpha_edge.market import build_silver_sessions_v3 as silver, ingest_bronze_full_history as bronze
 
 BUCKET = "alpha-edge-algo"
 BRONZE_RUN = "bronze-test-20261117"
@@ -200,6 +198,93 @@ def test_unusual_ohlc_is_flagged_not_rewritten():
     assert result.loc[1, "high"] == 1.0
     assert result.loc[1, "session_quality_status"] == "quarantined"
     assert "inconsistent_raw_ohlc" in set(issues["issue"])
+    assert result["close_eligible"].tolist() == [True, False, True]
+    assert result["daily_return_eligible"].tolist() == [False, False, False]
+
+
+def test_expected_sessions_do_not_bridge_gaps_or_unexpected_bars():
+    frame = raw_frame(("2026-10-02", "2026-10-03", "2026-10-05", "2026-10-07"))
+    result, _, _ = silver.prepare_session_candidate(frame, asset_id="EQH-SPY", symbol="SPY", calendar_id="NYSE")
+    assert result["close_eligible"].tolist() == [True, False, True, True]
+    assert result["daily_return_eligible"].tolist() == [False, False, False, False]
+    assert result["available_at_utc"].isna().all()
+
+
+def test_calendar_policy_preserves_review_and_applies_approved_session():
+    frame = raw_frame(("2026-10-02", "2026-10-03", "2026-10-05", "2026-10-07"))
+    exception = {"calendar_id": "NYSE", "session_date": "2026-10-03", "decision": "review"}
+    policy = {"exceptions": [exception]}
+    result, _, _ = silver.prepare_session_candidate(
+        frame, asset_id="EQH-SPY", symbol="SPY", calendar_id="NYSE", calendar_policy=policy
+    )
+    assert result.loc[1, "calendar_exception_review"]
+    assert result.loc[1, "session_quality_status"] == "review_required"
+    assert not result.loc[1, "close_eligible"]
+    assert not result.loc[2, "daily_return_eligible"]
+    exception["decision"] = "expected"
+    result, _, _ = silver.prepare_session_candidate(
+        frame, asset_id="EQH-SPY", symbol="SPY", calendar_id="NYSE", calendar_policy=policy
+    )
+    assert result["close_eligible"].tolist() == [True, True, True, True]
+    assert result["daily_return_eligible"].tolist() == [False, True, True, False]
+    assert pd.isna(result.loc[1, "scheduled_market_close_utc"])
+
+
+@pytest.mark.parametrize("calendar", ["NYSE", "XETR", "XLON", "JPX"])
+def test_exchange_placeholder_rule_is_calendar_independent(calendar):
+    frame = raw_frame(("2026-10-02", "2026-10-03", "2026-10-05", "2026-10-06"))
+    frame.loc[1, ["open", "high", "low", "close"]] = frame.loc[0, "close"]
+    frame.loc[1, "volume"] = 0
+    result, findings, report = silver.prepare_session_candidate(
+        frame, asset_id="EQH-SPY", symbol="SPY", calendar_id=calendar
+    )
+    assert result["non_trading_placeholder"].tolist() == [False, True, False, False]
+    assert result["daily_return_eligible"].tolist() == [False, False, True, True]
+    assert report["non_trading_placeholder_rows"] == 1
+    assert "non_trading_placeholder" in set(findings["issue"])
+    pd.testing.assert_series_equal(result["close"], frame["close"])
+    frame.loc[1, "volume"] = 1
+    result, _, _ = silver.prepare_session_candidate(frame, asset_id="EQH-SPY", symbol="SPY", calendar_id=calendar)
+    assert result.loc[1, "calendar_exception_review"]
+    assert not result.loc[2, "daily_return_eligible"]
+
+
+@pytest.mark.parametrize("calendar,weekend_expected", [("YAHOO_FX_WEEKDAYS", False), ("CRYPTO_24_7", True)])
+def test_fx_and_crypto_zero_volume_is_not_exchange_placeholder(calendar, weekend_expected):
+    frame = raw_frame(("2026-10-02", "2026-10-03", "2026-10-04", "2026-10-05"))
+    frame.loc[1, ["open", "high", "low", "close"]] = frame.loc[0, "close"]
+    frame.loc[1, "volume"] = 0
+    result, _, _ = silver.prepare_session_candidate(frame, asset_id="EQH-SPY", symbol="SPY", calendar_id=calendar)
+    assert not result["non_trading_placeholder"].any()
+    assert bool(result.loc[1, "close_eligible"]) == weekend_expected
+    assert bool(result.loc[1, "calendar_exception_review"]) != weekend_expected
+
+
+def test_close_correction_retains_original_and_restores_candidate_eligibility():
+    frame = raw_frame()
+    frame.loc[1, "close"] = 200.0
+    correction = {
+        "asset_id": "EQH-SPY",
+        "provider_symbol": "SPY",
+        "currency_original": "USD",
+        "session_date": "2026-10-06",
+        "original_close": 200.0,
+        "corrected_close": float(frame.loc[0, "close"]),
+        "correction_id": "test-correction",
+    }
+    result, _, _ = silver.prepare_session_candidate(
+        frame, asset_id="EQH-SPY", symbol="SPY", calendar_id="NYSE", close_correction=correction
+    )
+    assert result.loc[1, "close"] == 200.0
+    assert result.loc[1, "effective_close"] == frame.loc[0, "close"]
+    assert result.loc[1, "close_correction_id"] == "test-correction"
+    assert result["daily_return_eligible"].tolist() == [False, True, True]
+    correction.update(kind="close_corroboration", corrected_close=200.0)
+    result, _, _ = silver.prepare_session_candidate(
+        frame, asset_id="EQH-SPY", symbol="SPY", calendar_id="NYSE", close_correction=correction
+    )
+    assert result.loc[1, "close_eligible"]
+    assert not result.loc[1, "ohlc_eligible"]
 
 
 def test_pinned_bronze_s3_dry_run_and_candidate_publication(s3):
@@ -223,6 +308,7 @@ def test_pinned_bronze_s3_dry_run_and_candidate_publication(s3):
     assert not committed["production_eligible"]
     same = silver.build(s3, BUCKET, **kwargs, execute=True)
     assert same["assets"][0]["status"] == "already_committed"
+    assert silver.verify_candidate_run(s3, BUCKET, SILVER_RUN)["state"] == "pass"
 
 
 def test_hzn_missing_baseline_is_a_reported_exception_not_fabricated(s3):
@@ -257,3 +343,89 @@ def test_bronze_provenance_mismatch_blocks_silver(s3):
             only=["SPY"],
             calendar_id="NYSE",
         )
+
+
+def test_full_universe_reuses_compatible_fallback_and_reports_missing(s3, monkeypatch):
+    historical_fingerprint, _ = setup_bronze(s3)
+    current_fingerprint = "b" * 64
+    records, metadata = bronze.load_universe(s3, BUCKET, historical_fingerprint)
+    primary_run = "bronze-new-snapshot"
+    config = {
+        "source_fingerprint": current_fingerprint,
+        "requested_asset_ids": ["EQH-HZN"],
+        "end_exclusive": "2026-10-09",
+    }
+    s3.put_object(
+        Bucket=BUCKET, Key=f"{bronze.BRONZE_ROOT}/runs/{primary_run}/run.json", Body=bronze._json_bytes(config)
+    )
+    monkeypatch.setattr(silver, "load_universe", lambda *args: (records, metadata))
+    monkeypatch.setattr(
+        silver,
+        "load_registry",
+        lambda *args: {
+            "assets": [
+                {
+                    "asset_id": a["asset_id"],
+                    "provider_symbol": a["yahoo_ticker"],
+                    "calendar_id": "NYSE",
+                    "mapping_status": "proposed_review_required",
+                }
+                for a in records
+            ]
+        },
+    )
+    result = silver.build(
+        s3,
+        BUCKET,
+        source_fingerprint=current_fingerprint,
+        bronze_run_id=primary_run,
+        silver_run_id="silver-full-test",
+        only=[],
+        all_assets=True,
+        registry_version="c" * 64,
+        fallback_bronze_run_ids=[BRONZE_RUN],
+        execute=True,
+    )
+    assert result["selected"] == 2
+    assert result["processed"] == 1
+    assert result["missing_bronze"] == 1
+    assert result["summary"]["quality_totals"]["missing_endpoint_sessions"] == 1
+    spy = next(row for row in result["assets"] if row["ticker"] == "SPY")
+    assert spy["bronze_run_id"] == BRONZE_RUN
+    manifest_key = f"{silver.SILVER_ROOT}/runs/silver-full-test/assets/{bronze._digest(b'EQH-SPY')}/manifest.json"
+    manifest = json.loads(s3.get_object(Bucket=BUCKET, Key=manifest_key)["Body"].read())
+    assert manifest["bronze_source_fingerprint"] == historical_fingerprint
+    assert result["production_eligible"] is False
+    verification = silver.verify_candidate_run(s3, BUCKET, "silver-full-test")
+    assert verification["verified"] == 1
+    assert verification["missing"] == 1
+
+
+def test_endpoint_completeness_distinguishes_weekend_from_missing_session():
+    frame = raw_frame(("2026-10-01", "2026-10-02"))
+    _, findings, report = silver.prepare_session_candidate(
+        frame, asset_id="EQH-SPY", symbol="SPY", calendar_id="NYSE", end_exclusive="2026-10-06"
+    )
+    assert report["missing_endpoint_sessions"] == 1
+    assert findings.loc[findings["issue"].eq("missing_endpoint_session"), "session_date"].tolist() == ["2026-10-05"]
+
+
+def test_effective_exchange_transfer_gap_and_early_close():
+    from alpha_edge.market.effective_exchange_calendars import TXSE_POLICY, transfer_history
+
+    aid = "EQH272fff4855629062"
+    history = transfer_history(aid, "DDS")
+    frame = raw_frame(("2026-10-02", "2026-10-06"), asset_id=aid, symbol="DDS")
+    candidate, issues, quality = silver.prepare_session_candidate(
+        frame, asset_id=aid, symbol="DDS", calendar_id="TXSE", calendar_history=history, txse_policy=TXSE_POLICY
+    )
+    assert candidate["effective_calendar_id"].tolist() == ["NYSE", "TXSE"]
+    assert not candidate["daily_return_eligible"].any()
+    assert issues.loc[issues["issue"].eq("missing_expected_session"), "session_date"].tolist() == ["2026-10-05"]
+    assert quality["source_rows_preserved"]
+    frame = raw_frame(("2026-11-25", "2026-11-27"), asset_id=aid, symbol="DDS")
+    candidate, _, _ = silver.prepare_session_candidate(
+        frame, asset_id=aid, symbol="DDS", calendar_id="TXSE", calendar_history=history, txse_policy=TXSE_POLICY
+    )
+    assert candidate["daily_return_eligible"].tolist() == [False, True]
+    assert candidate["scheduled_market_close_utc"].iloc[-1].startswith("2026-11-27T18:00")

@@ -423,6 +423,20 @@ def load_active(s3, bucket: str) -> tuple[dict, dict]:
     return doc, pointer
 
 
+def resolve_source_fingerprint(s3, bucket: str, fingerprint: str | None = None) -> str:
+    """Use the approved S3 registry by default, or an explicit replay snapshot."""
+    if fingerprint is not None:
+        return fingerprint
+    try:
+        registry, pointer = load_active(s3, bucket)
+        fingerprint = registry["source_fingerprint"]
+        if pointer.get("source_fingerprint") != fingerprint:
+            raise LakehouseError("Active pointer and registry reference different source snapshots")
+    except (LakehouseError, KeyError, ValueError) as exc:
+        raise LakehouseError(f"Cannot resolve the active universe in S3 bucket {bucket}: {exc}") from exc
+    return fingerprint
+
+
 def verify_source_snapshots(s3, bucket: str, doc: dict) -> None:
     """Every one of the five files must exist in S3 with its pinned digest."""
     validate_registry(doc)

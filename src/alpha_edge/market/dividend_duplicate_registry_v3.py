@@ -72,7 +72,82 @@ def validate_registry(doc):
         retained.add((entry["asset_id"], entry["retained_date"]))
     if keys & retained:
         raise ValueError("Retained event cannot also be suppressed")
+    pairs = doc.get("legitimate_pairs", [])
+    if not isinstance(pairs, list):
+        raise TypeError("Invalid legitimate distribution pairs")
+    seen = set()
+    for pair in pairs:
+        if not isinstance(pair, dict):
+            raise TypeError("Expected legitimate distribution pair object")
+        for field in (
+            "asset_id",
+            "provider_symbol",
+            "bronze_sha256",
+            "first_date",
+            "second_date",
+            "source_value",
+            "source_currency",
+            "reason",
+            "approved_by",
+        ):
+            if not isinstance(pair.get(field), str) or not pair[field].strip():
+                raise ValueError(f"Missing legitimate pair field {field}")
+        if not re.fullmatch(r"[0-9a-f]{64}", pair["bronze_sha256"]):
+            raise ValueError("Invalid legitimate pair checksum")
+        for field in ("first_date", "second_date"):
+            if pd.Timestamp(pair[field]).date().isoformat() != pair[field]:
+                raise ValueError("Invalid legitimate pair date")
+        if not 0 < (pd.Timestamp(pair["second_date"]) - pd.Timestamp(pair["first_date"])).days <= 7:
+            raise ValueError("Legitimate pair dates outside diagnostic window")
+        try:
+            amount = Decimal(pair["source_value"])
+        except InvalidOperation as exc:
+            raise ValueError("Invalid legitimate pair amount") from exc
+        if not amount.is_finite() or amount <= 0:
+            raise ValueError("Invalid legitimate pair amount")
+        urls = pair.get("evidence_urls")
+        if (
+            not isinstance(urls, list)
+            or not all(isinstance(u, str) and u.startswith("https://") for u in urls)
+            or len(set(urls)) < 2
+        ):
+            raise ValueError("Two independent distribution references required")
+        key = (pair["asset_id"], pair["first_date"], pair["second_date"])
+        if key in seen or any((pair["asset_id"], day) in keys for day in key[1:]):
+            raise ValueError("Legitimate pair conflicts with suppression or repeated pair")
+        seen.add(key)
     return doc
+
+
+def mark_legitimate_pairs(findings, actions, doc, *, asset_id, provider_symbol, bronze_sha256):
+    """Retain the diagnostic row but resolve only the exact independently verified pair."""
+    validate_registry(doc)
+    result = findings.copy(deep=True)
+    for pair in doc.get("legitimate_pairs", []):
+        if pair["asset_id"] != asset_id:
+            continue
+        if pair["provider_symbol"] != provider_symbol or pair["bronze_sha256"] != bronze_sha256:
+            raise ValueError("Legitimate pair source identity or checksum changed")
+        for day in (pair["first_date"], pair["second_date"]):
+            rows = actions.loc[actions.effective_date.eq(day) & actions.action_type.eq("DIVIDEND")]
+            if len(rows) != 1:
+                raise ValueError("Legitimate pair must resolve exactly two dividend events")
+            row = rows.iloc[0]
+            if (
+                row.source_currency != pair["source_currency"]
+                or Decimal(str(row.source_value)) != Decimal(pair["source_value"])
+                or Decimal(str(row.get("normalized_value", row.source_value))) != Decimal(pair["source_value"])
+            ):
+                raise ValueError("Legitimate pair source amount or currency changed")
+        mask = (
+            result.reason.eq("nearby_equal_dividends")
+            & result.related_date.eq(pair["first_date"])
+            & result.effective_date.eq(pair["second_date"])
+        )
+        if mask.sum() != 1:
+            raise ValueError("Legitimate pair does not resolve exactly one diagnostic finding")
+        result.loc[mask, "review_status"] = "verified_legitimate_distributions"
+    return result
 
 
 def publish_registry(s3, bucket, doc, *, execute=False):

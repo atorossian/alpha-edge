@@ -118,13 +118,30 @@ def build(
     quarantine_stats = None
     duplicate_stats = None
     duplicate_correction_stats = None
+    duplicate_config = (
+        duplicate_registry.load_registry(s3, bucket, dividend_duplicate_registry_version)
+        if dividend_duplicate_registry_version
+        else None
+    )
     if assess_duplicate_dividends:
         duplicates, duplicate_stats = duplicate.assess(frame, outputs.get("currency_corrected_actions", actions))
+        if duplicate_config is not None:
+            duplicates = duplicate_registry.mark_legitimate_pairs(
+                duplicates,
+                outputs.get("currency_corrected_actions", actions),
+                duplicate_config,
+                asset_id=record["asset_id"],
+                provider_symbol=record["yahoo_ticker"],
+                bronze_sha256=receipt["data"]["sha256"],
+            )
+            duplicate_stats["verified_legitimate_pairs"] = int(
+                duplicates.review_status.eq("verified_legitimate_distributions").sum()
+            )
         outputs["dividend_duplicate_findings"] = duplicates
     if dividend_duplicate_registry_version:
         corrected, duplicate_correction_stats = duplicate_registry.apply_suppressions(
             outputs.get("currency_corrected_actions", actions),
-            duplicate_registry.load_registry(s3, bucket, dividend_duplicate_registry_version),
+            duplicate_config,
             asset_id=record["asset_id"],
             provider_symbol=record["yahoo_ticker"],
             bronze_sha256=receipt["data"]["sha256"],

@@ -168,6 +168,8 @@ def assess(
         for finding in duplicate_findings.loc[duplicate_findings["reason"].eq("nearby_equal_dividends")].to_dict(
             "records"
         ):
+            if finding.get("review_status") == "verified_legitimate_distributions":
+                continue
             day = pd.Timestamp(finding["effective_date"])
             if day not in source_dates:
                 raise ValueError("Duplicate finding outside pinned sessions")

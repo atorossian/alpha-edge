@@ -89,7 +89,17 @@ def consolidated_receipt(s3, bucket, index, row):
     return receipt
 
 
-def assess_asset(frame, *, asset_id, provider_symbol, source_key, sha, currency_registry, quarantine_registry):
+def assess_asset(
+    frame,
+    *,
+    asset_id,
+    provider_symbol,
+    source_key,
+    sha,
+    currency_registry,
+    quarantine_registry,
+    duplicate_correction_registry=None,
+):
     """Shared in-memory evidence calculation; does not write or repair anything."""
     actions, action_stats = extract_source_actions(frame)
     corrected, corrections = apply_currency_corrections(
@@ -100,6 +110,15 @@ def assess_asset(frame, *, asset_id, provider_symbol, source_key, sha, currency_
         bronze_sha256=sha,
     )
     duplicates, duplicate_stats = duplicate.assess(frame, corrected)
+    if duplicate_correction_registry is not None:
+        duplicates = duplicate_registry.mark_legitimate_pairs(
+            duplicates,
+            corrected,
+            duplicate_correction_registry,
+            asset_id=asset_id,
+            provider_symbol=provider_symbol,
+            bronze_sha256=sha,
+        )
     _, findings, quarantine_stats = quarantine.assess(
         frame,
         corrected,
@@ -125,6 +144,7 @@ def assess_asset(frame, *, asset_id, provider_symbol, source_key, sha, currency_
         "reported_splits": action_stats["reported_splits"],
         "approved_currency_corrections": corrections["approved"],
         "duplicate_findings": len(duplicates),
+        "verified_legitimate_pairs": int(duplicates.review_status.eq("verified_legitimate_distributions").sum()),
         "quarantine_findings": len(findings),
         "quarantine_through": quarantine_stats["quarantine_through"],
         "quarantined_sessions": quarantine_stats["quarantined_sessions"],
@@ -186,6 +206,9 @@ def publish(
                 coverage["approved_duplicate_suppressions_validated"].sum()
             )
             if "approved_duplicate_suppressions_validated" in coverage
+            else 0,
+            "verified_legitimate_pairs": int(coverage["verified_legitimate_pairs"].sum())
+            if "verified_legitimate_pairs" in coverage
             else 0,
             "dividend_reasons": dict(counts),
             "quarantine_findings": len(quarantine_findings),
@@ -286,6 +309,7 @@ def audit(
             sha=ref["sha256"],
             currency_registry=currency,
             quarantine_registry=external,
+            duplicate_correction_registry=proposals,
         )
         summary["approved_duplicate_suppressions_validated"] = approved
         return summary, d, q

@@ -107,3 +107,53 @@ def test_immutable_registry_proposal_s3_roundtrip():
         result = registry.publish_registry(s3, "test-bucket", evidence(), execute=True)
         assert result["version"] == preview["version"]
         assert registry.load_registry(s3, "test-bucket", result["version"]) == evidence()
+
+
+def test_legitimate_distribution_pair_preserves_both_events_and_fails_closed():
+    raw = actions()
+    raw.loc[1, "effective_date"] = "2008-05-14"
+    findings = pd.DataFrame(
+        [
+            {
+                "reason": "nearby_equal_dividends",
+                "related_date": "2008-05-09",
+                "effective_date": "2008-05-14",
+                "review_status": "review_required",
+            },
+            {
+                "reason": "dividend_factor_mismatch",
+                "related_date": None,
+                "effective_date": "2008-05-14",
+                "review_status": "review_required",
+            },
+        ]
+    )
+    doc = {
+        "schema": registry.SCHEMA,
+        "entries": [],
+        "legitimate_pairs": [
+            {
+                "asset_id": "A",
+                "provider_symbol": "AAA",
+                "bronze_sha256": "a" * 64,
+                "first_date": "2008-05-09",
+                "second_date": "2008-05-14",
+                "source_value": "1.36",
+                "source_currency": "EUR",
+                "reason": "Distinct declared distributions",
+                "approved_by": "reviewer",
+                "evidence_urls": ["https://example.com/first", "https://example.com/second"],
+            }
+        ],
+    }
+    kwargs = {"asset_id": "A", "provider_symbol": "AAA", "bronze_sha256": "a" * 64}
+    marked = registry.mark_legitimate_pairs(findings, raw, doc, **kwargs)
+    assert marked.review_status.tolist() == ["verified_legitimate_distributions", "review_required"]
+    assert findings.review_status.eq("review_required").all()
+    candidate, stats = registry.apply_suppressions(raw, doc, **kwargs)
+    assert candidate.normalized_value.tolist() == [1.36, 1.36]
+    assert stats["approved"] == 0
+    with pytest.raises(ValueError, match="checksum"):
+        registry.mark_legitimate_pairs(findings, raw, doc, **{**kwargs, "bronze_sha256": "b" * 64})
+    with pytest.raises(ValueError, match="two dividend events"):
+        registry.mark_legitimate_pairs(findings, raw.iloc[:1], doc, **kwargs)

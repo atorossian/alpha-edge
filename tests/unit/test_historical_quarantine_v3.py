@@ -123,3 +123,24 @@ def test_registry_publication_is_explicit_and_content_addressed():
         published = q.publish_registry(s3, bucket, doc, execute=True)
         assert published["version"] == preview["version"]
         assert q.load_registry(s3, bucket, published["version"]) == doc
+
+
+def test_verified_legitimate_pair_only_clears_nearby_equal_blocker():
+    frame = bars()
+    frame.loc[2, "dividends"] = 1.03
+    raw = extract_source_actions(frame)[0]
+    findings = pd.DataFrame(
+        [
+            {
+                "reason": "nearby_equal_dividends",
+                "effective_date": "2001-01-05",
+                "related_date": "2001-01-03",
+                "review_status": "verified_legitimate_distributions",
+            }
+        ]
+    )
+    _, result, stats = q.assess(
+        frame, raw, asset_id="A", provider_symbol="AAA", bronze_sha256="a" * 64, duplicate_findings=findings
+    )
+    assert result.reason.tolist() == ["dividend_factor_mismatch"]
+    assert stats["quarantine_through"] == "2001-01-03"

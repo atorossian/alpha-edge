@@ -65,6 +65,30 @@ validation receipt is stored at
 Both S3 objects were read back and checksum-verified. The registry is available
 for explicit pinning, not implicitly active or a production price correction.
 
+## Full nearby-equal dividend review (2026-11-22)
+
+The consolidated-universe diagnostic `aea94-full-universe-20261122` identified
+59 nearby-equal pairs. The completed review records 25 approved duplicate
+suppressions (including 20 previously approved), eight verified legitimate
+distribution pairs for EVT, and 26 unresolved pairs. Unresolved source events
+are preserved; ambiguity does not authorize suppression.
+
+Pin strict registry version
+`234ac8670302a1ea95121898f6f98228ca93e8862c87814a21d447ba97a23a8e`.
+The full pair-by-pair review, original source pointers, reasons and validation
+receipt are stored at
+`market/lake_v3/silver/financial_diagnostics/v1/duplicate_validation/2ab840de431b507bdebdfb1868beb948e3d4e49e633cc41954e4e9eccae6aed8/receipt.json`.
+Both registry and receipt were read back and checksum-verified. The five new
+suppressions (GNTX, BAP, twice ICL, and PUM.DE) and eight legitimate EVT pairs
+were checked against exact Bronze bytes and the pinned currency registry.
+
+The optional `legitimate_pairs` registry field resolves only an exact nearby-equal
+finding, with pinned source checksum, dates, currency, unchanged source amounts,
+and independent distribution references. Both cash events remain positive;
+the original finding is retained as verified, while other factor or price
+quarantine reasons are unaffected. Older strict v2 registries remain readable.
+No Bronze prices, adjusted closes, or Gold tables are changed by this review.
+
 ## Reproduce and scale
 
 Use `python -m alpha_edge.market.audit_financial_universe_v3` with explicit

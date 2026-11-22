@@ -15,6 +15,11 @@ from typing import Any
 import boto3
 import pandas as pd
 
+from alpha_edge.market import (
+    dividend_duplicate_evidence_v3 as duplicate,
+    dividend_duplicate_registry_v3 as duplicate_registry,
+    historical_quarantine_v3 as quarantine,
+)
 from alpha_edge.market.dividend_currency_registry_v3 import apply_currency_corrections, load_registry
 from alpha_edge.market.ingest_bronze_full_history import (
     BRONZE_ROOT,
@@ -61,11 +66,17 @@ def build(
     fx_currency: str | None = None,
     fx_direction: str | None = None,
     dividend_currency_registry_version: str | None = None,
+    strict_historical_quarantine: bool = False,
+    historical_quarantine_registry_version: str | None = None,
+    assess_duplicate_dividends: bool = False,
+    dividend_duplicate_registry_version: str | None = None,
     execute: bool = False,
 ) -> dict:
     """Only one pinned, verified Bronze asset; no broad implicit universe run."""
     if not SAFE_RUN.fullmatch(bronze_run_id) or not SAFE_RUN.fullmatch(silver_run_id):
         raise SilverEvidenceError("Invalid pinned run ID")
+    if historical_quarantine_registry_version and not strict_historical_quarantine:
+        raise SilverEvidenceError("Quarantine registry requires strict historical quarantine")
     if (fx_currency is None) != (fx_direction is None):
         raise SilverEvidenceError("FX currency and direction must be supplied together")
     if fx_currency is not None:
@@ -104,6 +115,39 @@ def build(
             bronze_sha256=receipt["data"]["sha256"],
         )
         outputs["currency_corrected_actions"] = corrected_actions
+    quarantine_stats = None
+    duplicate_stats = None
+    duplicate_correction_stats = None
+    if assess_duplicate_dividends:
+        duplicates, duplicate_stats = duplicate.assess(frame, outputs.get("currency_corrected_actions", actions))
+        outputs["dividend_duplicate_findings"] = duplicates
+    if dividend_duplicate_registry_version:
+        corrected, duplicate_correction_stats = duplicate_registry.apply_suppressions(
+            outputs.get("currency_corrected_actions", actions),
+            duplicate_registry.load_registry(s3, bucket, dividend_duplicate_registry_version),
+            asset_id=record["asset_id"],
+            provider_symbol=record["yahoo_ticker"],
+            bronze_sha256=receipt["data"]["sha256"],
+        )
+        outputs["duplicate_corrected_actions"] = corrected
+    if strict_historical_quarantine:
+        registry = (
+            quarantine.load_registry(s3, bucket, historical_quarantine_registry_version)
+            if historical_quarantine_registry_version
+            else None
+        )
+        sessions, findings, quarantine_stats = quarantine.assess(
+            frame,
+            outputs.get("currency_corrected_actions", actions),
+            asset_id=record["asset_id"],
+            provider_symbol=record["yahoo_ticker"],
+            bronze_sha256=receipt["data"]["sha256"],
+            registry=registry,
+            duplicate_findings=outputs.get("dividend_duplicate_findings"),
+        )
+        quarantine_stats["registry_version"] = historical_quarantine_registry_version
+        outputs["historical_quarantine_sessions"] = sessions
+        outputs["historical_quarantine_findings"] = findings
     fx_stats = None
     if fx_currency:
         quotes = frame[["provider_symbol", "session_date", "close"]].rename(columns={"close": "quote_close"})
@@ -132,6 +176,12 @@ def build(
     }
     if currency_correction_stats is not None:
         config_manifest["dividend_currency_correction"] = currency_correction_stats
+    if quarantine_stats is not None:
+        config_manifest["historical_quarantine"] = quarantine_stats
+    if duplicate_stats is not None:
+        config_manifest["dividend_duplicate_evidence"] = duplicate_stats
+    if duplicate_correction_stats is not None:
+        config_manifest["dividend_duplicate_correction"] = duplicate_correction_stats
     root = f"{ROOT}/runs/{silver_run_id}/assets/{_digest(record['asset_id'].encode('utf-8'))}"
     prior = _get_optional(s3, bucket, root + "/manifest.json")
     if prior is not None:
@@ -183,6 +233,10 @@ def main() -> None:
     parser.add_argument("--fx-currency")
     parser.add_argument("--fx-direction", choices=["direct", "inverse"])
     parser.add_argument("--dividend-currency-registry-version")
+    parser.add_argument("--strict-historical-quarantine", action="store_true")
+    parser.add_argument("--historical-quarantine-registry-version")
+    parser.add_argument("--assess-duplicate-dividends", action="store_true")
+    parser.add_argument("--dividend-duplicate-registry-version")
     parser.add_argument("--execute", action="store_true")
     args = parser.parse_args()
     s3 = boto3.client("s3", region_name=args.region)
@@ -196,6 +250,10 @@ def main() -> None:
         fx_currency=args.fx_currency,
         fx_direction=args.fx_direction,
         dividend_currency_registry_version=args.dividend_currency_registry_version,
+        strict_historical_quarantine=args.strict_historical_quarantine,
+        historical_quarantine_registry_version=args.historical_quarantine_registry_version,
+        assess_duplicate_dividends=args.assess_duplicate_dividends,
+        dividend_duplicate_registry_version=args.dividend_duplicate_registry_version,
         execute=args.execute,
     )
     print(json.dumps(report, indent=2))

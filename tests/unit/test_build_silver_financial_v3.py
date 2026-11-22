@@ -9,8 +9,11 @@ import pandas as pd
 import pytest
 from moto import mock_aws
 
-from alpha_edge.market import build_silver_financial_v3 as silver
-from alpha_edge.market import ingest_bronze_full_history as bronze
+from alpha_edge.market import (
+    audit_financial_universe_v3 as diagnostic,
+    build_silver_financial_v3 as silver,
+    ingest_bronze_full_history as bronze,
+)
 from alpha_edge.market.dividend_currency_registry_v3 import (
     RATE_REFERENCE,
     REGISTRY_ROOT,
@@ -152,6 +155,57 @@ def test_optional_registry_is_pinned_in_dry_run_manifest(source):
     assert result["statistics"]["dividend_currency_correction"]["registry_version"] == version
     assert result["outputs"]["currency_corrected_actions"] == 1
     assert s3.list_objects_v2(Bucket=BUCKET, Prefix=silver.ROOT).get("KeyCount", 0) == 0
+
+
+def test_strict_quarantine_in_dry_run_manifest(source):
+    s3, fingerprint = source
+    result = silver.build(
+        s3,
+        BUCKET,
+        fingerprint=fingerprint,
+        bronze_run_id=BRONZE_RUN,
+        silver_run_id=SILVER_RUN,
+        selector="SPY",
+        strict_historical_quarantine=True,
+    )
+    assert result["statistics"]["historical_quarantine"]["quarantine_through"] == "2026-11-13"
+    assert result["statistics"]["historical_quarantine"]["candidate_returns"] == 0
+    assert result["outputs"]["historical_quarantine_sessions"] == 3
+    assert not result["production_eligible"]
+    assert s3.list_objects_v2(Bucket=BUCKET, Prefix=silver.ROOT).get("KeyCount", 0) == 0
+
+
+def test_universe_diagnostic_persists_coverage_and_findings_only_on_execute(source):
+    s3, fingerprint = source
+    registry = {"schema": SCHEMA, "rate_reference": RATE_REFERENCE, "units_per_eur": UNITS_PER_EUR, "entries": []}
+    version = registry_version(registry)
+    put_json(s3, BUCKET, f"{REGISTRY_ROOT}/{version}/registry.json", registry)
+    kwargs = {
+        "fingerprint": fingerprint,
+        "bronze_run_id": BRONZE_RUN,
+        "run_id": "diagnostic-test",
+        "currency_version": version,
+    }
+    dry = diagnostic.audit(s3, BUCKET, **kwargs)
+    assert dry["statistics"]["assets"] == 2
+    assert dry["statistics"]["dividend_reasons"] == {"dividend_factor_mismatch": 1}
+    assert s3.list_objects_v2(Bucket=BUCKET, Prefix=diagnostic.AUDIT_ROOT)["KeyCount"] == 0
+    result = diagnostic.audit(s3, BUCKET, **kwargs, execute=True)
+    assert result["outputs"] == dry["outputs"]
+    assert not result["production_eligible"]
+    for ref in result["outputs"].values():
+        blob = s3.get_object(Bucket=BUCKET, Key=ref["key"])["Body"].read()
+        assert bronze._digest(blob) == ref["sha256"]
+    assert diagnostic.audit(s3, BUCKET, **kwargs, execute=True) == result
+    json_run = diagnostic.audit(
+        s3, BUCKET, **{**kwargs, "run_id": "diagnostic-json-test"}, execute=True, artifact_format="json"
+    )
+    for ref in json_run["outputs"].values():
+        import json
+
+        blob = s3.get_object(Bucket=BUCKET, Key=ref["key"])["Body"].read()
+        assert bronze._digest(blob) == ref["sha256"]
+        assert len(json.loads(blob)["rows"]) == ref["rows"]
 
 
 def test_fx_inverse_rate_source_evidence_and_same_run_resume(source):

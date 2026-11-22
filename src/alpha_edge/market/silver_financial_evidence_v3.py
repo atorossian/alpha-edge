@@ -43,7 +43,7 @@ def extract_source_actions(bars: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
     if (~np.isfinite(dividends)).any() or dividends.lt(0).any():
         raise SilverFinancialError("Invalid/negative source dividend; requires independent review")
     events = []
-    for i in range(len(bars)):
+    for i in np.flatnonzero(splits.ne(0) | dividends.ne(0)):
         row = bars.iloc[i]
         day = dates.iloc[i].date().isoformat()
         for kind, amount in (("SPLIT", splits.iloc[i]), ("DIVIDEND", dividends.iloc[i])):
@@ -59,7 +59,7 @@ def extract_source_actions(bars: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
                     "action_type": kind,
                     "source_value": float(amount),
                     "source_currency": str(row["currency_original"]) if kind == "DIVIDEND" else None,
-                    "source_row_number": i,
+                    "source_row_number": int(i),
                     "origin": "yahoo_bronze_daily_bar",
                     "evidence_status": "provider_reported_not_independently_confirmed",
                 }

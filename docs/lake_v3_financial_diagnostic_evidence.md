@@ -89,6 +89,34 @@ the original finding is retained as verified, while other factor or price
 quarantine reasons are unaffected. Older strict v2 registries remain readable.
 No Bronze prices, adjusted closes, or Gold tables are changed by this review.
 
+## TR share-basis reconstruction pilot
+
+The TR price diagnostic is pinned at SHA-256
+`34cd1ba25b4fdb7cc9256ae7dd815fa3d6c7489ceb9abae809762efee81e339f`.
+Nine issuer-confirmed 3% stock distributions have zero source split values on
+candidate ex-dates; opening gaps and contemporaneous issuer closing-price
+ranges support the missing basis factors. Dates remain candidate evidence.
+
+`alpha_edge.market.build_share_basis_candidate_v3` is a separate, explicitly
+pinned Silver candidate, not a production financial stage. It checks the
+Bronze and evidence hashes, validates all expected source events and applies
+only missing subsequent ratios to OHLC and ordinary candidate cash dividends.
+Source OHLC, adjusted close, dividends, splits and volume are retained. A
+same-day cash observation on a reconstructed share event is not automatically
+treated as post-share cash; it blocks the candidate total return and the
+backward adjusted-price chain. Price-only returns are separate. The September
+1992 duplicate pair also remains unresolved. Observations before 1992-09-22
+are retained but untransformed; earlier stock/cash classification requires
+additional investigation. No production eligibility is granted.
+
+Pin TR candidate registry
+`7e92fd0bc688a42de59baad938eaa5fadc12e71573889ac40f98dbdced7bbbae`.
+Run `python -m alpha_edge.market.build_share_basis_candidate_v3 --registry-version
+7e92fd0bc688a42de59baad938eaa5fadc12e71573889ac40f98dbdced7bbbae
+--run-id tr-share-basis-pilot-20261122` for a dry run; add `--execute` only to
+publish the isolated candidate to `market/lake_v3/silver/share_basis_candidates/v1/`.
+The manifest is committed last, with content-addressed output and source inputs.
+
 ## Reproduce and scale
 
 Use `python -m alpha_edge.market.audit_financial_universe_v3` with explicit

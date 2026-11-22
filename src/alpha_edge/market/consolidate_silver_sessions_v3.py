@@ -12,6 +12,7 @@ import boto3
 import pandas as pd
 
 from alpha_edge.market.build_silver_sessions_v3 import SILVER_ROOT, SILVER_SCHEMA, SilverSessionError, _put
+from alpha_edge.market.calendar_registry_v3 import load_registry
 from alpha_edge.market.ingest_bronze_full_history import (
     DEFAULT_BUCKET,
     DEFAULT_REGION,
@@ -43,7 +44,7 @@ def classify(issue: str) -> str:
     return "unclassified_review"
 
 
-def consolidate(s3, bucket: str, run_ids: list[str], *, execute: bool = False) -> dict:
+def consolidate(s3, bucket: str, run_ids: list[str], *, execute: bool = False, revision_run: str | None = None) -> dict:
     if not run_ids or len(set(run_ids)) != len(run_ids) or any(not SAFE_RUN.fullmatch(r) for r in run_ids):
         raise SilverSessionError("Invalid or repeated Silver run IDs")
     configs = {}
@@ -54,14 +55,34 @@ def consolidate(s3, bucket: str, run_ids: list[str], *, execute: bool = False) -
         if cfg["silver_run_id"] != run or cfg["status"] != "candidate_only_not_certified":
             raise SilverSessionError("Unexpected run identity or status")
         configs[run] = (cfg, {"key": key, "sha256": _digest(raw)})
-    base = configs[run_ids[0]][0]
-    for cfg, _ in configs.values():
+    if revision_run is not None and (revision_run not in configs or revision_run == run_ids[0]):
+        raise SilverSessionError("Revision must be a separate named input run")
+    base = configs[revision_run or run_ids[0]][0]
+    original = configs[run_ids[0]][0]
+    for run, (cfg, _) in configs.items():
         for field in ("source_fingerprint", "source_git_commit", "registry_version", "calendar_policy_version",
                       "calendar_library_version", "exchange_calendars_version", "session_eligibility_policy"):
-            if cfg.get(field) != base.get(field):
+            reference = base if run == revision_run else original
+            if cfg.get(field) != reference.get(field):
                 raise SilverSessionError(f"Incompatible run configuration: {field}")
+            if field not in {"source_fingerprint", "source_git_commit", "registry_version"} and cfg.get(field) != base.get(field):
+                raise SilverSessionError(f"Revision changed common validation policy: {field}")
     universe, _ = load_universe(s3, bucket, base["source_fingerprint"])
     expected = {a["asset_id"]: a for a in universe}
+    retired, replaced = set(), set()
+    if revision_run:
+        prior_universe, _ = load_universe(s3, bucket, original["source_fingerprint"])
+        prior = {a["asset_id"]: a for a in prior_universe}
+        old_registry = load_registry(s3, bucket, original["registry_version"], original["source_fingerprint"])
+        new_registry = load_registry(s3, bucket, base["registry_version"], base["source_fingerprint"])
+        old_rows = {r["asset_id"]: r for r in old_registry["assets"]}
+        new_rows = {r["asset_id"]: r for r in new_registry["assets"]}
+        if set(old_rows) != set(prior) or set(new_rows) != set(expected):
+            raise SilverSessionError("Registry/universe coverage mismatch")
+        retired = set(prior) - set(expected)
+        replaced = {aid for aid in expected if prior.get(aid) != expected[aid] or old_rows.get(aid) != new_rows[aid]}
+        if set(base["selected_asset_ids"]) != replaced:
+            raise SilverSessionError("Revision selection must exactly match changed or new active assets")
     indexed = {}
     counts = Counter()
     groups = defaultdict(set)
@@ -73,6 +94,8 @@ def consolidate(s3, bucket: str, run_ids: list[str], *, execute: bool = False) -
         for i, aid in enumerate(cfg["selected_asset_ids"], 1):
             if i == 1 or i % 50 == 0:
                 print(f"[consolidate] {run} {i}/{len(cfg['selected_asset_ids'])}", file=sys.stderr, flush=True)
+            if revision_run and run != revision_run and aid in retired | replaced:
+                continue
             if aid not in expected:
                 raise SilverSessionError(f"Asset outside pinned universe: {aid}")
             prefix = f"{SILVER_ROOT}/runs/{run}/assets/{_digest(aid.encode())}"
@@ -117,6 +140,11 @@ def consolidate(s3, bucket: str, run_ids: list[str], *, execute: bool = False) -
             indexed[aid] = {"manifest_key": key, "manifest_sha256": sha, "silver_run_id": run,
                             "calendar_id": calendar, "correction_version": m.get("correction_version"),
                             "outputs": m["outputs"]}
+            if revision_run:
+                if (m["calendar_id"] != (new_rows[aid]["calendar_id"] or "")
+                        or m.get("calendar_history") != new_rows[aid].get("calendar_history")):
+                    raise SilverSessionError(f"Candidate calendar differs from revised registry: {aid}")
+                indexed[aid]["registry_version"] = m.get("registry_version")
     missing = sorted(set(expected) - set(indexed))
     if missing:
         raise SilverSessionError(f"Incomplete consolidated coverage: {missing}")
@@ -149,11 +177,15 @@ def consolidate(s3, bucket: str, run_ids: list[str], *, execute: bool = False) -
         ],
         "validation_scope": "manifest_and_findings_integrity; candidate_bytes_not_reverified",
     }
+    if revision_run:
+        report["revision"] = {"run_id": revision_run, "prior_registry_version": original["registry_version"],
+                              "retired_asset_ids": sorted(retired), "replaced_asset_ids": sorted(replaced)}
     payload = _json_bytes(report)
     key = f"{SILVER_ROOT}/consolidated/{_digest(payload)}/index.json"
     if execute:
         _put(s3, bucket, key, payload, "application/json")
     return {"executed": execute, "index_s3_uri": f"s3://{bucket}/{key}", **report["summary"],
+            **({"revision": report["revision"]} if revision_run else {}),
             "by_calendar_issue_source": report["by_calendar_issue_source"],
             "top_date_clusters": [
                 {k: v for k, v in row.items() if k != "asset_ids"}
@@ -166,10 +198,11 @@ def main() -> None:
     parser.add_argument("--bucket", default=DEFAULT_BUCKET)
     parser.add_argument("--region", default=DEFAULT_REGION)
     parser.add_argument("--run-id", action="append", required=True)
+    parser.add_argument("--revision-run", help="Explicit replacement run for changed assets in a revised universe")
     parser.add_argument("--execute", action="store_true")
     args = parser.parse_args()
     print(json.dumps(consolidate(boto3.client("s3", region_name=args.region), args.bucket,
-                                 args.run_id, execute=args.execute), indent=2))
+                                 args.run_id, execute=args.execute, revision_run=args.revision_run), indent=2))
 
 
 if __name__ == "__main__":

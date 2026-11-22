@@ -97,9 +97,20 @@ def _derive(row: dict) -> dict:
         "calendar_validation_approved": False,
     }
     history = transfer_history(result["asset_id"], result["provider_symbol"])
-    if history and exchange == "TEX" and quote_type == "EQUITY" and asset_class == "equity" and explicit in {"", "TXSE"}:
-        result.update(calendar_id="TXSE", mapping_source="effective_dated_listing_evidence",
-                      mapping_status="proposed_review_required", calendar_history=history, txse_policy=TXSE_POLICY)
+    if (
+        history
+        and exchange == "TEX"
+        and quote_type == "EQUITY"
+        and asset_class == "equity"
+        and explicit in {"", "TXSE"}
+    ):
+        result.update(
+            calendar_id="TXSE",
+            mapping_source="effective_dated_listing_evidence",
+            mapping_status="proposed_review_required",
+            calendar_history=history,
+            txse_policy=TXSE_POLICY,
+        )
     return result
 
 

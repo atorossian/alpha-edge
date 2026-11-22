@@ -39,7 +39,12 @@ def classify(issue: str) -> str:
         return "mapping_blocker"
     if issue == "inconsistent_raw_ohlc":
         return "price_integrity_review"
-    if issue in {"invalid_session_date", "duplicate_source_session", "missing_offset_aware_timestamp", "negative_volume"}:
+    if issue in {
+        "invalid_session_date",
+        "duplicate_source_session",
+        "missing_offset_aware_timestamp",
+        "negative_volume",
+    }:
         return "source_integrity_review"
     return "unclassified_review"
 
@@ -60,12 +65,21 @@ def consolidate(s3, bucket: str, run_ids: list[str], *, execute: bool = False, r
     base = configs[revision_run or run_ids[0]][0]
     original = configs[run_ids[0]][0]
     for run, (cfg, _) in configs.items():
-        for field in ("source_fingerprint", "source_git_commit", "registry_version", "calendar_policy_version",
-                      "calendar_library_version", "exchange_calendars_version", "session_eligibility_policy"):
+        for field in (
+            "source_fingerprint",
+            "source_git_commit",
+            "registry_version",
+            "calendar_policy_version",
+            "calendar_library_version",
+            "exchange_calendars_version",
+            "session_eligibility_policy",
+        ):
             reference = base if run == revision_run else original
             if cfg.get(field) != reference.get(field):
                 raise SilverSessionError(f"Incompatible run configuration: {field}")
-            if field not in {"source_fingerprint", "source_git_commit", "registry_version"} and cfg.get(field) != base.get(field):
+            if field not in {"source_fingerprint", "source_git_commit", "registry_version"} and cfg.get(
+                field
+            ) != base.get(field):
                 raise SilverSessionError(f"Revision changed common validation policy: {field}")
     universe, _ = load_universe(s3, bucket, base["source_fingerprint"])
     expected = {a["asset_id"]: a for a in universe}
@@ -109,11 +123,16 @@ def consolidate(s3, bucket: str, run_ids: list[str], *, execute: bool = False, r
             if s3.head_object(Bucket=bucket, Key=key)["Metadata"].get("sha256") != sha:
                 raise SilverSessionError(f"Manifest checksum mismatch: {aid}")
             m = json.loads(raw)
-            if (m["schema"] != SILVER_SCHEMA or m["asset_id"] != aid or m["silver_run_id"] != run
-                    or m["production_eligible"] or m["provider_symbol"] != expected[aid]["yahoo_ticker"]
-                    or m.get("registry_version") != cfg.get("registry_version")
-                    or m.get("calendar_policy_version") != cfg.get("calendar_policy_version")
-                    or (m.get("correction_version") and m["correction_version"] != cfg.get("correction_version"))):
+            if (
+                m["schema"] != SILVER_SCHEMA
+                or m["asset_id"] != aid
+                or m["silver_run_id"] != run
+                or m["production_eligible"]
+                or m["provider_symbol"] != expected[aid]["yahoo_ticker"]
+                or m.get("registry_version") != cfg.get("registry_version")
+                or m.get("calendar_policy_version") != cfg.get("calendar_policy_version")
+                or (m.get("correction_version") and m["correction_version"] != cfg.get("correction_version"))
+            ):
                 raise SilverSessionError(f"Incompatible candidate manifest: {aid}")
             for name in ("candidate", "findings"):
                 if not m["outputs"][name]["key"].startswith(f"{prefix}/objects/{name}-"):
@@ -137,12 +156,18 @@ def consolidate(s3, bucket: str, run_ids: list[str], *, execute: bool = False, r
                 affected[issue].add(aid)
             totals.update({k: v for k, v in m["quality"].items() if type(v) is int})
             by_source[m["bronze_run_id"]] += 1
-            indexed[aid] = {"manifest_key": key, "manifest_sha256": sha, "silver_run_id": run,
-                            "calendar_id": calendar, "correction_version": m.get("correction_version"),
-                            "outputs": m["outputs"]}
+            indexed[aid] = {
+                "manifest_key": key,
+                "manifest_sha256": sha,
+                "silver_run_id": run,
+                "calendar_id": calendar,
+                "correction_version": m.get("correction_version"),
+                "outputs": m["outputs"],
+            }
             if revision_run:
-                if (m["calendar_id"] != (new_rows[aid]["calendar_id"] or "")
-                        or m.get("calendar_history") != new_rows[aid].get("calendar_history")):
+                if m["calendar_id"] != (new_rows[aid]["calendar_id"] or "") or m.get("calendar_history") != new_rows[
+                    aid
+                ].get("calendar_history"):
                     raise SilverSessionError(f"Candidate calendar differs from revised registry: {aid}")
                 indexed[aid]["registry_version"] = m.get("registry_version")
     missing = sorted(set(expected) - set(indexed))
@@ -161,36 +186,55 @@ def consolidate(s3, bucket: str, run_ids: list[str], *, execute: bool = False, r
         "calendar_policy_version": base.get("calendar_policy_version"),
         "source_runs": {r: ref for r, (_, ref) in configs.items()},
         "assets": indexed,
-        "summary": {"selected": len(expected), "indexed": len(indexed), "quality_totals": dict(totals),
-                    "by_bronze_run": dict(by_source), "assets_by_calendar": dict(by_calendar),
-                    "by_category": dict(classification), "findings_by_issue": dict(by_issue),
-                    "affected_assets_by_issue": {k: len(v) for k, v in affected.items()}},
+        "summary": {
+            "selected": len(expected),
+            "indexed": len(indexed),
+            "quality_totals": dict(totals),
+            "by_bronze_run": dict(by_source),
+            "assets_by_calendar": dict(by_calendar),
+            "by_category": dict(classification),
+            "findings_by_issue": dict(by_issue),
+            "affected_assets_by_issue": {k: len(v) for k, v in affected.items()},
+        },
         "by_calendar_issue_source": [
             {"calendar": cal, "issue": issue, "bronze_run": source, "findings": n}
             for (cal, issue, source), n in sorted(counts.items())
         ],
         "by_calendar_issue_date": [
-            {"calendar": cal, "issue": issue, "session_date": day, "affected_assets": len(ids),
-             "calendar_assets": by_calendar[cal],
-             "asset_ids": sorted(ids)}
+            {
+                "calendar": cal,
+                "issue": issue,
+                "session_date": day,
+                "affected_assets": len(ids),
+                "calendar_assets": by_calendar[cal],
+                "asset_ids": sorted(ids),
+            }
             for (cal, issue, day), ids in sorted(groups.items())
         ],
         "validation_scope": "manifest_and_findings_integrity; candidate_bytes_not_reverified",
     }
     if revision_run:
-        report["revision"] = {"run_id": revision_run, "prior_registry_version": original["registry_version"],
-                              "retired_asset_ids": sorted(retired), "replaced_asset_ids": sorted(replaced)}
+        report["revision"] = {
+            "run_id": revision_run,
+            "prior_registry_version": original["registry_version"],
+            "retired_asset_ids": sorted(retired),
+            "replaced_asset_ids": sorted(replaced),
+        }
     payload = _json_bytes(report)
     key = f"{SILVER_ROOT}/consolidated/{_digest(payload)}/index.json"
     if execute:
         _put(s3, bucket, key, payload, "application/json")
-    return {"executed": execute, "index_s3_uri": f"s3://{bucket}/{key}", **report["summary"],
-            **({"revision": report["revision"]} if revision_run else {}),
-            "by_calendar_issue_source": report["by_calendar_issue_source"],
-            "top_date_clusters": [
-                {k: v for k, v in row.items() if k != "asset_ids"}
-                for row in sorted(report["by_calendar_issue_date"], key=lambda r: -r["affected_assets"])[:30]
-            ]}
+    return {
+        "executed": execute,
+        "index_s3_uri": f"s3://{bucket}/{key}",
+        **report["summary"],
+        **({"revision": report["revision"]} if revision_run else {}),
+        "by_calendar_issue_source": report["by_calendar_issue_source"],
+        "top_date_clusters": [
+            {k: v for k, v in row.items() if k != "asset_ids"}
+            for row in sorted(report["by_calendar_issue_date"], key=lambda r: -r["affected_assets"])[:30]
+        ],
+    }
 
 
 def main() -> None:
@@ -201,8 +245,18 @@ def main() -> None:
     parser.add_argument("--revision-run", help="Explicit replacement run for changed assets in a revised universe")
     parser.add_argument("--execute", action="store_true")
     args = parser.parse_args()
-    print(json.dumps(consolidate(boto3.client("s3", region_name=args.region), args.bucket,
-                                 args.run_id, execute=args.execute, revision_run=args.revision_run), indent=2))
+    print(
+        json.dumps(
+            consolidate(
+                boto3.client("s3", region_name=args.region),
+                args.bucket,
+                args.run_id,
+                execute=args.execute,
+                revision_run=args.revision_run,
+            ),
+            indent=2,
+        )
+    )
 
 
 if __name__ == "__main__":

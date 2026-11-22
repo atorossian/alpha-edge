@@ -74,8 +74,11 @@ Use `python -m alpha_edge.market.audit_financial_universe_v3` with explicit
 `--dividend-duplicate-registry-version`, and either `--only ASSET_ID ...` or
 `--all`. The latter assesses the complete included universe for the exact
 pinned source snapshot and Bronze run; any absent or corrupt receipt fails
-closed before publication. A consolidated current universe spanning different
-Bronze runs needs separately pinned receipt selection before running `--all`.
+closed before publication. Alternatively, supply `--consolidated-index-version`
+instead of the fingerprint and Bronze run. The audit then verifies the index,
+exact active universe coverage, each indexed Silver manifest and its referenced
+Bronze receipt and source bytes. This supports the consolidated universe across
+multiple Bronze runs. `--workers` controls bounded parallel source reads.
 Without `--execute` there are no S3 writes. The proposal registry is validated
 against the source events but not applied by this diagnostic.
 

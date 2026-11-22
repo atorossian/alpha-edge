@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import json
 
 import boto3
 import pandas as pd
@@ -206,6 +207,76 @@ def test_universe_diagnostic_persists_coverage_and_findings_only_on_execute(sour
         blob = s3.get_object(Bucket=BUCKET, Key=ref["key"])["Body"].read()
         assert bronze._digest(blob) == ref["sha256"]
         assert len(json.loads(blob)["rows"]) == ref["rows"]
+
+
+def test_audit_consolidation_pins_bronze_receipts_across_runs(source):
+    s3, fingerprint = source
+    registry = {"schema": SCHEMA, "rate_reference": RATE_REFERENCE, "units_per_eur": UNITS_PER_EUR, "entries": []}
+    version = registry_version(registry)
+    put_json(s3, BUCKET, f"{REGISTRY_ROOT}/{version}/registry.json", registry)
+    entries = {}
+    for aid, symbol, run in (("EQH-SPY", "SPY", BRONZE_RUN), ("EQH-JPY", "JPY=X", "repair-bronze")):
+        original_prefix = bronze._target_prefix(BRONZE_RUN, aid)
+        receipt = json.loads(bronze._read(s3, BUCKET, original_prefix + "/manifest.json"))
+        if run != BRONZE_RUN:
+            prefix = bronze._target_prefix(run, aid)
+            old = receipt["data"]["key"]
+            new = old.replace(original_prefix, prefix)
+            s3.copy_object(Bucket=BUCKET, Key=new, CopySource={"Bucket": BUCKET, "Key": old})
+            receipt["data"]["key"] = new
+            receipt["run_id"] = run
+            put_json(s3, BUCKET, prefix + "/manifest.json", receipt)
+        silver_run = "silver-" + run
+        key = f"{diagnostic.SILVER_ROOT}/runs/{silver_run}/assets/{bronze._digest(aid.encode())}/manifest.json"
+        manifest = {
+            "schema": diagnostic.SILVER_SCHEMA,
+            "asset_id": aid,
+            "provider_symbol": symbol,
+            "silver_run_id": silver_run,
+            "production_eligible": False,
+            "outputs": {},
+            "bronze_run_id": run,
+            "source_manifest_key": bronze._target_prefix(run, aid) + "/manifest.json",
+            "source_data_key": receipt["data"]["key"],
+            "source_data_sha256": receipt["data"]["sha256"],
+        }
+        put_json(s3, BUCKET, key, manifest)
+        entries[aid] = {
+            "manifest_key": key,
+            "manifest_sha256": bronze._digest(bronze._read(s3, BUCKET, key)),
+            "silver_run_id": silver_run,
+            "outputs": {},
+        }
+    index = {
+        "schema": "alpha_edge_silver_consolidated_candidate_v1",
+        "production_eligible": False,
+        "source_fingerprint": fingerprint,
+        "assets": entries,
+        "source_runs": {entry["silver_run_id"]: {} for entry in entries.values()},
+    }
+    index_version = diagnostic.digest(diagnostic.json_bytes(index))
+    put_json(s3, BUCKET, f"{diagnostic.SILVER_ROOT}/consolidated/{index_version}/index.json", index)
+    result = diagnostic.audit(
+        s3,
+        BUCKET,
+        consolidated_version=index_version,
+        run_id="consolidated-test",
+        currency_version=version,
+        execute=True,
+    )
+    assert result["statistics"]["assets"] == 2
+    ref = result["outputs"]["coverage"]
+    table = pd.read_parquet(io.BytesIO(bronze._read(s3, BUCKET, ref["key"])))
+    assert (
+        table.loc[table.asset_id.eq("EQH-JPY"), "bronze_key"]
+        .iloc[0]
+        .startswith(bronze._target_prefix("repair-bronze", "EQH-JPY"))
+    )
+    index["assets"].pop("EQH-JPY")
+    invalid = diagnostic.digest(diagnostic.json_bytes(index))
+    put_json(s3, BUCKET, f"{diagnostic.SILVER_ROOT}/consolidated/{invalid}/index.json", index)
+    with pytest.raises(ValueError, match="exact active universe"):
+        diagnostic.audit(s3, BUCKET, consolidated_version=invalid, run_id="invalid-test", currency_version=version)
 
 
 def test_fx_inverse_rate_source_evidence_and_same_run_resume(source):

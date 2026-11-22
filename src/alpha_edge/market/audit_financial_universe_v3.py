@@ -5,7 +5,10 @@ from __future__ import annotations
 import argparse
 import io
 import json
+import re
+import sys
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
 
 import boto3
 import pandas as pd
@@ -15,6 +18,7 @@ from alpha_edge.market import (
     dividend_duplicate_registry_v3 as duplicate_registry,
     historical_quarantine_v3 as quarantine,
 )
+from alpha_edge.market.build_silver_sessions_v3 import SILVER_ROOT, SILVER_SCHEMA
 from alpha_edge.market.dividend_currency_registry_v3 import apply_currency_corrections, load_registry
 from alpha_edge.market.ingest_bronze_full_history import (
     BRONZE_ROOT,
@@ -25,11 +29,64 @@ from alpha_edge.market.ingest_bronze_full_history import (
     _read,
     load_universe,
 )
-from alpha_edge.market.lakehouse_v3.storage import ROOT, digest, json_bytes, parquet_bytes, put_immutable
+from alpha_edge.market.lakehouse_v3.storage import (
+    ROOT,
+    digest,
+    json_bytes,
+    parquet_bytes,
+    put_immutable,
+    verified_bytes,
+)
 from alpha_edge.market.silver_financial_evidence_v3 import extract_source_actions
 
 AUDIT_ROOT = f"{ROOT}/silver/financial_diagnostics/v1"
 SCHEMA = "alpha_edge_financial_diagnostic_v1"
+
+
+def load_consolidated(s3, bucket, version):
+    if not re.fullmatch(r"[0-9a-f]{64}", version):
+        raise ValueError("Expected consolidated index SHA-256")
+    key = f"{SILVER_ROOT}/consolidated/{version}/index.json"
+    index = json.loads(verified_bytes(s3, bucket, {"key": key, "sha256": version}))
+    if (
+        index.get("schema") != "alpha_edge_silver_consolidated_candidate_v1"
+        or index.get("production_eligible") is not False
+    ):
+        raise ValueError("Invalid consolidated candidate index")
+    return index
+
+
+def consolidated_receipt(s3, bucket, index, row):
+    aid = row["asset_id"]
+    entry = index["assets"][aid]
+    run = entry["silver_run_id"]
+    expected_key = f"{SILVER_ROOT}/runs/{run}/assets/{digest(aid.encode())}/manifest.json"
+    if not SAFE_RUN.fullmatch(run) or run not in index["source_runs"] or entry["manifest_key"] != expected_key:
+        raise ValueError(f"Invalid consolidated manifest reference: {aid}")
+    manifest = json.loads(verified_bytes(s3, bucket, {"key": expected_key, "sha256": entry["manifest_sha256"]}))
+    if (
+        manifest.get("schema") != SILVER_SCHEMA
+        or manifest.get("asset_id") != aid
+        or manifest.get("provider_symbol") != row["yahoo_ticker"]
+        or manifest.get("silver_run_id") != run
+        or manifest.get("production_eligible") is not False
+        or manifest.get("outputs") != entry["outputs"]
+    ):
+        raise ValueError(f"Consolidated manifest identity mismatch: {aid}")
+    bronze_run = manifest["bronze_run_id"]
+    if not SAFE_RUN.fullmatch(bronze_run):
+        raise ValueError(f"Invalid consolidated Bronze run: {aid}")
+    expected_receipt = f"{BRONZE_ROOT}/runs/{bronze_run}/assets/{digest(aid.encode())}/manifest.json"
+    if manifest.get("source_manifest_key") != expected_receipt:
+        raise ValueError(f"Consolidated Bronze receipt reference mismatch: {aid}")
+    receipt = _completed(s3, bucket, run_id=bronze_run, record=row, verify_hash=False)
+    if (
+        receipt is None
+        or receipt["data"]["key"] != manifest.get("source_data_key")
+        or receipt["data"]["sha256"] != manifest.get("source_data_sha256")
+    ):
+        raise ValueError(f"Consolidated Bronze evidence mismatch: {aid}")
+    return receipt
 
 
 def assess_asset(frame, *, asset_id, provider_symbol, source_key, sha, currency_registry, quarantine_registry):
@@ -125,6 +182,11 @@ def publish(
             "source_rows": int(coverage["source_rows"].sum()),
             "reported_dividends": int(coverage["reported_dividends"].sum()),
             "reported_splits": int(coverage["reported_splits"].sum()),
+            "approved_duplicate_suppressions_validated": int(
+                coverage["approved_duplicate_suppressions_validated"].sum()
+            )
+            if "approved_duplicate_suppressions_validated" in coverage
+            else 0,
             "dividend_reasons": dict(counts),
             "quarantine_findings": len(quarantine_findings),
         },
@@ -148,8 +210,9 @@ def audit(
     s3,
     bucket,
     *,
-    fingerprint,
-    bronze_run_id,
+    fingerprint=None,
+    bronze_run_id=None,
+    consolidated_version=None,
     run_id,
     currency_version,
     quarantine_version=None,
@@ -157,13 +220,27 @@ def audit(
     selectors=None,
     execute=False,
     artifact_format="parquet",
+    workers=1,
 ):
-    if not all(SAFE_RUN.fullmatch(v) for v in (bronze_run_id, run_id)):
+    if not SAFE_RUN.fullmatch(run_id) or not 1 <= workers <= 16:
         raise ValueError("Invalid pinned run ID")
+    if consolidated_version:
+        if fingerprint is not None or bronze_run_id is not None:
+            raise ValueError("Specify consolidated index or single Bronze run, not both")
+        index = load_consolidated(s3, bucket, consolidated_version)
+        fingerprint = index["source_fingerprint"]
+    else:
+        if not fingerprint or not bronze_run_id or not SAFE_RUN.fullmatch(bronze_run_id):
+            raise ValueError("Expected pinned source fingerprint and Bronze run")
+        index = None
     active, source = load_universe(s3, bucket, fingerprint)
-    config = json.loads(_read(s3, bucket, f"{BRONZE_ROOT}/runs/{bronze_run_id}/run.json"))
-    if config.get("source_fingerprint") != fingerprint:
-        raise ValueError("Bronze fingerprint mismatch")
+    if index is not None:
+        if set(index["assets"]) != {row["asset_id"] for row in active}:
+            raise ValueError("Consolidated index does not cover exact active universe")
+    else:
+        config = json.loads(_read(s3, bucket, f"{BRONZE_ROOT}/runs/{bronze_run_id}/run.json"))
+        if config.get("source_fingerprint") != fingerprint:
+            raise ValueError("Bronze fingerprint mismatch")
     selected = active if selectors is None else [row for row in active if row["asset_id"] in selectors]
     if not selected or (selectors is not None and len(selected) != len(set(selectors))):
         raise ValueError("Expected known canonical asset IDs")
@@ -173,11 +250,15 @@ def audit(
         duplicate_registry.load_registry(s3, bucket, duplicate_registry_version) if duplicate_registry_version else None
     )
     summaries, dividends, quarantines = [], [], []
-    for row in sorted(selected, key=lambda r: r["asset_id"]):
+
+    def process(row):
         asset_id = row["asset_id"]
-        if asset_id not in config.get("requested_asset_ids", []):
-            raise ValueError(f"Asset not included in pinned Bronze run: {asset_id}")
-        receipt = _completed(s3, bucket, run_id=bronze_run_id, record=row, verify_hash=False)
+        if index is not None:
+            receipt = consolidated_receipt(s3, bucket, index, row)
+        else:
+            if asset_id not in config.get("requested_asset_ids", []):
+                raise ValueError(f"Asset not included in pinned Bronze run: {asset_id}")
+            receipt = _completed(s3, bucket, run_id=bronze_run_id, record=row, verify_hash=False)
         if receipt is None:
             raise ValueError(f"Missing verified Bronze receipt: {asset_id}")
         ref = receipt["data"]
@@ -187,11 +268,16 @@ def audit(
         frame = pd.read_parquet(io.BytesIO(blob), engine="pyarrow")
         if len(frame) != receipt["validation"]["rows"]:
             raise ValueError(f"Bronze row count mismatch: {asset_id}")
+        approved = 0
         if proposals is not None:
             actions, _ = extract_source_actions(frame)
-            duplicate_registry.apply_suppressions(
+            actions, _ = apply_currency_corrections(
+                actions, currency, asset_id=asset_id, provider_symbol=row["yahoo_ticker"], bronze_sha256=ref["sha256"]
+            )
+            _, stats = duplicate_registry.apply_suppressions(
                 actions, proposals, asset_id=asset_id, provider_symbol=row["yahoo_ticker"], bronze_sha256=ref["sha256"]
             )
+            approved = stats["approved"]
         summary, d, q, _ = assess_asset(
             frame,
             asset_id=asset_id,
@@ -201,11 +287,19 @@ def audit(
             currency_registry=currency,
             quarantine_registry=external,
         )
-        summaries.append(summary)
-        dividends.append(d)
-        quarantines.append(q)
+        summary["approved_duplicate_suppressions_validated"] = approved
+        return summary, d, q
+
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        for i, (summary, d, q) in enumerate(pool.map(process, sorted(selected, key=lambda r: r["asset_id"])), 1):
+            summaries.append(summary)
+            dividends.append(d)
+            quarantines.append(q)
+            if i % 50 == 0 or i == len(selected):
+                print(f"[financial audit] {i}/{len(selected)}", file=sys.stderr, flush=True)
     inputs = {
         "bronze_run_id": bronze_run_id,
+        "consolidated_index_version": consolidated_version,
         "source_fingerprint": fingerprint,
         "source_git_commit": source["source_git_commit"],
         "currency_registry_version": currency_version,
@@ -232,8 +326,9 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--bucket", default=DEFAULT_BUCKET)
     parser.add_argument("--region", default=DEFAULT_REGION)
-    parser.add_argument("--source-fingerprint", required=True)
-    parser.add_argument("--bronze-run-id", required=True)
+    parser.add_argument("--source-fingerprint")
+    parser.add_argument("--bronze-run-id")
+    parser.add_argument("--consolidated-index-version")
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--dividend-currency-registry-version", required=True)
     parser.add_argument("--historical-quarantine-registry-version")
@@ -243,6 +338,7 @@ def main():
     selection.add_argument("--only", nargs="+")
     parser.add_argument("--execute", action="store_true")
     parser.add_argument("--artifact-format", choices=["parquet", "json"], default="parquet")
+    parser.add_argument("--workers", type=int, default=8)
     args = parser.parse_args()
     print(
         json.dumps(
@@ -251,6 +347,7 @@ def main():
                 args.bucket,
                 fingerprint=args.source_fingerprint,
                 bronze_run_id=args.bronze_run_id,
+                consolidated_version=args.consolidated_index_version,
                 run_id=args.run_id,
                 currency_version=args.dividend_currency_registry_version,
                 quarantine_version=args.historical_quarantine_registry_version,
@@ -258,6 +355,7 @@ def main():
                 selectors=args.only,
                 execute=args.execute,
                 artifact_format=args.artifact_format,
+                workers=args.workers,
             ),
             indent=2,
         )

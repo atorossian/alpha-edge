@@ -11,6 +11,14 @@ from moto import mock_aws
 
 from alpha_edge.market import build_silver_financial_v3 as silver
 from alpha_edge.market import ingest_bronze_full_history as bronze
+from alpha_edge.market.dividend_currency_registry_v3 import (
+    RATE_REFERENCE,
+    REGISTRY_ROOT,
+    SCHEMA,
+    UNITS_PER_EUR,
+    registry_version,
+)
+from alpha_edge.market.lakehouse_v3.storage import put_json
 
 BUCKET = "alpha-edge-algo"
 BRONZE_RUN = "bronze-financial-test"
@@ -124,6 +132,25 @@ def test_spy_actions_dry_run_no_s3_write(source):
     assert result["statistics"]["action_statistics"]["reported_dividends"] == 1
     assert result["outputs"]["actions"] == 1
     assert not result["production_eligible"]
+    assert s3.list_objects_v2(Bucket=BUCKET, Prefix=silver.ROOT).get("KeyCount", 0) == 0
+
+
+def test_optional_registry_is_pinned_in_dry_run_manifest(source):
+    s3, fingerprint = source
+    registry = {"schema": SCHEMA, "rate_reference": RATE_REFERENCE, "units_per_eur": UNITS_PER_EUR, "entries": []}
+    version = registry_version(registry)
+    put_json(s3, BUCKET, f"{REGISTRY_ROOT}/{version}/registry.json", registry)
+    result = silver.build(
+        s3,
+        BUCKET,
+        fingerprint=fingerprint,
+        bronze_run_id=BRONZE_RUN,
+        silver_run_id=SILVER_RUN,
+        selector="SPY",
+        dividend_currency_registry_version=version,
+    )
+    assert result["statistics"]["dividend_currency_correction"]["registry_version"] == version
+    assert result["outputs"]["currency_corrected_actions"] == 1
     assert s3.list_objects_v2(Bucket=BUCKET, Prefix=silver.ROOT).get("KeyCount", 0) == 0
 
 

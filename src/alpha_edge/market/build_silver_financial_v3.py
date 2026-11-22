@@ -15,6 +15,7 @@ from typing import Any
 import boto3
 import pandas as pd
 
+from alpha_edge.market.dividend_currency_registry_v3 import apply_currency_corrections, load_registry
 from alpha_edge.market.ingest_bronze_full_history import (
     BRONZE_ROOT,
     DEFAULT_BUCKET,
@@ -59,6 +60,7 @@ def build(
     selector: str,
     fx_currency: str | None = None,
     fx_direction: str | None = None,
+    dividend_currency_registry_version: str | None = None,
     execute: bool = False,
 ) -> dict:
     """Only one pinned, verified Bronze asset; no broad implicit universe run."""
@@ -91,6 +93,17 @@ def build(
     actions, action_stats = extract_source_actions(frame)
     flags = source_adjustment_flags(frame, actions)
     outputs = {"actions": actions, "ratio_flags": flags}
+    currency_correction_stats = None
+    if dividend_currency_registry_version is not None:
+        currency_registry = load_registry(s3, bucket, dividend_currency_registry_version)
+        corrected_actions, currency_correction_stats = apply_currency_corrections(
+            actions,
+            currency_registry,
+            asset_id=record["asset_id"],
+            provider_symbol=record["yahoo_ticker"],
+            bronze_sha256=receipt["data"]["sha256"],
+        )
+        outputs["currency_corrected_actions"] = corrected_actions
     fx_stats = None
     if fx_currency:
         quotes = frame[["provider_symbol", "session_date", "close"]].rename(columns={"close": "quote_close"})
@@ -117,6 +130,8 @@ def build(
         "production_eligible": False,
         "financial_validation": "source_evidence_only",
     }
+    if currency_correction_stats is not None:
+        config_manifest["dividend_currency_correction"] = currency_correction_stats
     root = f"{ROOT}/runs/{silver_run_id}/assets/{_digest(record['asset_id'].encode('utf-8'))}"
     prior = _get_optional(s3, bucket, root + "/manifest.json")
     if prior is not None:
@@ -167,6 +182,7 @@ def main() -> None:
     parser.add_argument("--only", required=True)
     parser.add_argument("--fx-currency")
     parser.add_argument("--fx-direction", choices=["direct", "inverse"])
+    parser.add_argument("--dividend-currency-registry-version")
     parser.add_argument("--execute", action="store_true")
     args = parser.parse_args()
     s3 = boto3.client("s3", region_name=args.region)
@@ -179,6 +195,7 @@ def main() -> None:
         selector=args.only,
         fx_currency=args.fx_currency,
         fx_direction=args.fx_direction,
+        dividend_currency_registry_version=args.dividend_currency_registry_version,
         execute=args.execute,
     )
     print(json.dumps(report, indent=2))

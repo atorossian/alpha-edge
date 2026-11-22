@@ -72,6 +72,34 @@ def test_same_day_cash_is_not_assumed_to_be_post_share():
     assert c.unresolved_cash.iloc[1] and pd.isna(c.candidate_total_return.iloc[1])
 
 
+def test_declared_cash_uses_complete_pre_event_share_basis():
+    source = data()
+    source["currency_original"] = "USD"
+    source.loc[1, "dividends"] = 3.0
+    doc = registry()
+    doc["events"][0]["source_cash"] = "3"
+    doc["cash_reconciliations"] = [
+        {
+            "effective_date": "2000-01-02",
+            "source_cash": "3",
+            "declared_cash": "1.03",
+            "currency": "USD",
+            "entitlement_basis": "pre_share_event",
+            "status": "candidate",
+            "reason": "Issuer declaration",
+            "evidence_urls": ["https://example.org/a", "https://example.org/b"],
+        }
+    ]
+    c, stats = sb.reconstruct(source, doc, bronze_sha256="a" * 64)
+    assert c.candidate_cash_dividend.iloc[1] == pytest.approx(1 / 1.03)
+    assert not c.unresolved_cash.iloc[1]
+    assert stats["cash_reconciliations"] == 1
+    assert c.dividends.iloc[1] == 3
+    doc["cash_reconciliations"][0]["source_cash"] = "2"
+    with pytest.raises(ValueError, match="source value"):
+        sb.reconstruct(source, doc, bronze_sha256="a" * 64)
+
+
 def test_existing_split_and_checksum_fail_closed():
     doc = registry()
     doc["events"][0]["effective_date"] = "2000-01-03"

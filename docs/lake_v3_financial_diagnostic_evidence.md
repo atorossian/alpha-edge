@@ -117,6 +117,23 @@ Run `python -m alpha_edge.market.build_share_basis_candidate_v3 --registry-versi
 publish the isolated candidate to `market/lake_v3/silver/share_basis_candidates/v1/`.
 The manifest is committed last, with content-addressed output and source inputs.
 
+The second TR candidate extends scope to 1992-03-11, adds the missing 1992
+March 1.03 share factor and ten explicit candidate cash reconciliations,
+including the nine previously blocked simultaneous stock/cash events.
+Each uses the documented original declared cash on the pre-share entitlement
+basis, divided by the recorded and missing subsequent share factors including
+the same-day event. The originally reported cash is retained unchanged.
+The September 1992 pair is still blocked: secondary histories conflict, and
+the four-business-day pre-1995 ex-date convention points to September 24 if
+the secondary September 30 record date is correct. Do not suppress either
+without adequate date evidence. Earlier 1980-1992 history remains out of scope
+because additional missing stock and cash events have not been reconciled.
+The updated candidate registry is
+`386a7a050e9a201322982ac0775f260d3b5f70a778a8f774d7ba425928c2e502`.
+In-memory replay on the exact Bronze object yielded 10 reconstructed factors,
+10 cash reconciliations, 8,730 candidate total returns, and 8,596 continuous
+candidate adjusted prices, starting 1992-09-24. No production approval.
+
 ## Reproduce and scale
 
 Use `python -m alpha_edge.market.audit_financial_universe_v3` with explicit

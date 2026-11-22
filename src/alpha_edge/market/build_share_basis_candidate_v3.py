@@ -75,6 +75,25 @@ def validate_registry(doc):
         dates.add(day)
     if len(set(blocked)) != len(blocked) or any(_date(d) < scope for d in blocked):
         raise ValueError("Invalid unresolved cash dates")
+    cash_days = set()
+    for e in doc.get("cash_reconciliations", []):
+        day = _date(e["effective_date"])
+        if day < scope or day in cash_days or day in blocked or day not in dates:
+            raise ValueError("Conflicting cash reconciliation date")
+        if _decimal(e["source_cash"]) <= 0 or _decimal(e["declared_cash"]) <= 0:
+            raise ValueError("Expected positive source and declared cash")
+        if e.get("entitlement_basis") != "pre_share_event" or e.get("status") != "candidate":
+            raise ValueError("Expected explicit candidate pre-share entitlement basis")
+        if not isinstance(e.get("currency"), str) or not re.fullmatch(r"[A-Z]{3}", e["currency"]):
+            raise ValueError("Expected currency code")
+        if (
+            not isinstance(e.get("evidence_urls"), list)
+            or len(e["evidence_urls"]) < 2
+            or not all(isinstance(url, str) and url.startswith("https://") for url in e["evidence_urls"])
+            or not e.get("reason")
+        ):
+            raise ValueError("Cash reconciliation requires independent evidence and rationale")
+        cash_days.add(day)
     return doc
 
 
@@ -144,6 +163,32 @@ def reconstruct(bars, doc, *, bronze_sha256):
     # basis decision; no automatic conversion of a possibly cum-share amount.
     f["unresolved_cash"] |= f.candidate_share_event.ne(0) & cash.ne(0)
     f["candidate_cash_dividend"] = (cash / missing).where(scope & ~f.unresolved_cash & np.isfinite(cash) & cash.ge(0))
+    if doc.get("cash_reconciliations"):
+        f["candidate_cash_reconciled"] = False
+    # Original declarations are on the pre-event share basis. Reverse the
+    # entire subsequent share chain (recorded AND missing), including today's
+    # newly reconstructed share dividend, exactly once. Other cash events keep
+    # the provider basis and the missing-only correction above.
+    recorded = pd.to_numeric(f.stock_splits, errors="raise").replace(0, 1)
+    if not np.isfinite(recorded).all() or not recorded.gt(0).all():
+        raise ValueError("Invalid recorded share ratio")
+    recorded_future = recorded.iloc[::-1].cumprod().iloc[::-1] / recorded
+    for e in doc.get("cash_reconciliations", []):
+        mask = dates.eq(e["effective_date"])
+        if mask.sum() != 1:
+            raise ValueError("Cash reconciliation session missing")
+        i = f.index[mask][0]
+        if (
+            Decimal(str(f.at[i, "dividends"])) != _decimal(e["source_cash"])
+            or f.at[i, "currency_original"] != e["currency"]
+        ):
+            raise ValueError("Cash reconciliation source value or currency changed")
+        factor = recorded_future.iat[i] * missing.iat[i] * f.at[i, "candidate_share_event"]
+        if not np.isfinite(factor) or factor <= 0:
+            raise ValueError("Invalid complete declared-cash share basis")
+        f.at[i, "candidate_cash_dividend"] = float(_decimal(e["declared_cash"])) / factor
+        f.at[i, "candidate_cash_reconciled"] = True
+        f.at[i, "unresolved_cash"] = False
     f["candidate_price_return"] = f.candidate_close / f.candidate_close.shift() - 1
     f["candidate_total_return"] = (f.candidate_close + f.candidate_cash_dividend) / f.candidate_close.shift() - 1
     f["candidate_adjusted_close"] = np.nan
@@ -165,6 +210,8 @@ def reconstruct(bars, doc, *, bronze_sha256):
         "candidate_adjusted_prices": int(f.candidate_adjusted_close.notna().sum()),
         "production_eligible": False,
     }
+    if doc.get("cash_reconciliations"):
+        stats["cash_reconciliations"] = int(f.candidate_cash_reconciled.sum())
     return f, stats
 
 

@@ -134,6 +134,36 @@ In-memory replay on the exact Bronze object yielded 10 reconstructed factors,
 10 cash reconciliations, 8,730 candidate total returns, and 8,596 continuous
 candidate adjusted prices, starting 1992-09-24. No production approval.
 
+## Explicit dividend-event reconstruction pilot (RMS.PA and ML.PA)
+
+The approved strict duplicate registry now has 28 entries and eight legitimate
+pairs: `145570abe413f8f9ac3cc352423afa15465d25b08f585b0ae5d1cca168ad41c9`.
+VIV.PA and NOC retained/suppressed events passed a checksum-pinned replay.
+
+`alpha_edge.market.build_dividend_event_candidate_v3` handles a reviewed window
+with unsupported cash events and a matching amount already present in Bronze.
+It verifies the exact source checksum, currency, complete cash-event window,
+target session and subsequent recorded share ratios before reconstructing one
+candidate event. Share ratios and price coefficients are separate types;
+provisional coefficients cannot support a verified basis. Source observations
+are retained, no price or return transformation is made, and the resulting
+candidate is never production eligible.
+
+Pin registry `a52772b152e3a0ecd957706626a5ff97871f6fbe505d1eb86a91ec7e3cd15824`.
+Hermes: source 20/23 May 2008 EUR1.17 each and 5 June EUR1.00; candidate
+6 June EUR1.00 on verified basis. Michelin: source 9/14 May EUR0.314028
+each and 20 May EUR0.386496; candidate 20 May EUR0.386496 on provisional
+basis, pending independent confirmation of the 2010 rights coefficient.
+The issuer confirms original EUR1.60; the 2022 4:1 split is verified, and the
+implied 0.96624 coefficient is not an approved independent factor.
+
+Run `python -m alpha_edge.market.build_dividend_event_candidate_v3
+--registry-version a52772b152e3a0ecd957706626a5ff97871f6fbe505d1eb86a91ec7e3cd15824
+--run-id rms-ml-event-pilot-20261122` (add `--execute` for immutable candidate
+publication). The two unresolved pairs remain in the diagnostic until final
+financial reconciliation; the candidate cannot release quarantine or replace
+the authoritative histories.
+
 ## Reproduce and scale
 
 Use `python -m alpha_edge.market.audit_financial_universe_v3` with explicit

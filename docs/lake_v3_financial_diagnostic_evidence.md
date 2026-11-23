@@ -164,6 +164,31 @@ publication). The two unresolved pairs remain in the diagnostic until final
 financial reconciliation; the candidate cannot release quarantine or replace
 the authoritative histories.
 
+## European historical rights-issue coefficient reconciliation (2026-11-23)
+
+All 13 reviewed mismatch windows replayed against five checksum-verified Bronze
+histories: 26 original positive observations and 13 candidate positive events.
+The historical provider basis was independently reconstructed from the official
+rights terms and the ratio of the Bronze adjusted cum-close to the historical
+unadjusted reference quote. Volkswagen's reference quote is reconstructed by
+inverting the published theoretical ex-rights formula, not an independently
+retrieved exchange print. Veolia requires both the 2007 and 2021 rights issues.
+These price coefficients reconcile cash on the provider basis; they are not
+additional stock splits to apply to returns.
+
+Eleven windows retain the exact stored legitimate cash. Two additionally replace
+the incorrectly reported cash with the issuer's declared cash excluding a
+shareholder-specific tax credit: NEX.PA 2004-06-07 (0.267775 to 0.178516) and
+RI.PA 2004-05-25 (0.896007 to 0.499877). The explicit issuer-cash correction
+policy requires a verified basis, pinned positive source target and evidence;
+the default exact retained-observation requirement is unchanged.
+
+Evidence review: `96908a60c3fbc263d28d25491a5c411981c916b38a6364a3157901e790a2d0e9`.
+Reconciliation registry: `7839957a5c68d65d52bcd92a54f871fdd1ffcdc5dafca3ed81af32e27de3d647`.
+The partition is 40 cash/factor candidates, 35 event-reconstruction candidates
+and 90 unresolved (165 total). All are candidate only; Bronze and production
+prices remain unchanged.
+
 ## Reproduce and scale
 
 Use `python -m alpha_edge.market.audit_financial_universe_v3` with explicit

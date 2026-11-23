@@ -95,6 +95,28 @@ def test_unexpected_cash_basis_or_source_fails_closed():
         ev.reconstruct(source(), e, source_sha256="a" * 64)
 
 
+def test_explicit_issuer_cash_correction_preserves_source_and_requires_verified_basis():
+    e = entry()
+    e["issuer_amount"] = "2"
+    e["issuer_cash_correction"] = {
+        "policy": "issuer_declared_cash_excluding_tax_credit",
+        "source_target_cash": "0.386496",
+        "reason": "Issuer distinguishes cash from historic tax credit",
+    }
+    with pytest.raises(ValueError, match="Invalid independently documented"):
+        ev.reconstruct(source(), e, source_sha256="a" * 64)
+    e["basis_status"] = "verified"
+    e["basis_factors"][0]["status"] = "verified"
+    out = ev.reconstruct(source(), e, source_sha256="a" * 64)
+    assert out.source_cash.tolist() == [0.314028, 0.314028, 0.386496, 0.0]
+    assert out.candidate_cash.tolist() == [0.0, 0.0, 0.48312, 0.0]
+    assert out.action_status.iloc[2] == "candidate_corrected_issuer_cash"
+    assert not out.production_eligible.any()
+    e["issuer_cash_correction"]["source_target_cash"] = "0.1"
+    with pytest.raises(ValueError, match="Invalid independently documented"):
+        ev.reconstruct(source(), e, source_sha256="a" * 64)
+
+
 def test_immutable_candidate_roundtrip():
     with mock_aws():
         s3 = boto3.client("s3", region_name="us-east-1")

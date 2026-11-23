@@ -82,7 +82,23 @@ def validate_registry(doc):
         # A retained matching amount must actually be stored on some source
         # session. Prohibit a fabricated replacement of an unknown payment.
         amount = normalized_amount(e)
-        if amount not in {_decimal(x["cash"]) for x in events}:
+        correction = e.get("issuer_cash_correction")
+        if correction is not None:
+            # An independently documented cash correction is distinct from an
+            # inferred duplicate. Pin the existing target and require verified
+            # basis, so the original cash remains auditable in the candidate.
+            target_cash = next((_decimal(x["cash"]) for x in events if _date(x["date"]) == target), None)
+            if (
+                not isinstance(correction, dict)
+                or e["basis_status"] != "verified"
+                or target_cash is None
+                or target_cash != _decimal(correction.get("source_target_cash", "0"))
+                or not isinstance(correction.get("reason"), str)
+                or not correction["reason"].strip()
+                or correction.get("policy") != "issuer_declared_cash_excluding_tax_credit"
+            ):
+                raise ValueError("Invalid independently documented issuer cash correction")
+        elif amount not in {_decimal(x["cash"]) for x in events}:
             raise ValueError("No correctly sized source observation to reconstruct")
         urls = e.get("evidence_urls")
         if not isinstance(urls, list) or len(set(urls)) < 2 or not all(u.startswith("https://") for u in urls):
@@ -142,6 +158,8 @@ def reconstruct(bars, entry, *, source_sha256):
     out["action_status"] = "unchanged_no_event"
     out.loc[out.source_cash.ne(0) & ~target, "action_status"] = "candidate_suppressed_source_event"
     out.loc[target, "action_status"] = "candidate_reconstructed_event"
+    if entry.get("issuer_cash_correction") is not None:
+        out.loc[target, "action_status"] = "candidate_corrected_issuer_cash"
     out["basis_status"] = entry["basis_status"]
     out["source_sha256"] = source_sha256
     out["production_eligible"] = False

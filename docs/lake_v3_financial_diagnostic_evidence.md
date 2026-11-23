@@ -255,6 +255,30 @@ independent confirmation of the proposed 2000-05-01 ex-date. Accor's separate
 - Cumulative 165 mismatches: 64 cash/factor candidates, 57 event reconstruction
   or suppression candidates, 44 unresolved. Production eligibility remains false.
 
+## Mexican USD-denominated dividend review — 2026-11-23
+
+Twelve non-Sigma mismatches (PINFRA.MX 2, ORBIA.MX 9, PE&OLES.MX 1) were
+checksum-replayed against immutable Bronze. The observed Yahoo factor implies
+approximately the USD-declared amount, although the close is in MXN; the
+reported cash reflects an approximately constant 18.5 MXN/USD multiplier.
+Issuer/exchange notices and independent per-share histories support the USD
+amounts. Six ORBIA installments use rounded independent per-share quotes
+corroborated by issuer aggregate USD declarations; exact notices remain desirable.
+No subsequent reported splits occur after these events.
+
+For candidate local valuation only, multiply the declared USD by the DOF FX
+published on the preceding business day, which is available before the ex-date,
+then calculate `1 - candidate_cash / previous_close`. This is not a claim of
+actual MXN settlement or a payment-day FX fixing. The original USD declaration,
+FX publication date and rate, source hash, historical prices, evidence and
+candidate factor are pinned; production FX policy approval remains required.
+The existing ORBIA quarantine is not released.
+
+- Review: `fc07826b52896907263b03e95dbafb3f0a086176ca1b8592926cbd8b1f0a37b0`.
+- Reconciliation registry: `219e80e837d38f6ef07b1cf93f78931d107cf8f03340bc77c9e430e96ec906f0`.
+- Cumulative 165 mismatches: 76 cash/factor candidates, 57 event reconstruction
+  or suppression candidates, 32 unresolved. No Bronze or production price changes.
+
 ## Reproduce and scale
 
 Use `python -m alpha_edge.market.audit_financial_universe_v3` with explicit

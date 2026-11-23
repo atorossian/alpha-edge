@@ -234,6 +234,27 @@ observations are on the first resumed session, not a claim that the legal ex-dat
 - Cumulative 165 mismatches: 64 cash/factor candidates, 43 event reconstruction
   candidates, 58 unresolved. No production prices or Bronze observations changed.
 
+## Historical share-basis discrepancy review — 2026-11-23
+
+Fifteen cases across KRN.DE (4), ITX.MC (4), KPN.AS (4), and AC.PA (3) were
+reviewed. Issuer distribution records contradict fourteen additional cash events;
+the legitimate dividend observations are already stored. The user explicitly
+approved suppression of those fourteen unsupported events, distinct from literal
+duplicate payments. Each exact session has candidate cash 0 and factor 1; all
+other observations remain unchanged. KPN.AS 2000-06-21 remains held pending
+independent confirmation of the proposed 2000-05-01 ex-date. Accor's separate
+2008-05-20 payment-date duplicate is not part of this approval.
+
+- Evidence review: `c958c8c81fb2bcd24efc9f031d18c48d479725d92f32aaeb64f22cf94182e3da`.
+- Suppression registry: `3dbf6d63692ff3dbb57d8dcce3806faf21df126f65c482835f93e467c98e0c23`.
+- Reconciliation registry: `879ca02c8ed2934288e635a09d5bc35cf8cd2bd3ba1d02786ef3c383a8bfa1bd`.
+- Candidate run: `historical-basis-suppressions-20261123`, four assets, 31 event rows,
+  14 suppressed and 17 retained positive source observations. Exact session scope;
+  no intervening events or source prices modified. Parquet SHA-256:
+  `8679f61da28e29050c136c8677b0d86b9ea907fcb8cb0c23341facd2df96077c`.
+- Cumulative 165 mismatches: 64 cash/factor candidates, 57 event reconstruction
+  or suppression candidates, 44 unresolved. Production eligibility remains false.
+
 ## Reproduce and scale
 
 Use `python -m alpha_edge.market.audit_financial_universe_v3` with explicit

@@ -279,6 +279,30 @@ The existing ORBIA quarantine is not released.
 - Cumulative 165 mismatches: 76 cash/factor candidates, 57 event reconstruction
   or suppression candidates, 32 unresolved. No Bronze or production price changes.
 
+## VESTA quarterly dividend reconciliation — 2026-11-23
+
+All ten flagged VESTA.MX observations were checksum-replayed against Bronze.
+The issuer reports the actual MXN distributed per share in quarterly results;
+the declared USD amount and the DOF publication preceding payment independently
+reconcile each amount within MXN 0.00005. April 2022 and April 2023 source events
+use annual-sized amounts instead of the quarterly installment. October 2021
+cash is corroborated by the issuer's quarterly settlement disclosure despite
+the inconsistent annual USD note following the April 2021 equity issuance.
+No subsequent reported splits were found.
+
+The issuer-reported MXN settlement and its factor are retrospective candidates.
+A separate prior-ex-date published FX valuation is recorded, with availability
+of the precise USD declaration not assumed. Production policy approval remains
+required. May 2026 uses the May 4 DOF publication because no edition was
+published May 5. Two additional unflagged source events (2021-07-13 and
+2022-01-12) contain USD-sized cash in MXN and are recorded for follow-up,
+outside the original 165 mismatch denominator.
+
+- Review: `db0d695696e2d97fc949190eac74147fd88288dc16e34b81f1d690dff3b3586f`.
+- Reconciliation registry: `10f9a047170e5d52f118854362fa825bfb3c642d7be7a50d4c92e9104d354389`.
+- Cumulative 165 mismatches: 86 cash/factor candidates, 57 event reconstruction
+  or suppression candidates, 22 unresolved. Bronze and production unchanged.
+
 ## Reproduce and scale
 
 Use `python -m alpha_edge.market.audit_financial_universe_v3` with explicit

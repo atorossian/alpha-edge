@@ -303,6 +303,22 @@ outside the original 165 mismatch denominator.
 - Cumulative 165 mismatches: 86 cash/factor candidates, 57 event reconstruction
   or suppression candidates, 22 unresolved. Bronze and production unchanged.
 
+### Additional VESTA currency observations — 2026-11-23
+
+Both previously unflagged events were checksum-replayed and reconciled:
+2021-07-13 source cash 0.020133, actual MXN 0.40265; 2022-01-12 source cash
+0.020133, actual MXN 0.41004. The issuer's 4Q21 results report both settlements;
+payment-day prior DOF FX independently reconciles within MXN 0.00005.
+Both source dividend and Yahoo factor were numerically consistent but on the
+wrong currency basis, so the original factor diagnostic missed them. The
+retrospective candidate and prior-ex-date FX valuation remain distinct.
+
+- Review: `a86f2948c08a76d06d0a1bdde869b6c6f590c5f6f182000b1b00b72b46c7da3c`.
+- Reconciliation registry: `92557ec4d79bbd55e994dbbd5bfe68823dd15926ca1b7a35f38812fb9d520bc6`.
+- Two additional currency candidates are stored separately from the original
+  165 mismatches (86 cash/factor, 57 event reconstruction/suppression, 22 held).
+  No production price or Bronze changes; no quarantine release.
+
 ## Reproduce and scale
 
 Use `python -m alpha_edge.market.audit_financial_universe_v3` with explicit

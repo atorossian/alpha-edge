@@ -319,6 +319,33 @@ retrospective candidate and prior-ex-date FX valuation remain distinct.
   165 mismatches (86 cash/factor, 57 event reconstruction/suppression, 22 held).
   No production price or Bronze changes; no quarantine release.
 
+## Remaining 22 discrepancies — 2026-11-23
+
+All remaining cases were reviewed and the pinned Bronze observations replayed.
+Four Irish issuer cash corrections (Kingspan and Glanbia), four USD-to-MXN
+historical valuation candidates (Alpek 2013 and Sigma 2007/2013/2016), and one
+Sigma event date reconstruction were registered. Historical FX valuation is
+not an assertion of actual settlement, and remains candidate only. The BMV
+2005 prospectus gives 2005-04-07 ex-date and MXN 0.896 for Sigma/ALFA, with a
+10:1 subsequent split and the previously validated 0.9135698846 price coefficient;
+the normalized candidate is 0.081856, moved from the incorrect April 8 source
+event using the existing event-builder validation. No extra payment is created.
+
+Thirteen remain held: five absent ex-sessions (BBAS3.SA, CSMG3.SA, KIMBERA.MX,
+ALSEA.MX, VIG.VI); three unsupported extra events awaiting explicit user approval
+(SK.PA, REP.DE, SGO.PA, with SGO also requiring tax-credit cash correction);
+KPN date verification; SBMO combined cash/stock distribution; VID and Sigma
+2025 price basis; and contradictory Sigma 2006 exchange date/amount evidence.
+
+- Review: `eee322ac87a8e0163eaa18eaf226a5e0e75c9e3604bc0c7396b7097d6df8e118`.
+- Reconciliation registry: `fefe38d4798cdb2635c410155c6ad70db9e06ce0603aa615067c915c4c859076`.
+- Event registry: `5a7cd63f22cadc2a6b802b4ddd70659f9b0e483d7b18556e7a609a3cb9ec1c31`.
+- Candidate run `sigma-2005-exdate-reconstruction-20261123`: two rows, one
+  retained/reconstructed payment, Parquet SHA-256
+  `d5b4547a4b878340f9371d6c45113c1a0183edfeda2f151c51fff1b29579d22d`.
+- Original scope: 94 cash/factor candidates, 58 event candidates, 13 held (165).
+  Two additional VESTA candidates are tracked separately. No Bronze or production changes.
+
 ## Reproduce and scale
 
 Use `python -m alpha_edge.market.audit_financial_universe_v3` with explicit

@@ -214,6 +214,26 @@ Six historical Sigma cases remain held (2005, 2006, 2007, 2013, 2016 and 2025).
 The new partition is 58 cash/factor candidates, 36 event reconstruction
 candidates and 71 unresolved. Bronze and production prices are unchanged.
 
+## Individual dividend discrepancies — 2026-11-23
+
+The 18 individual mismatches were reviewed against issuer/exchange evidence. Seven
+extra observations were reconstructed with their independently supported retained
+payments (EMN, CBU, PGR, TXT, ALB, AZM.MI, RED.MC). Six same-session cash/factor
+corrections were registered (BBAS3.SA, FLRY3.SA, DXCO3.SA, CSMG3.SA, VALE3.SA,
+BEEF3.SA). Four cases require missing source-session recovery (BBAS3.SA 2012,
+CSMG3.SA 2020, KIMBERA.MX, ALSEA.MX); VID.MC requires share-basis verification.
+The US duplicates precede the September 2001 exchange closure; the retained
+observations are on the first resumed session, not a claim that the legal ex-date changed.
+
+- Evidence registry: `742555018952f393c6cb8fee0f5cb1fe0bdb9f08aa11efa217b6a41be1184860`.
+- Factor reconciliation registry: `15b53695df19f4c8a4a1c30436b534b6b4dcbab0b07778f5806bf027485bfa7f`.
+- Event reconstruction registry: `f9f83e65613f8ff77f623d58223ffaab8840e5327e0d41f40ca29aa0408c9883`.
+- Candidate run: `individual-duplicates-reconciliation-20261123`, 14 source event rows,
+  seven candidate positive events, seven assets, no provisional basis assets.
+  Parquet SHA-256 `3fc5d46ded7a151a0139959b75de5efab660f81b6f4c14ddd38d03ecbae52dae`.
+- Cumulative 165 mismatches: 64 cash/factor candidates, 43 event reconstruction
+  candidates, 58 unresolved. No production prices or Bronze observations changed.
+
 ## Reproduce and scale
 
 Use `python -m alpha_edge.market.audit_financial_universe_v3` with explicit

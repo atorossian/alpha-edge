@@ -189,6 +189,31 @@ The partition is 40 cash/factor candidates, 35 event-reconstruction candidates
 and 90 unresolved (165 total). All are candidate only; Bronze and production
 prices remain unchanged.
 
+## Sigma/ALFA historical dividend reconciliation (2026-11-23)
+
+The Sigma/ALFA group exposed a currency divergence across historical dividends:
+the provider's implied cash is approximately 5.402% of its reported cash.
+Issuer and exchange records establish USD declarations and historical MXN cash
+equivalents. The 2012 10-for-1 split is already reflected in prices. The provider
+price coefficient before the Axtel distribution in May 2023 is approximately
+0.91356983, independently pinned by the 2020-12-11 closing quote and corroborated
+by historical issuer year-end quotes and the tick grid of the flagged sessions.
+This is a price-basis normalization, not an additional split.
+
+18 same-session cash/factor candidates were checksum-replayed; the 2018-02-06
+source event is separately reconstructed on the independently documented
+2018-03-07 ex-date (MXN 0.569977 on the provider price basis). The single-event
+date-correction policy requires an explicit pinned positive source event,
+verified basis, empty target observation and independent evidence. Historical
+FX published after the ex-date remains retrospective-only and cannot be used
+for point-in-time return construction. Noncash spin-offs are separately treated.
+
+Review: `b8e74e68026405ad838f321042be6afa2a046e8492b0f870f9b44e2e118363db`.
+Registry: `2b029229c01a88db9b9ae181072ce29b726f5aa6571ed262be534ebc8f439b52`.
+Six historical Sigma cases remain held (2005, 2006, 2007, 2013, 2016 and 2025).
+The new partition is 58 cash/factor candidates, 36 event reconstruction
+candidates and 71 unresolved. Bronze and production prices are unchanged.
+
 ## Reproduce and scale
 
 Use `python -m alpha_edge.market.audit_financial_universe_v3` with explicit

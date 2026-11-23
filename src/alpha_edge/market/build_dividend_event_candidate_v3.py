@@ -77,13 +77,28 @@ def validate_registry(doc):
         days = [_date(x["date"]) for x in events]
         if len(set(days)) != len(days) or any(not start <= d <= end for d in days):
             raise ValueError("Repeated or out-of-window source event")
-        if len(events) < 2 or any(_decimal(x["cash"]) <= 0 for x in events):
+        date_correction = e.get("issuer_date_correction")
+        if len(events) < (1 if date_correction is not None else 2) or any(_decimal(x["cash"]) <= 0 for x in events):
             raise ValueError("Expected positive original candidate events")
         # A retained matching amount must actually be stored on some source
         # session. Prohibit a fabricated replacement of an unknown payment.
         amount = normalized_amount(e)
         correction = e.get("issuer_cash_correction")
-        if correction is not None:
+        if date_correction is not None:
+            if (
+                correction is not None
+                or not isinstance(date_correction, dict)
+                or e["basis_status"] != "verified"
+                or len(events) != 1
+                or target in days
+                or date_correction.get("source_date") != events[0]["date"]
+                or _decimal(date_correction.get("source_cash", "0")) != _decimal(events[0]["cash"])
+                or date_correction.get("policy") != "independently_documented_single_event_date_and_cash"
+                or not isinstance(date_correction.get("reason"), str)
+                or not date_correction["reason"].strip()
+            ):
+                raise ValueError("Invalid independently documented issuer date correction")
+        elif correction is not None:
             # An independently documented cash correction is distinct from an
             # inferred duplicate. Pin the existing target and require verified
             # basis, so the original cash remains auditable in the candidate.
@@ -160,6 +175,8 @@ def reconstruct(bars, entry, *, source_sha256):
     out.loc[target, "action_status"] = "candidate_reconstructed_event"
     if entry.get("issuer_cash_correction") is not None:
         out.loc[target, "action_status"] = "candidate_corrected_issuer_cash"
+    if entry.get("issuer_date_correction") is not None:
+        out.loc[target, "action_status"] = "candidate_corrected_issuer_date_and_cash"
     out["basis_status"] = entry["basis_status"]
     out["source_sha256"] = source_sha256
     out["production_eligible"] = False

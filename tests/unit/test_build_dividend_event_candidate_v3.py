@@ -117,6 +117,33 @@ def test_explicit_issuer_cash_correction_preserves_source_and_requires_verified_
         ev.reconstruct(source(), e, source_sha256="a" * 64)
 
 
+def test_explicit_single_event_date_and_cash_correction():
+    raw = source()
+    raw.loc[0, "dividends"] = 0.0
+    raw.loc[1, "dividends"] = 0.0
+    e = entry()
+    e["issuer_ex_date"] = "2008-05-21"
+    e["issuer_amount"] = "2"
+    e["basis_status"] = "verified"
+    e["basis_factors"][0]["status"] = "verified"
+    e["source_events"] = [{"date": "2008-05-20", "cash": "0.386496"}]
+    with pytest.raises(ValueError, match="Expected positive"):
+        ev.reconstruct(raw, e, source_sha256="a" * 64)
+    e["issuer_date_correction"] = {
+        "policy": "independently_documented_single_event_date_and_cash",
+        "source_date": "2008-05-20",
+        "source_cash": "0.386496",
+        "reason": "Issuer cash and independently documented ex-date",
+    }
+    out = ev.reconstruct(raw, e, source_sha256="a" * 64)
+    assert out.source_cash.tolist() == [0.0, 0.0, 0.386496, 0.0]
+    assert out.candidate_cash.tolist() == [0.0, 0.0, 0.0, 0.48312]
+    assert out.action_status.iloc[3] == "candidate_corrected_issuer_date_and_cash"
+    e["issuer_date_correction"]["source_cash"] = "0.01"
+    with pytest.raises(ValueError, match="Invalid independently documented issuer date"):
+        ev.reconstruct(raw, e, source_sha256="a" * 64)
+
+
 def test_immutable_candidate_roundtrip():
     with mock_aws():
         s3 = boto3.client("s3", region_name="us-east-1")

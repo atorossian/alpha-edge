@@ -9,7 +9,7 @@ import json
 import re
 from datetime import date, timedelta
 from urllib.error import HTTPError
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 from urllib.request import Request
 
 import certifi
@@ -43,6 +43,14 @@ class EodhdSourceError(RuntimeError):
     """Sanitized provider acquisition or validation error."""
 
 
+def _validate_symbol(symbol):
+    if not isinstance(symbol, str) or not re.fullmatch(r"[A-Za-z0-9_.&-]+\.[A-Za-z0-9]+", symbol):
+        raise EodhdSourceError(f"Invalid EODHD symbol: {symbol!r}")
+    if symbol.startswith(".") or ".." in symbol:
+        raise EodhdSourceError(f"Invalid EODHD symbol: {symbol!r}")
+    return symbol
+
+
 def load_mapping(s3, bucket, records, version):
     if not isinstance(version, str) or not re.fullmatch(r"[a-f0-9]{64}", version):
         raise EodhdSourceError("EODHD requires a pinned mapping registry SHA256")
@@ -61,9 +69,7 @@ def load_mapping(s3, bucket, records, version):
         entry = by_id.get(record["asset_id"])
         if not entry or entry["yahoo_symbol"] != record["yahoo_ticker"]:
             raise EodhdSourceError(f"Missing/stale mapping: {record['asset_id']}")
-        symbol = entry["eodhd_symbol"]
-        if not re.fullmatch(r"[A-Za-z0-9_.-]+", symbol) or "." not in symbol:
-            raise EodhdSourceError("Invalid EODHD symbol")
+        symbol = _validate_symbol(entry["eodhd_symbol"])
         mapped = {
             **record,
             "provider": "eodhd",
@@ -116,10 +122,11 @@ def acquire_eodhd(record, end, token, *, opener=None):
         raise EodhdSourceError("Missing EODHD credential")
     until = (date.fromisoformat(end) - timedelta(days=1)).isoformat()
     base = _api_base(record)
+    symbol_path = quote(_validate_symbol(record["provider_symbol"]), safe="")
     responses = {}
     for endpoint in ENDPOINTS:
         params = {"api_token": token, "fmt": "json", "to": until}
-        url = f"{base}/{endpoint}/{record['provider_symbol']}"
+        url = f"{base}/{endpoint}/{symbol_path}"
         try:
             if opener is None:
                 # Explicit CA bundle; reject redirects so credentials stay on the approved host.

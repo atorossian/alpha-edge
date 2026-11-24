@@ -176,3 +176,4 @@ B76AE0C6E73A562C,ATKR,equity,Asset not publicly traded anymore,Acquired by Prysm
 9F14C5ABFC2E8F69,INPST,equity,historical_only,Euronext Amsterdam delisted 2026-10-23; last trading day 2026-10-22; retain immutable Bronze history
 E15C493CCEE55296,LESL,equity,historical_only,Chapter 11 and Nasdaq delisting; retain Bronze history; exclude OTC successor LESLQ
 78D0D5C2400AADC3,COP,equity,historical_only,CompuGroup Medical Frankfurt regulated listing ended 2025-06-24; no longer tradable in Quantfury per owner; retain Hamburg Bronze history; do not exclude ConocoPhillips
+84C099F52345F31B,ROKU,equity,historical_only,Fox acquisition completed 2026-11-06; Nasdaq trading halted before 2026-11-09 per SEC 8-K; retain canonical asset ID and existing Bronze history

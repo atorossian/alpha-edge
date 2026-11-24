@@ -8,11 +8,27 @@ from __future__ import annotations
 import json
 import re
 from datetime import date, timedelta
-from urllib.parse import urlencode
-from urllib.request import Request, urlopen
 from urllib.error import HTTPError
+from urllib.parse import urlencode
+from urllib.request import Request
+
+import certifi
+import requests
 
 from alpha_edge.market.lakehouse_v3.storage import ROOT, digest, json_bytes, verified_bytes
+
+STANDARD_API_BASE = "https://eodhd.com/api"
+MILAN_API_BASE = "https://cboe.eodhd.com/api"
+
+
+def _api_base(record):
+    base = record.get("api_base", STANDARD_API_BASE)
+    if base == STANDARD_API_BASE:
+        return base
+    if base == MILAN_API_BASE and record["provider_symbol"].endswith(".MI"):
+        return base
+    raise EodhdSourceError("Unapproved EODHD endpoint for instrument")
+
 
 MAPPING_ROOT = f"{ROOT}/config/eodhd_symbol_mappings/v1"
 ENDPOINTS = ("eod", "splits", "div")
@@ -48,8 +64,15 @@ def load_mapping(s3, bucket, records, version):
         symbol = entry["eodhd_symbol"]
         if not re.fullmatch(r"[A-Za-z0-9_.-]+", symbol) or "." not in symbol:
             raise EodhdSourceError("Invalid EODHD symbol")
-        selected.append({**record, "provider": "eodhd", "provider_symbol": symbol,
-                         "mapping_version": version})
+        mapped = {
+            **record,
+            "provider": "eodhd",
+            "provider_symbol": symbol,
+            "mapping_version": version,
+            "api_base": entry.get("api_base", STANDARD_API_BASE),
+        }
+        _api_base(mapped)
+        selected.append(mapped)
     return selected
 
 
@@ -59,6 +82,7 @@ def verify_bundle(payload, record, end):
             or bundle.get("asset_id") != record["asset_id"]
             or bundle.get("provider_symbol") != record["provider_symbol"]
             or bundle.get("mapping_version") != record["mapping_version"]
+            or bundle.get("api_base", STANDARD_API_BASE) != _api_base(record)
             or bundle.get("end_exclusive") != end
             or set(bundle["responses"]) != set(ENDPOINTS)):
         raise EodhdSourceError("Invalid bundle identity or endpoints")
@@ -87,21 +111,33 @@ def verify_bundle(payload, record, end):
     return {**stats["eod"], "endpoints": stats}
 
 
-def acquire_eodhd(record, end, token, *, opener=urlopen):
+def acquire_eodhd(record, end, token, *, opener=None):
     if not token:
         raise EodhdSourceError("Missing EODHD credential")
     until = (date.fromisoformat(end) - timedelta(days=1)).isoformat()
+    base = _api_base(record)
     responses = {}
     for endpoint in ENDPOINTS:
-        params = urlencode({"api_token": token, "fmt": "json", "to": until})
-        request = Request(
-            f"https://eodhd.com/api/{endpoint}/{record['provider_symbol']}?{params}",
-            headers={"Accept": "application/json"},
-        )
+        params = {"api_token": token, "fmt": "json", "to": until}
+        url = f"{base}/{endpoint}/{record['provider_symbol']}"
         try:
-            with opener(request, timeout=60) as response:
-                raw = response.read()
+            if opener is None:
+                # Explicit CA bundle; reject redirects so credentials stay on the approved host.
+                response = requests.get(
+                    url, params=params, headers={"Accept": "application/json"},
+                    verify=certifi.where(), timeout=60, allow_redirects=False,
+                )
+                if response.status_code != 200:
+                    raise EodhdSourceError(f"{endpoint}: HTTP {response.status_code}")
+                raw = response.content
+            else:
+                # Injectable transport for existing offline tests.
+                request = Request(f"{url}?{urlencode(params)}", headers={"Accept": "application/json"})
+                with opener(request, timeout=60) as response:
+                    raw = response.read()
             responses[endpoint] = {"raw_json": raw.decode("utf-8"), "sha256": digest(raw)}
+        except EodhdSourceError:
+            raise
         except HTTPError as exc:
             raise EodhdSourceError(f"{endpoint}: HTTP {exc.code}") from None
         except Exception:
@@ -112,6 +148,7 @@ def acquire_eodhd(record, end, token, *, opener=urlopen):
         "provider_symbol": record["provider_symbol"],
         "mapping_version": record["mapping_version"],
         "end_exclusive": end,
+        "api_base": base,
         "responses": responses,
     })
     try:
@@ -120,6 +157,7 @@ def acquire_eodhd(record, end, token, *, opener=urlopen):
         raise EodhdSourceError("Provider response validation failed") from None
     return payload, validation, {
         "provider": "eodhd", "mapping_version": record["mapping_version"],
+        "api_base": base,
         "identity_status": "candidate_mapping",
         "ohlc_basis": "provider_documented_as_traded",
         "volume_basis": "provider_documented_split_adjusted",

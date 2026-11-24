@@ -1,10 +1,10 @@
-"""Full-history Yahoo Finance -> immutable S3 Bronze, using the CURRENT universe.
+"""Full-history market data -> immutable S3 Bronze, using the CURRENT universe.
 
 Inputs: ONLY the five versioned universe-configuration CSVs snapshotted in S3.
 No historical market data or v1/v2 lake artifacts are read. No local files,
 local data caches, FX conversion, adjusted-return calculation, or repair.
 
-Reuses acquire_yahoo_bars from ingest_bronze_yahoo_v2 (the source adapter).
+Reuses provider acquisition adapters with shared run orchestration.
 DO NOT import ingest_market_data.py: it creates a local cache on import and
 writes transformed legacy outputs. This job has a separate S3-only contract.
 """
@@ -28,6 +28,7 @@ import numpy as np
 import pandas as pd
 from botocore.exceptions import ClientError
 
+from alpha_edge.market.eodhd_source_v3 import acquire_eodhd, load_mapping, verify_bundle
 from alpha_edge.market.ingest_bronze_yahoo_v2 import acquire_yahoo_bars
 from alpha_edge.market.lakehouse_v3.registry_v3 import resolve_source_fingerprint
 from alpha_edge.market.lakehouse_v3.storage import LakehouseError, parquet_bytes, put_immutable
@@ -36,6 +37,19 @@ DEFAULT_BUCKET = "alpha-edge-algo"
 DEFAULT_REGION = "eu-west-1"
 SNAPSHOT_ROOT = "market/lake_v3/config/source_snapshots"
 BRONZE_ROOT = "market/lake_v3/bronze/full_history"
+EODHD_ROOT = "market/lake_v3/bronze/eodhd_full_history/v1"
+
+
+def _root(provider):
+    return {"yahoo": BRONZE_ROOT, "eodhd": EODHD_ROOT}[provider]
+
+
+def _provider(record):
+    return record.get("provider", "yahoo")
+
+
+def _symbol(record):
+    return record.get("provider_symbol", record["yahoo_ticker"])
 SOURCE_NAMES = (
     "universe.csv",
     "universe_overrides.csv",
@@ -94,7 +108,7 @@ def _get_optional(s3: Any, bucket: str, key: str) -> bytes | None:
 
 def _put_immutable(s3: Any, bucket: str, key: str, payload: bytes, content_type: str) -> None:
     try:
-        put_immutable(s3, bucket, key, payload, content_type=content_type, scope=BRONZE_ROOT)
+        put_immutable(s3, bucket, key, payload, content_type=content_type, scope=EODHD_ROOT if key.startswith(EODHD_ROOT + "/") else BRONZE_ROOT)
     except LakehouseError as exc:
         raise BronzeIngestError(str(exc)) from exc
 
@@ -208,9 +222,9 @@ def load_universe(s3: Any, bucket: str, fingerprint: str) -> tuple[list[dict], d
     return sorted(included, key=lambda x: x["asset_id"]), metadata
 
 
-def _target_prefix(run_id: str, asset_id: str) -> str:
+def _target_prefix(run_id: str, asset_id: str, provider: str = "yahoo") -> str:
     token = _digest(asset_id.encode("utf-8"))
-    return f"{BRONZE_ROOT}/runs/{run_id}/assets/{token}"
+    return f"{_root(provider)}/runs/{run_id}/assets/{token}"
 
 
 def _check_bars(frame: pd.DataFrame, record: dict) -> dict:
@@ -244,7 +258,8 @@ def _check_bars(frame: pd.DataFrame, record: dict) -> dict:
 
 
 def _write_run(s3: Any, bucket: str, *, run_id: str, run_config: dict, execute: bool) -> None:
-    key = f"{BRONZE_ROOT}/runs/{run_id}/run.json"
+    provider = "eodhd" if run_config.get("provider_parameters", {}).get("provider") == "eodhd" else "yahoo"
+    key = f"{_root(provider)}/runs/{run_id}/run.json"
     existing = _get_optional(s3, bucket, key)
     if existing is not None:
         current = json.loads(existing)
@@ -255,22 +270,24 @@ def _write_run(s3: Any, bucket: str, *, run_id: str, run_config: dict, execute: 
 
 
 def _completed(s3: Any, bucket: str, *, run_id: str, record: dict, verify_hash: bool) -> dict | None:
-    prefix = _target_prefix(run_id, record["asset_id"])
+    prefix = _target_prefix(run_id, record["asset_id"], _provider(record))
     blob = _get_optional(s3, bucket, prefix + "/manifest.json")
     if blob is None:
         return None
     manifest = json.loads(blob)
+    schema = "alpha_edge_eodhd_asset_v1" if _provider(record) == "eodhd" else "alpha_edge_full_history_asset_v1"
     if (
-        manifest.get("schema") != "alpha_edge_full_history_asset_v1"
+        manifest.get("schema") != schema
         or manifest.get("asset_id") != record["asset_id"]
-        or manifest.get("provider_symbol") != record["yahoo_ticker"]
+        or manifest.get("provider_symbol") != _symbol(record)
         or manifest.get("run_id") != run_id
         or manifest.get("status") != "committed"
     ):
         raise BronzeIngestError(f"Existing asset commit is incompatible: {prefix}")
     data_ref = manifest.get("data", {})
     data_key = data_ref.get("key", "")
-    if not data_key.startswith(prefix + "/objects/") or not data_key.endswith(".parquet"):
+    extension = ".json" if _provider(record) == "eodhd" else ".parquet"
+    if not data_key.startswith(prefix + "/objects/") or not data_key.endswith(extension):
         raise BronzeIngestError(f"Existing asset data key unsafe: {data_key}")
     if not SHA_RE.fullmatch(str(data_ref.get("sha256", ""))):
         raise BronzeIngestError(f"Existing asset data SHA malformed: {prefix}")
@@ -278,8 +295,11 @@ def _completed(s3: Any, bucket: str, *, run_id: str, record: dict, verify_hash: 
         actual = _read(s3, bucket, data_key)
         if _digest(actual) != data_ref["sha256"] or len(actual) != data_ref.get("bytes"):
             raise BronzeIngestError(f"Existing Bronze source Parquet corrupt: {data_key}")
-        restored = pd.read_parquet(io.BytesIO(actual), engine="pyarrow")
-        if len(restored) != manifest.get("validation", {}).get("rows"):
+        if _provider(record) == "eodhd":
+            rows = verify_bundle(actual, record, manifest["end_exclusive"])["rows"]
+        else:
+            rows = len(pd.read_parquet(io.BytesIO(actual), engine="pyarrow"))
+        if rows != manifest.get("validation", {}).get("rows"):
             raise BronzeIngestError(f"Existing Bronze row count mismatch: {data_key}")
     else:
         head = s3.head_object(Bucket=bucket, Key=data_key)
@@ -302,31 +322,38 @@ def _acquire_one(
     retry_delay: float,
     ticker_factory: Callable | None,
     sleep: Callable[[float], None],
+    eodhd_token: str | None = None,
 ) -> dict:
-    asset_id, symbol = record["asset_id"], record["yahoo_ticker"]
+    asset_id, symbol = record["asset_id"], _symbol(record)
     if not symbol:
-        raise BronzeIngestError(f"{asset_id}: missing resolved Yahoo ticker")
+        raise BronzeIngestError(f"{asset_id}: missing resolved provider ticker")
     failure = None
     for attempt in range(1, retry_count + 2):
         try:
-            bars, provenance = acquire_yahoo_bars(
-                asset_id,
-                symbol,
-                start=None,
-                end=end,
-                batch_id=run_id,
-                ticker_factory=ticker_factory,
-                currency_hint=record["currency_hint"],
-                full_history=True,
-            )
-            validation = _check_bars(bars, record)
-            payload = parquet_bytes(bars)
-            prefix = _target_prefix(run_id, asset_id)
+            if _provider(record) == "eodhd":
+                payload, validation, provenance = acquire_eodhd(record, end, eodhd_token)
+                extension, content_type = "json", "application/json"
+            else:
+                bars, provenance = acquire_yahoo_bars(
+                    asset_id,
+                    symbol,
+                    start=None,
+                    end=end,
+                    batch_id=run_id,
+                    ticker_factory=ticker_factory,
+                    currency_hint=record["currency_hint"],
+                    full_history=True,
+                )
+                validation = _check_bars(bars, record)
+                payload = parquet_bytes(bars)
+                extension, content_type = "parquet", "application/vnd.apache.parquet"
+            prefix = _target_prefix(run_id, asset_id, _provider(record))
             sha = _digest(payload)
-            data_key = f"{prefix}/objects/{sha}.parquet"
-            _put_immutable(s3, bucket, data_key, payload, "application/vnd.apache.parquet")
+            data_key = f"{prefix}/objects/{sha}.{extension}"
+            _put_immutable(s3, bucket, data_key, payload, content_type)
+            schema = "alpha_edge_eodhd_asset_v1" if _provider(record) == "eodhd" else "alpha_edge_full_history_asset_v1"
             manifest = {
-                "schema": "alpha_edge_full_history_asset_v1",
+                "schema": schema,
                 "run_id": run_id,
                 "asset_id": asset_id,
                 "broker_ticker": record["ticker"],
@@ -360,14 +387,14 @@ def _acquire_one(
 
 def _record_failure(s3: Any, bucket: str, run_id: str, record: dict, error: Exception) -> None:
     key = (
-        f"{_target_prefix(run_id, record['asset_id'])}/failures/"
+        f"{_target_prefix(run_id, record['asset_id'], _provider(record))}/failures/"
         f"{datetime.now(timezone.utc):%Y%m%dT%H%M%S}-{uuid.uuid4().hex}.json"
     )
     report = {
         "schema": "alpha_edge_bronze_failure_v1",
         "run_id": run_id,
         "asset_id": record["asset_id"],
-        "provider_symbol": record["yahoo_ticker"],
+        "provider_symbol": _symbol(record),
         "error_type": type(error).__name__,
         "error": str(error)[:2000],
         "occurred_at_utc": _utc_now(),
@@ -387,6 +414,7 @@ def _audit_event(
     output_keys: list[str] | None = None,
     metadata: dict | None = None,
     error: str | None = None,
+    provider: str = "yahoo",
 ) -> str:
     """Immutable S3 audit, mirroring Alpha Edge's existing build_dataset event fields.
 
@@ -396,7 +424,7 @@ def _audit_event(
     """
     now = datetime.now(timezone.utc)
     audit_id = f"bronze_{now:%Y%m%dT%H%M%S}-{uuid.uuid4().hex}"
-    key = f"{BRONZE_ROOT}/runs/{run_id}/audit/dt={now:%Y-%m-%d}/{audit_id}.json"
+    key = f"{_root(provider)}/runs/{run_id}/audit/dt={now:%Y-%m-%d}/{audit_id}.json"
     payload = {
         "schema": "alpha_edge_bronze_audit_v1",
         "audit_id": audit_id,
@@ -405,14 +433,14 @@ def _audit_event(
         "entity_type": "bronze_full_history",
         "entity_id": record["asset_id"] if record else None,
         "source_script": "ingest_bronze_full_history.py",
-        "source_mode": "yahoo_finance_full_history",
+        "source_mode": "eodhd_full_history" if provider == "eodhd" else "yahoo_finance_full_history",
         "created_at_utc": now.isoformat(),
         "status": status,
         "input_args": {
             "source_fingerprint": fingerprint,
             "end_exclusive": end,
             "asset_id": record["asset_id"] if record else None,
-            "provider_symbol": record["yahoo_ticker"] if record else None,
+            "provider_symbol": _symbol(record) if record else None,
         },
         "output_keys": output_keys or [],
         "metadata": metadata or {},
@@ -462,6 +490,9 @@ def ingest(
     pause_seconds: float = 0.5,
     progress_every: int = 10,
     print_first_failures: int = 20,
+    provider: str = "yahoo",
+    mapping_version: str | None = None,
+    region: str = DEFAULT_REGION,
 ) -> dict:
     if not SAFE_RUN.fullmatch(run_id):
         raise BronzeIngestError("run_id must be 3–80 lowercase letters/digits/hyphens/underscores")
@@ -489,6 +520,9 @@ def ingest(
             if sum(requested_name in (a["ticker"], a["yahoo_ticker"], a["asset_id"]) for a in matches) > 1:
                 raise BronzeIngestError(f"Ambiguous asset selector {requested_name}; use asset_id")
         selected = sorted(matches, key=lambda a: a["asset_id"])
+    root = _root(provider)
+    if provider == "eodhd":
+        selected = load_mapping(s3, bucket, selected, mapping_version)
     config = {
         "schema": "alpha_edge_full_history_run_v1",
         "run_id": run_id,
@@ -507,6 +541,13 @@ def ingest(
             "repair": False,
         },
     }
+    if provider == "eodhd":
+        config["provider_parameters"] = {
+            "provider": "eodhd",
+            "interval": "1d",
+            "period": "max",
+            "mapping_version": mapping_version,
+        }
     _write_run(s3, bucket, run_id=run_id, run_config=config, execute=execute)
     if not execute:
         return {
@@ -517,6 +558,13 @@ def ingest(
             "writes": 0,
             "end_exclusive": end,
         }
+    eodhd_token = None
+    if provider == "eodhd":
+        eodhd_token = boto3.client("ssm", region_name=region).get_parameter(
+            Name="/alpha-edge/market-data/eodhd/api-key", WithDecryption=True
+        )["Parameter"]["Value"]
+        if not eodhd_token:
+            raise BronzeIngestError("Empty EODHD credential")
     completed = []
     failures = []
     skipped = []
@@ -532,23 +580,24 @@ def ingest(
         f"included_total:  {source['included']}\\n"
         f"selected:        {total}\\n"
         f"end_exclusive:   {end}\\n"
-        f"source:          Yahoo Finance 1d (period=max)\\n"
-        f"audit:           s3://{bucket}/{BRONZE_ROOT}/runs/{run_id}/audit/\\n",
+        f"source:          {provider} 1d (period=max)\\n"
+        f"audit:           s3://{bucket}/{root}/runs/{run_id}/audit/\\n",
         flush=True,
     )
     _audit_event(
         s3,
         bucket,
+        provider=provider,
         run_id=run_id,
         status="started",
         fingerprint=fingerprint,
         end=end,
         metadata={"selected": total, "universe_included_count": source["included"]},
-        output_keys=[f"{BRONZE_ROOT}/runs/{run_id}/run.json"],
+        output_keys=[f"{root}/runs/{run_id}/run.json"],
     )
     for done, record in enumerate(selected, start=1):
         aid = record["asset_id"]
-        symbol = record["yahoo_ticker"]
+        symbol = _symbol(record)
         try:
             existing = _completed(s3, bucket, run_id=run_id, record=record, verify_hash=False)
             if existing:
@@ -556,6 +605,7 @@ def ingest(
                 _audit_event(
                     s3,
                     bucket,
+                    provider=provider,
                     run_id=run_id,
                     status="already_committed",
                     fingerprint=fingerprint,
@@ -563,7 +613,7 @@ def ingest(
                     record=record,
                     output_keys=[
                         existing["data"]["key"],
-                        f"{_target_prefix(run_id, aid)}/manifest.json",
+                        f"{_target_prefix(run_id, aid, provider)}/manifest.json",
                     ],
                     metadata=existing.get("validation", {}),
                 )
@@ -578,6 +628,7 @@ def ingest(
                     retry_delay=retry_delay,
                     ticker_factory=ticker_factory,
                     sleep=sleep,
+                    eodhd_token=eodhd_token,
                 )
                 completed.append(result)
                 manifest = _completed(s3, bucket, run_id=run_id, record=record, verify_hash=False)
@@ -586,6 +637,7 @@ def ingest(
                 _audit_event(
                     s3,
                     bucket,
+                    provider=provider,
                     run_id=run_id,
                     status="success",
                     fingerprint=fingerprint,
@@ -593,7 +645,7 @@ def ingest(
                     record=record,
                     output_keys=[
                         manifest["data"]["key"],
-                        f"{_target_prefix(run_id, aid)}/manifest.json",
+                        f"{_target_prefix(run_id, aid, provider)}/manifest.json",
                     ],
                     metadata=manifest["validation"],
                 )
@@ -605,6 +657,7 @@ def ingest(
             _audit_event(
                 s3,
                 bucket,
+                provider=provider,
                 run_id=run_id,
                 status="interrupted",
                 fingerprint=fingerprint,
@@ -624,6 +677,7 @@ def ingest(
             _audit_event(
                 s3,
                 bucket,
+                provider=provider,
                 run_id=run_id,
                 status="failed",
                 fingerprint=fingerprint,
@@ -635,7 +689,7 @@ def ingest(
             if len(failures) <= print_first_failures:
                 print(
                     f"[bronze][fail][{len(failures)}] "
-                    f"{done}/{total} asset_id={aid} yahoo={symbol} "
+                    f"{done}/{total} asset_id={aid} provider={symbol} "
                     f"error={failure['error'][:320]}",
                     flush=True,
                 )
@@ -665,12 +719,13 @@ def ingest(
         "failure_details": failures,
         "successes": completed,
     }
-    key = f"{BRONZE_ROOT}/runs/{run_id}/reports/{datetime.now(timezone.utc):%Y%m%dT%H%M%S}-{uuid.uuid4().hex}.json"
+    key = f"{root}/runs/{run_id}/reports/{datetime.now(timezone.utc):%Y%m%dT%H%M%S}-{uuid.uuid4().hex}.json"
     _put_immutable(s3, bucket, key, _json_bytes(result), "application/json")
     result["report_s3_uri"] = f"s3://{bucket}/{key}"
     result["audit_final_key"] = _audit_event(
         s3,
         bucket,
+        provider=provider,
         run_id=run_id,
         status="complete" if not failures else "completed_with_failures",
         fingerprint=fingerprint,
@@ -703,9 +758,12 @@ def ingest(
     return result
 
 
-def verify(s3: Any, bucket: str, *, fingerprint: str, run_id: str, only: list[str] | None = None) -> dict:
+def verify(
+    s3: Any, bucket: str, *, fingerprint: str, run_id: str,
+    only: list[str] | None = None, provider: str = "yahoo"
+) -> dict:
     """Independent full-byte/Parquet check of every selected S3 asset commit."""
-    config_key = f"{BRONZE_ROOT}/runs/{run_id}/run.json"
+    config_key = f"{_root(provider)}/runs/{run_id}/run.json"
     config = json.loads(_read(s3, bucket, config_key))
     if config.get("source_fingerprint") != fingerprint:
         raise BronzeIngestError("Run snapshot fingerprint differs from verification request")
@@ -717,6 +775,9 @@ def verify(s3: Any, bucket: str, *, fingerprint: str, run_id: str, only: list[st
     if only:
         selected = {s.strip() for s in only}
         wanted = [i for i in wanted if i in selected or current.get(i, {}).get("ticker") in selected]
+    if provider == "eodhd":
+        mapped = load_mapping(s3, bucket, [current[i] for i in wanted], config["provider_parameters"]["mapping_version"])
+        current = {a["asset_id"]: a for a in mapped}
     stats = {"expected": len(wanted), "committed": 0, "missing": 0, "corrupt": 0}
     errors = []
     for aid in wanted:
@@ -743,7 +804,7 @@ def verify(s3: Any, bucket: str, *, fingerprint: str, run_id: str, only: list[st
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="S3-only, resumable Yahoo FULL-HISTORY Bronze ingestion")
+    parser = argparse.ArgumentParser(description="S3-only, resumable multi-provider FULL-HISTORY Bronze ingestion")
     sub = parser.add_subparsers(dest="command", required=True)
     for name in ("ingest", "verify"):
         p = sub.add_parser(name)
@@ -751,8 +812,10 @@ def main() -> None:
         p.add_argument("--region", default=DEFAULT_REGION)
         p.add_argument("--source-fingerprint", help="Override the active S3 universe with a pinned snapshot SHA256")
         p.add_argument("--run-id", required=True)
+        p.add_argument("--provider", choices=("yahoo", "eodhd"), default="yahoo")
         p.add_argument("--only", default="", help="Comma-separated pilot selectors; omit for ALL included assets")
         if name == "ingest":
+            p.add_argument("--mapping-version", help="SHA256 of EODHD mapping registry")
             p.add_argument("--end", required=True, help="Exclusive date YYYY-MM-DD, before today's partial candle")
             p.add_argument("--execute", action="store_true", help="Explicit S3 writes; otherwise only dry run")
             p.add_argument("--retries", type=int, default=2)
@@ -782,6 +845,9 @@ def main() -> None:
             pause_seconds=args.pause_seconds,
             progress_every=args.progress_every,
             print_first_failures=args.print_first_failures,
+            provider=args.provider,
+            mapping_version=args.mapping_version,
+            region=args.region,
         )
     else:
         output = verify(
@@ -790,6 +856,7 @@ def main() -> None:
             fingerprint=fingerprint,
             run_id=args.run_id,
             only=selectors,
+            provider=args.provider,
         )
     # Full results are persisted as S3 run reports. Terminal output stays short.
     display = {k: v for k, v in output.items() if k not in {"successes", "failure_details"}}

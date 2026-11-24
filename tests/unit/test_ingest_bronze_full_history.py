@@ -578,3 +578,50 @@ def test_provider_revision_preserves_original_bronze_version(s3_with_snapshot):
             assert bars[column].tolist() == source[column.title()].tolist()
         assert bars["stock_splits"].tolist() == [0.0, 2.0]
         assert bars["adj_close"].tolist() == expected_adjusted
+
+
+def test_eodhd_shared_ingest_resume_verify(s3_with_snapshot, monkeypatch):
+    from alpha_edge.market import eodhd_source_v3 as eodhd
+
+    s3, fingerprint = s3_with_snapshot
+    mapping = bronze._json_bytes({
+        "schema": "alpha_edge_eodhd_symbol_mapping_v1",
+        "assets": [{"asset_id": "EQH001", "yahoo_symbol": "SPY", "eodhd_symbol": "SPY.US"}],
+    })
+    version = bronze._digest(mapping)
+    s3.put_object(Bucket=BUCKET, Key=f"{eodhd.MAPPING_ROOT}/objects/{version}.json", Body=mapping)
+    boto3.client("ssm", region_name="eu-west-1").put_parameter(
+        Name="/alpha-edge/market-data/eodhd/api-key", Value="test-token", Type="SecureString"
+    )
+    calls = []
+
+    def opener(request, timeout):
+        endpoint = request.full_url.split("/api/")[1].split("/")[0]
+        calls.append(endpoint)
+        rows = {
+            "eod": [{"date": "2026-11-10", "open": 100, "high": 102, "low": 99,
+                     "close": 101, "adjusted_close": 50, "volume": 10}],
+            "splits": [{"date": "2026-11-10", "split": "2/1"}],
+            "div": [],
+        }[endpoint]
+        return io.BytesIO(json.dumps(rows).encode())
+
+    monkeypatch.setattr(bronze, "acquire_eodhd",
+                        lambda record, end, token: eodhd.acquire_eodhd(record, end, token, opener=opener))
+    options = dict(fingerprint=fingerprint, run_id="eodhd-test", end="2026-11-14",
+                   only=["SPY"], provider="eodhd", mapping_version=version, pause_seconds=0)
+    assert bronze.ingest(s3, BUCKET, **options)["writes"] == 0
+    assert calls == []
+    assert bronze.ingest(s3, BUCKET, execute=True, **options)["succeeded"] == 1
+    assert bronze.ingest(s3, BUCKET, execute=True, **options)["already_committed"] == 1
+    assert calls == ["eod", "splits", "div"]
+    assert bronze.verify(s3, BUCKET, fingerprint=fingerprint, run_id="eodhd-test", provider="eodhd")["state"] == "pass"
+    assert s3.list_objects_v2(Bucket=BUCKET, Prefix=bronze.BRONZE_ROOT)["KeyCount"] == 0
+    manifest = json.loads(bronze._read(s3, BUCKET,
+        bronze._target_prefix("eodhd-test", "EQH001", "eodhd") + "/manifest.json"))
+    blob = bronze._read(s3, BUCKET, manifest["data"]["key"])
+    assert b"test-token" not in blob
+    assert json.loads(blob)["responses"]["splits"]["raw_json"] == '[{"date": "2026-11-10", "split": "2/1"}]'
+
+    with pytest.raises(eodhd.EodhdSourceError, match="Missing/stale mapping"):
+        bronze.ingest(s3, BUCKET, **{**options, "only": ["BTC-USD"]})

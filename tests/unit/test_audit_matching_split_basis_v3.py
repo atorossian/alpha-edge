@@ -1,0 +1,57 @@
+"""Local split basis screening and conservative quarantine upper bounds."""
+
+import pandas as pd
+
+from alpha_edge.market.audit_matching_split_basis_v3 import CANDIDATE, prepare, recovery_bound, screen_event
+
+
+def fixture():
+    days = pd.bdate_range("2020-01-01", periods=10).strftime("%Y-%m-%d").tolist()
+    day = days[5]
+    y = pd.DataFrame({"session_date": days, "open": 50., "high": 51., "low": 49., "close": 50.,
+                      "adj_close": 45., "stock_splits": [0]*5+[2]+[0]*4})
+    responses = {"eod": [{"date": d, "open": 50*f, "high": 51*f, "low": 49*f, "close": 50*f,
+                          "adjusted_close": 45.} for d, f in zip(days, [2]*5+[1]*5)],
+                 "splits": [{"date": day, "split": "2/1"}], "div": []}
+    event = {"yahoo_date": day, "yahoo_value": 2.}
+    screen = {"same_day_dividend": False, "continuity": "provider_normalized_signal"}
+    return y, responses, event, screen
+
+
+def test_integer_split_basis_matches_across_ten_sessions():
+    y, responses, event, screen = fixture()
+    yy, ee = prepare(y, responses)
+    result = screen_event(yy, ee, responses, event, screen)
+    assert result["status"] == CANDIDATE
+    assert result["implied_ratio"] == 2
+    assert result["production_eligible"] is False
+
+
+def test_same_day_cash_and_fractional_events_require_review():
+    y, responses, event, screen = fixture()
+    yy, ee = prepare(y, responses)
+    responses["div"] = [{"date": event["yahoo_date"], "value": 1}]
+    assert screen_event(yy, ee, responses, event, screen)["status"] == "same_day_cash_event"
+    event["yahoo_value"] = 1.328
+    assert screen_event(yy, ee, responses, event, screen)["status"] == "non_integer_economic_review"
+
+
+def test_split_agreement_does_not_override_wrong_price_basis():
+    y, responses, event, screen = fixture()
+    responses["eod"][0]["open"] = 80
+    yy, ee = prepare(y, responses)
+    assert screen_event(yy, ee, responses, event, screen)["status"] == "ohlc_window_disagreement"
+    y, responses, event, screen = fixture()
+    responses["eod"][5]["adjusted_close"] = 30
+    yy, ee = prepare(y, responses)
+    assert screen_event(yy, ee, responses, event, screen)["status"] == "adjustment_factor_disagreement"
+
+
+def test_recovery_bound_respects_non_split_blocker():
+    y, _, event, _ = fixture()
+    findings = pd.DataFrame([
+        {"scope": "prefix", "reason": "split_price_basis_unverified", "effective_date": event["yahoo_date"]},
+        {"scope": "prefix", "reason": "other", "effective_date": y.session_date.iloc[2]},
+    ])
+    assert recovery_bound(y, findings, {event["yahoo_date"]}) == 3
+    assert recovery_bound(y, findings, set()) == 0

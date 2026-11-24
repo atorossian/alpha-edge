@@ -25,15 +25,16 @@ def test_full_current_universe_exactly_five_files_and_membership():
     validate_registry(doc)
     counts = doc["summary"]
     assert counts["universe_total"] == 2207
-    assert counts["included"] == 2028
-    assert counts["excluded"] == 179
-    assert counts["configured"] + counts["blocked"] == 2028
-    assert len(doc["assets"]) == 2028
-    assert len(doc["excluded"]) == 179
-    assert len({a["asset_id"] for a in doc["assets"]}) == 2028
-    assert len({a["yahoo_ticker"] for a in doc["assets"]}) == 2028
+    assert counts["included"] == 2027
+    assert counts["excluded"] == 180
+    assert counts["configured"] + counts["blocked"] == 2027
+    assert len(doc["assets"]) == 2027
+    assert len(doc["excluded"]) == 180
+    assert len({a["asset_id"] for a in doc["assets"]}) == 2027
+    assert len({a["yahoo_ticker"] for a in doc["assets"]}) == 2027
     assert doc["refresh_tickers"] == ["HYPE-USD"]
     by_ticker = {a["ticker"]: a for a in doc["assets"]}
+    assert "ROKU" not in by_ticker
     for ticker in ("SPY", "GLD", "BTC-USD", "RENT3", "TRAXIONA", "LOG", "REY", "EUR-USD"):
         assert ticker in by_ticker
     assert by_ticker["EUR-USD"]["yahoo_ticker"] == "EURUSD=X"
@@ -49,6 +50,7 @@ def test_full_current_universe_exactly_five_files_and_membership():
         "EQH4113c94384740eeb",
         "EQH50281759392ec254",
         "EQH0816028bb3741194",
+        "EQH5fb6456f97f402d5",
     }
     for ticker, currency in {"USD-CNY": "CNY", "USD-BRL": "BRL", "USD-JPY": "JPY"}.items():
         assert by_ticker[ticker]["currency"] == currency

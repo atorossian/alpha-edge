@@ -116,3 +116,33 @@ def test_irregular_ratio_requires_scope_and_independent_price_evidence():
     responses["eod"][0]["open"] *= 1.1
     yy, ee = prepare(y, responses)
     assert screen_event(yy, ee, responses, event, screen, irregular=True)["status"] == "ohlc_window_disagreement"
+
+
+def test_yahoo_only_requires_implicit_price_and_factor_evidence():
+    y, responses, event, screen = fixture()
+    responses["splits"] = []
+    yy, ee = prepare(y, responses)
+    result = screen_event(yy, ee, responses, event, screen, yahoo_only=True)
+    assert result["status"] == "yahoo_only_implicit_price_basis_candidate"
+    assert result["production_eligible"] is False
+    # Equal price bases cannot independently establish the reported split.
+    for row in responses["eod"][:5]:
+        for field in ("open", "high", "low", "close"):
+            row[field] /= 2
+    yy, ee = prepare(y, responses)
+    assert screen_event(yy, ee, responses, event, screen, yahoo_only=True)["status"] == "no_independent_split_basis_change"
+
+
+def test_yahoo_only_rejects_conflicting_actions_and_adjustment_factor():
+    y, responses, event, screen = fixture()
+    yy, ee = prepare(y, responses)
+    assert screen_event(yy, ee, responses, event, screen, yahoo_only=True)["status"] == "multiple_or_conflicting_share_events_in_window"
+    responses["splits"] = []
+    responses["div"] = [{"date": event["yahoo_date"], "value": 1}]
+    assert screen_event(yy, ee, responses, event, screen, yahoo_only=True)["status"] == "same_day_cash_event"
+    responses["div"] = [{"date": responses["eod"][4]["date"], "value": 1}]
+    assert screen_event(yy, ee, responses, event, screen, yahoo_only=True)["status"] == "nearby_eodhd_cash_event"
+    responses["div"] = []
+    responses["eod"][5]["adjusted_close"] = 30
+    yy, ee = prepare(y, responses)
+    assert screen_event(yy, ee, responses, event, screen, yahoo_only=True)["status"] == "adjustment_factor_disagreement"

@@ -42,6 +42,8 @@ SMALL_POLICY = "small_fraction_cross_provider_ohlc_basis_v1"
 SMALL_CANDIDATE = "small_fraction_price_basis_candidate"
 IRREGULAR_POLICY = "irregular_cross_provider_ohlc_basis_economic_review_v1"
 IRREGULAR_CANDIDATE = "irregular_price_basis_candidate"
+YAHOO_ONLY_POLICY = "yahoo_only_implicit_cross_provider_price_basis_v1"
+YAHOO_ONLY_CANDIDATE = "yahoo_only_implicit_price_basis_candidate"
 
 
 def is_small_fraction(ratio):
@@ -65,26 +67,28 @@ def prepare(yahoo, responses):
     return y, e
 
 
-def screen_event(y, e, responses, event, screen, *, fractional=False, small_fraction=False, irregular=False):
+def screen_event(y, e, responses, event, screen, *, fractional=False, small_fraction=False, irregular=False, yahoo_only=False):
     day = event["yahoo_date"]
     ratio = float(event["yahoo_value"])
     group = classify(ratio)
-    policy = IRREGULAR_POLICY if irregular else SMALL_POLICY if small_fraction else FRACTIONAL_POLICY if fractional else POLICY
+    policy = YAHOO_ONLY_POLICY if yahoo_only else IRREGULAR_POLICY if irregular else SMALL_POLICY if small_fraction else FRACTIONAL_POLICY if fractional else POLICY
     details = {"group": group, "date": day, "ratio": ratio, "policy": policy,
                "status": "not_evaluated", "production_eligible": False}
 
     def finish(status):
         return {**details, "status": status}
 
-    if sum((fractional, small_fraction, irregular)) > 1:
+    if sum((fractional, small_fraction, irregular, yahoo_only)) > 1:
         raise ValueError("Choose one screening mode")
     if small_fraction and not is_small_fraction(ratio):
         return finish("outside_small_fraction_scope")
-    if group not in ({"irregular_ratio"} if irregular else {"simple_fraction"} if fractional or small_fraction else {"integer_forward", "integer_reverse"}):
+    if yahoo_only and group == "invalid_or_unit_ratio":
+        return finish("invalid_or_unit_ratio")
+    if not yahoo_only and group not in ({"irregular_ratio"} if irregular else {"simple_fraction"} if fractional or small_fraction else {"integer_forward", "integer_reverse"}):
         return finish("non_integer_economic_review")
     if bool(screen["same_day_dividend"]) or any(r["date"] == day for r in responses["div"]):
         return finish("same_day_cash_event")
-    if not (small_fraction or irregular) and screen["continuity"] != "provider_normalized_signal":
+    if not (small_fraction or irregular or yahoo_only) and screen["continuity"] != "provider_normalized_signal":
         return finish("yahoo_continuity_not_confirmed")
     if y.index.has_duplicates or e.index.has_duplicates or day not in y.index or day not in e.index:
         return finish("missing_or_duplicate_session")
@@ -96,14 +100,23 @@ def screen_event(y, e, responses, event, screen, *, fractional=False, small_frac
         return finish("session_windows_disagree")
     split_dates_y = set(yw.index[pd.to_numeric(yw.stock_splits, errors="coerce").fillna(0).ne(0)])
     split_dates_e = [r["date"] for r in responses["splits"] if r["date"] in ew.index]
-    if split_dates_y != {day} or split_dates_e != [day]:
+    if yahoo_only:
+        split_dates_e = [r["date"] for r in responses["splits"] if ew.index[0] <= r["date"] <= ew.index[-1]]
+        if split_dates_y != {day} or split_dates_e:
+            return finish("multiple_or_conflicting_share_events_in_window")
+        if any(ew.index[0] <= r["date"] <= ew.index[-1] for r in responses["div"]):
+            return finish("nearby_eodhd_cash_event")
+        if "dividends" in yw and pd.to_numeric(yw.dividends, errors="coerce").fillna(0).ne(0).any():
+            return finish("nearby_yahoo_cash_event")
+    elif split_dates_y != {day} or split_dates_e != [day]:
         return finish("multiple_or_missing_share_events_in_window")
     # The events are pinned to their original source bytes; also assert the raw ratios.
     if not math.isclose(float(y.loc[day, "stock_splits"]), ratio, rel_tol=0.0001):
         raise ValueError("Yahoo event ratio changed")
-    er = next(r for r in responses["splits"] if r["date"] == day)
-    if not close_to(split_ratio(er["split"]) or 0, ratio):
-        raise ValueError("EODHD event ratio changed")
+    if not yahoo_only:
+        er = next(r for r in responses["splits"] if r["date"] == day)
+        if not close_to(split_ratio(er["split"]) or 0, ratio):
+            raise ValueError("EODHD event ratio changed")
     ym, em = positive_matrix(yw, FIELDS), positive_matrix(ew, FIELDS)
     ya, ea = positive_matrix(yw, ["adj_close"]), positive_matrix(ew, ["adjusted_close"])
     if any(x is None for x in (ym, em, ya, ea)):
@@ -126,15 +139,20 @@ def screen_event(y, e, responses, event, screen, *, fractional=False, small_frac
         return finish("invalid_price_window")
     if error_pre > TOL or error_post > TOL:
         return finish("ohlc_window_disagreement")
+    if yahoo_only:
+        if abs(math.log(ratio)) <= 2 * TOL:
+            return finish("ratio_too_small_to_distinguish_from_unit")
+        if close_to(implied, 1.0) and close_to(yf, 1.0) and close_to(ef, 1.0):
+            return finish("no_independent_split_basis_change")
     if not close_to(implied, ratio) or not close_to((e_step / y_step) * ratio, 1.0):
         return finish("implied_share_ratio_disagreement")
     if not close_to(yf, 1.0) or not close_to(ef, ratio):
         return finish("adjustment_factor_disagreement")
-    if (small_fraction or irregular) and abs(math.log(y_step)) > 0.10:
+    if (small_fraction or irregular or yahoo_only) and abs(math.log(y_step)) > 0.10:
         return finish("large_event_session_return_review")
     # Cross-provider OHLC and factor-step checks replace the impossible 0.10 log-margin gate.
     # This corroborates price basis, not the legal identity of every corporate action.
-    return finish(IRREGULAR_CANDIDATE if irregular else SMALL_CANDIDATE if small_fraction else FRACTIONAL if fractional else CANDIDATE)
+    return finish(YAHOO_ONLY_CANDIDATE if yahoo_only else IRREGULAR_CANDIDATE if irregular else SMALL_CANDIDATE if small_fraction else FRACTIONAL if fractional else CANDIDATE)
 
 
 def recovery_bound(y, findings, approved_dates):
@@ -151,7 +169,7 @@ def recovery_bound(y, findings, approved_dates):
     return int((valid & dates.le(old) & (dates.gt(remaining.max()) if not remaining.empty else True)).sum())
 
 
-def audit(s3, bucket, *, reconciliation_run, screening_run, run_id, workers=8, execute=False, fractional=False, small_fraction=False, irregular=False):
+def audit(s3, bucket, *, reconciliation_run, screening_run, run_id, workers=8, execute=False, fractional=False, small_fraction=False, irregular=False, yahoo_only=False):
     for value in (reconciliation_run, screening_run, run_id):
         check_id(value)
     if not 1 <= workers <= 16:
@@ -177,9 +195,14 @@ def audit(s3, bucket, *, reconciliation_run, screening_run, run_id, workers=8, e
     if screens.duplicated(["asset_id", "date"]).any() or coverage.asset_id.duplicated().any():
         raise ValueError("Duplicate source evidence")
     by_screen = {(x["asset_id"], x["date"]): x for x in screens.to_dict("records")}
-    if sum((fractional, small_fraction, irregular)) > 1:
+    if sum((fractional, small_fraction, irregular, yahoo_only)) > 1:
         raise ValueError("Choose one screening mode")
-    if irregular:
+    if yahoo_only:
+        matched = events.loc[events.kind.eq("split") & events.date_status.eq("yahoo_only") & events.yahoo_event_rows.eq(1)]
+        expected = recon["statistics"]["split"]["date_status"]["yahoo_only"]
+        if len(matched) != expected or matched.duplicated(["asset_id", "yahoo_date"]).any():
+            raise ValueError("Yahoo-only split population mismatch")
+    elif irregular:
         matched = matched.loc[matched.yahoo_value.map(lambda v: classify(float(v)) == "irregular_ratio")]
         expected = len(matched)
     elif small_fraction:
@@ -188,8 +211,8 @@ def audit(s3, bucket, *, reconciliation_run, screening_run, run_id, workers=8, e
     elif fractional:
         matched = matched.loc[matched.yahoo_value.map(lambda v: classify(float(v)) == "simple_fraction")]
         expected = len(matched)
-    policy = IRREGULAR_POLICY if irregular else SMALL_POLICY if small_fraction else FRACTIONAL_POLICY if fractional else POLICY
-    candidate_status = IRREGULAR_CANDIDATE if irregular else SMALL_CANDIDATE if small_fraction else FRACTIONAL if fractional else CANDIDATE
+    policy = YAHOO_ONLY_POLICY if yahoo_only else IRREGULAR_POLICY if irregular else SMALL_POLICY if small_fraction else FRACTIONAL_POLICY if fractional else POLICY
+    candidate_status = YAHOO_ONLY_CANDIDATE if yahoo_only else IRREGULAR_CANDIDATE if irregular else SMALL_CANDIDATE if small_fraction else FRACTIONAL if fractional else CANDIDATE
     by_asset = {a: g.to_dict("records") for a, g in matched.groupby("asset_id")}
     by_cov = coverage.set_index("asset_id").to_dict("index")
     by_q = {a: g for a, g in quarantine.groupby("asset_id")}
@@ -222,7 +245,7 @@ def audit(s3, bucket, *, reconciliation_run, screening_run, run_id, workers=8, e
                     or event["eodhd_sha256"] != receipt["data"]["sha256"]
                     or not math.isclose(float(screen["ratio"]), float(event["yahoo_value"]), rel_tol=0.0001)):
                 raise ValueError(f"Event source evidence mismatch: {aid}")
-            decision = screen_event(y, e, responses, event, screen, fractional=fractional, small_fraction=small_fraction, irregular=irregular)
+            decision = screen_event(y, e, responses, event, screen, fractional=fractional, small_fraction=small_fraction, irregular=irregular, yahoo_only=yahoo_only)
             findings.append({"asset_id": aid, "yahoo_symbol": row["yahoo_ticker"], "eodhd_symbol": row["provider_symbol"],
                              "yahoo_sha256": yr["bronze_sha256"], "eodhd_sha256": receipt["data"]["sha256"],
                              **decision})
@@ -278,7 +301,7 @@ def audit(s3, bucket, *, reconciliation_run, screening_run, run_id, workers=8, e
                              "groups": {k: dict(v) for k, v in groups.items()},
                              "ratios": {k: dict(v) for k, v in ratios.items()} if fractional or small_fraction else {},
                              **({"ratio_bands": {k: dict(v) for k, v in ratios.items()}} if irregular else {}),
-                             "economic_review_required": fractional or small_fraction or irregular,
+                             "economic_review_required": fractional or small_fraction or irregular or yahoo_only,
                              "candidate_assets": sum(x["candidate_events"] > 0 for x in assets),
                              "source_rows_potentially_unblocked": sum(x["source_rows_potentially_unblocked"] for x in assets)},
               "production_eligible": False, "quarantine_released": False, "outputs": outputs,
@@ -299,11 +322,12 @@ def main():
     parser.add_argument("--fractional", action="store_true", help="Screen simple fractional matches; economic identity remains unverified")
     parser.add_argument("--small-fraction", action="store_true", help="Reassess 21:20 and 11:10 using cross-provider basis evidence")
     parser.add_argument("--irregular", action="store_true", help="Assess irregular ratio price basis; economic identity remains unverified")
+    parser.add_argument("--yahoo-only", action="store_true", help="Assess implicit EODHD price evidence for Yahoo-only split events")
     parser.add_argument("--execute", action="store_true")
     args = parser.parse_args()
     print(json.dumps(audit(boto3.client("s3", region_name=args.region), args.bucket,
                            reconciliation_run=args.reconciliation_run, screening_run=args.screening_run,
-                           run_id=args.run_id, workers=args.workers, execute=args.execute, fractional=args.fractional, small_fraction=args.small_fraction, irregular=args.irregular), indent=2))
+                           run_id=args.run_id, workers=args.workers, execute=args.execute, fractional=args.fractional, small_fraction=args.small_fraction, irregular=args.irregular, yahoo_only=args.yahoo_only), indent=2))
 
 
 if __name__ == "__main__":

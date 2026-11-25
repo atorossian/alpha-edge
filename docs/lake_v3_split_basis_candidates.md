@@ -47,3 +47,7 @@ The 175 candidates in registry `0d459c14be48fab1ca4e0548e76dc8a4d5ddd507cbfb8d14
 ## Irregular approval and unmatched population
 
 The 239 irregular candidates in registry `f4da644501d73ed5d3db4185d244cb790a19bb35b346ee3ca3a42e46aaa654e5` were approved for price basis only. Record using `approve_split_basis_v3 --irregular --expected-count 239`. The `audit_unmatched_split_cases_v3` module joins pinned screening and reconciliation outputs by asset and Yahoo event date, checks source hashes and classifies the 290 unmatched Yahoo events without counting EODHD-only events as Yahoo splits. It distinguishes date, ratio, duplicate, overlap and historical coverage exceptions and writes an immutable detailed event table and reason distribution. No data corrections or quarantine release occur.
+
+## Yahoo-only implicit price evidence
+
+The `--yahoo-only` mode screens all 224 Yahoo-only events within the overlapping history. It verifies source hashes and exact Yahoo ratios, excludes simultaneous and nearby cash events and conflicting EODHD share events, requires matching ten-session OHLC scales with a ratio-sized discontinuity and matching adjusted-close factor steps, and retains the event-return guard. Equal provider price bases or ratios too small to distinguish from unity are not corroboration. Successful findings are separately labelled `yahoo_only_implicit_price_basis_candidate`; they establish price basis only, not the legal event or an independently reported split. No corrections or quarantine release are performed.

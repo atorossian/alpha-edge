@@ -54,3 +54,19 @@ def test_small_fraction_approval_requires_explicit_scope(monkeypatch):
     registry["entries"][0]["ratio"] = 1.5
     with pytest.raises(ValueError):
         approval.approve(None, "bucket", "a" * 64, expected_count=1, small_fraction=True)
+
+
+def test_irregular_approval_requires_matching_policy(monkeypatch):
+    from alpha_edge.market.audit_matching_split_basis_v3 import IRREGULAR_CANDIDATE, IRREGULAR_POLICY
+    registry = {"schema": "alpha_edge_split_basis_candidate_registry_v1", "policy": IRREGULAR_POLICY,
+                "entries": [{"asset_id": "asset", "date": "2020-01-01", "status": IRREGULAR_CANDIDATE,
+                             "group": "irregular_ratio", "policy": IRREGULAR_POLICY, "ratio": 1.328}]}
+    monkeypatch.setattr(approval, "verified_bytes", lambda *args: json.dumps(registry).encode())
+    with pytest.raises(ValueError):
+        approval.approve(None, "bucket", "a" * 64, expected_count=1, fractional=True)
+    result = approval.approve(None, "bucket", "a" * 64, expected_count=1, irregular=True)
+    assert result["economic_review_required"] is True
+    assert result["quarantine_released"] is False
+    registry["entries"][0]["ratio"] = 1.5
+    with pytest.raises(ValueError):
+        approval.approve(None, "bucket", "a" * 64, expected_count=1, irregular=True)

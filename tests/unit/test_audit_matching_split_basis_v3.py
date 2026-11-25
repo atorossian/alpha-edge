@@ -55,3 +55,20 @@ def test_recovery_bound_respects_non_split_blocker():
     ])
     assert recovery_bound(y, findings, {event["yahoo_date"]}) == 3
     assert recovery_bound(y, findings, set()) == 0
+
+
+def test_fractional_price_basis_is_not_integer_approval():
+    y, responses, event, screen = fixture()
+    y.loc[5, "stock_splits"] = 1.5
+    event["yahoo_value"] = 1.5
+    responses["splits"][0]["split"] = "3/2"
+    for row in responses["eod"][:5]:
+        for field in ("open", "high", "low", "close"):
+            row[field] *= .75
+    yy, ee = prepare(y, responses)
+    assert screen_event(yy, ee, responses, event, screen)["status"] == "non_integer_economic_review"
+    result = screen_event(yy, ee, responses, event, screen, fractional=True)
+    assert result["status"] == "fractional_price_basis_candidate"
+    assert result["production_eligible"] is False
+    responses["div"] = [{"date": event["yahoo_date"], "value": 1}]
+    assert screen_event(yy, ee, responses, event, screen, fractional=True)["status"] == "same_day_cash_event"

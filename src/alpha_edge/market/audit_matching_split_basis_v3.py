@@ -7,6 +7,7 @@ import json
 import math
 import sys
 from collections import Counter
+from fractions import Fraction
 from concurrent.futures import ThreadPoolExecutor
 
 import boto3
@@ -35,6 +36,8 @@ WINDOW = 5
 TOL = 0.005
 FIELDS = ["open", "high", "low", "close"]
 CANDIDATE = "provider_normalized_candidate"
+FRACTIONAL = "fractional_price_basis_candidate"
+FRACTIONAL_POLICY = "fractional_five_session_ohlc_basis_economic_review_v1"
 
 
 def close_to(a, b):
@@ -54,17 +57,17 @@ def prepare(yahoo, responses):
     return y, e
 
 
-def screen_event(y, e, responses, event, screen):
+def screen_event(y, e, responses, event, screen, *, fractional=False):
     day = event["yahoo_date"]
     ratio = float(event["yahoo_value"])
     group = classify(ratio)
-    details = {"group": group, "date": day, "ratio": ratio, "policy": POLICY,
+    details = {"group": group, "date": day, "ratio": ratio, "policy": FRACTIONAL_POLICY if fractional else POLICY,
                "status": "not_evaluated", "production_eligible": False}
 
     def finish(status):
         return {**details, "status": status}
 
-    if group not in {"integer_forward", "integer_reverse"}:
+    if group not in ({"simple_fraction"} if fractional else {"integer_forward", "integer_reverse"}):
         return finish("non_integer_economic_review")
     if bool(screen["same_day_dividend"]) or any(r["date"] == day for r in responses["div"]):
         return finish("same_day_cash_event")
@@ -115,7 +118,7 @@ def screen_event(y, e, responses, event, screen):
     if not close_to(yf, 1.0) or not close_to(ef, ratio):
         return finish("adjustment_factor_disagreement")
     # This corroborates price basis, not the legal identity of every corporate action.
-    return finish(CANDIDATE)
+    return finish(FRACTIONAL if fractional else CANDIDATE)
 
 
 def recovery_bound(y, findings, approved_dates):
@@ -132,7 +135,7 @@ def recovery_bound(y, findings, approved_dates):
     return int((valid & dates.le(old) & (dates.gt(remaining.max()) if not remaining.empty else True)).sum())
 
 
-def audit(s3, bucket, *, reconciliation_run, screening_run, run_id, workers=8, execute=False):
+def audit(s3, bucket, *, reconciliation_run, screening_run, run_id, workers=8, execute=False, fractional=False):
     for value in (reconciliation_run, screening_run, run_id):
         check_id(value)
     if not 1 <= workers <= 16:
@@ -158,6 +161,11 @@ def audit(s3, bucket, *, reconciliation_run, screening_run, run_id, workers=8, e
     if screens.duplicated(["asset_id", "date"]).any() or coverage.asset_id.duplicated().any():
         raise ValueError("Duplicate source evidence")
     by_screen = {(x["asset_id"], x["date"]): x for x in screens.to_dict("records")}
+    if fractional:
+        matched = matched.loc[matched.yahoo_value.map(lambda v: classify(float(v)) == "simple_fraction")]
+        expected = len(matched)
+    policy = FRACTIONAL_POLICY if fractional else POLICY
+    candidate_status = FRACTIONAL if fractional else CANDIDATE
     by_asset = {a: g.to_dict("records") for a, g in matched.groupby("asset_id")}
     by_cov = coverage.set_index("asset_id").to_dict("index")
     by_q = {a: g for a, g in quarantine.groupby("asset_id")}
@@ -190,11 +198,11 @@ def audit(s3, bucket, *, reconciliation_run, screening_run, run_id, workers=8, e
                     or event["eodhd_sha256"] != receipt["data"]["sha256"]
                     or not math.isclose(float(screen["ratio"]), float(event["yahoo_value"]), rel_tol=0.0001)):
                 raise ValueError(f"Event source evidence mismatch: {aid}")
-            decision = screen_event(y, e, responses, event, screen)
+            decision = screen_event(y, e, responses, event, screen, fractional=fractional)
             findings.append({"asset_id": aid, "yahoo_symbol": row["yahoo_ticker"], "eodhd_symbol": row["provider_symbol"],
                              "yahoo_sha256": yr["bronze_sha256"], "eodhd_sha256": receipt["data"]["sha256"],
                              **decision})
-        dates = {x["date"] for x in findings if x["status"] == CANDIDATE}
+        dates = {x["date"] for x in findings if x["status"] == candidate_status}
         bound = recovery_bound(yf, by_q[aid], dates)
         return findings, {"asset_id": aid, "symbol": row["yahoo_ticker"], "candidate_events": len(dates),
                           "source_rows_potentially_unblocked": bound}
@@ -212,9 +220,13 @@ def audit(s3, bucket, *, reconciliation_run, screening_run, run_id, workers=8, e
     groups = {}
     for x in decisions:
         groups.setdefault(x["group"], Counter())[x["status"]] += 1
+    ratios = {}
+    for x in decisions:
+        label = str(Fraction(x["ratio"]).limit_denominator(20)) if fractional else str(x["ratio"])
+        ratios.setdefault(label, Counter())[x["status"]] += 1
     scope = f"{SCOPE}/runs/{run_id}"
     outputs = {}
-    candidates = [x for x in decisions if x["status"] == CANDIDATE]
+    candidates = [x for x in decisions if x["status"] == candidate_status]
     if execute:
         for name, rows in (("events", decisions), ("assets", assets)):
             blob = parquet_bytes(pd.DataFrame(rows))
@@ -222,7 +234,7 @@ def audit(s3, bucket, *, reconciliation_run, screening_run, run_id, workers=8, e
             outputs[name] = {**put_immutable(s3, bucket, key, blob, content_type="application/vnd.apache.parquet",
                                              scope=SCOPE), "rows": len(rows), "format": "parquet"}
         # Explicitly candidate-only; this is not a production split registry.
-        obj = {"schema": "alpha_edge_split_basis_candidate_registry_v1", "policy": POLICY,
+        obj = {"schema": "alpha_edge_split_basis_candidate_registry_v1", "policy": policy,
                "reconciliation_events": recon["outputs"]["events"],
                "screening_events": screening["event_output"],
                "quarantine_findings": diagnostic["outputs"]["quarantine_findings"],
@@ -231,12 +243,14 @@ def audit(s3, bucket, *, reconciliation_run, screening_run, run_id, workers=8, e
         key = f"{ROOT}/config/split_basis_candidate_registries/v1/objects/{digest(body)}.json"
         outputs["candidate_registry"] = put_immutable(s3, bucket, key, body, content_type="application/json",
                                                        scope=f"{ROOT}/config/split_basis_candidate_registries/v1")
-    result = {"schema": "alpha_edge_split_basis_candidate_v1", "run_id": run_id, "policy": POLICY,
+    result = {"schema": "alpha_edge_split_basis_candidate_v1", "run_id": run_id, "policy": policy,
               "inputs": {"reconciliation_run": reconciliation_run, "reconciliation_events": recon["outputs"]["events"],
                          "screening_run": screening_run, "screening_events": screening["event_output"],
                          "quarantine_findings": diagnostic["outputs"]["quarantine_findings"]},
               "statistics": {"events": len(decisions), "assets": len(assets), "statuses": dict(counts),
                              "groups": {k: dict(v) for k, v in groups.items()},
+                             "ratios": {k: dict(v) for k, v in ratios.items()} if fractional else {},
+                             "economic_review_required": fractional,
                              "candidate_assets": sum(x["candidate_events"] > 0 for x in assets),
                              "source_rows_potentially_unblocked": sum(x["source_rows_potentially_unblocked"] for x in assets)},
               "production_eligible": False, "quarantine_released": False, "outputs": outputs,
@@ -254,11 +268,12 @@ def main():
     parser.add_argument("--screening-run", required=True)
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--workers", type=int, default=8)
+    parser.add_argument("--fractional", action="store_true", help="Screen simple fractional matches; economic identity remains unverified")
     parser.add_argument("--execute", action="store_true")
     args = parser.parse_args()
     print(json.dumps(audit(boto3.client("s3", region_name=args.region), args.bucket,
                            reconciliation_run=args.reconciliation_run, screening_run=args.screening_run,
-                           run_id=args.run_id, workers=args.workers, execute=args.execute), indent=2))
+                           run_id=args.run_id, workers=args.workers, execute=args.execute, fractional=args.fractional), indent=2))
 
 
 if __name__ == "__main__":

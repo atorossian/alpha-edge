@@ -27,3 +27,9 @@ it is an upper bound, not released or production-ready data.
 Run `python -m alpha_edge.market.audit_matching_split_basis_v3 --help`.
 Use `--execute` to persist the complete event decisions, per-asset estimates
 and immutable candidate registry. No provider calls or price writes occur.
+
+## Integer approval and fractional screening
+
+The 1,674 integer decisions in candidate registry `e2e88b74a4578a1f50b777845b7c32364ce5cc7fb023ac6f49a27e6b35482eff` were approved for price basis only. Record the approval with `approve_split_basis_v3 --candidate-version <digest> --expected-count 1674 --execute`. The immutable record references the hash-verified candidate registry; it does not release quarantine or publish prices.
+
+Run the existing matching split audit with `--fractional` and a new run ID to assess simple fractional exact-date ratio matches separately. The same ten-session evidence gates apply. A passing event is labelled `fractional_price_basis_candidate`, not an approved integer event. The manifest reports status counts by rational ratio; economic identity (split, bonus issue, rights, spin-off or another distribution) remains unresolved. No prices, volume, or quarantine are changed by this audit.

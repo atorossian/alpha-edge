@@ -70,3 +70,14 @@ def test_irregular_approval_requires_matching_policy(monkeypatch):
     registry["entries"][0]["ratio"] = 1.5
     with pytest.raises(ValueError):
         approval.approve(None, "bucket", "a" * 64, expected_count=1, irregular=True)
+
+
+def test_yahoo_only_approval_is_separate(monkeypatch):
+    from alpha_edge.market.audit_matching_split_basis_v3 import YAHOO_ONLY_CANDIDATE, YAHOO_ONLY_POLICY
+    registry = {"schema": "alpha_edge_split_basis_candidate_registry_v1", "policy": YAHOO_ONLY_POLICY,
+                "entries": [{"asset_id": "asset", "date": "2020-01-01", "status": YAHOO_ONLY_CANDIDATE,
+                             "group": "integer_forward", "policy": YAHOO_ONLY_POLICY, "ratio": 2.0}]}
+    monkeypatch.setattr(approval, "verified_bytes", lambda *args: json.dumps(registry).encode())
+    with pytest.raises(ValueError):
+        approval.approve(None, "bucket", "a" * 64, expected_count=1)
+    assert approval.approve(None, "bucket", "a" * 64, expected_count=1, yahoo_only=True)["economic_review_required"]

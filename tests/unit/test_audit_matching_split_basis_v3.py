@@ -9,7 +9,7 @@ def fixture():
     days = pd.bdate_range("2020-01-01", periods=10).strftime("%Y-%m-%d").tolist()
     day = days[5]
     y = pd.DataFrame({"session_date": days, "open": 50., "high": 51., "low": 49., "close": 50.,
-                      "adj_close": 45., "stock_splits": [0]*5+[2]+[0]*4})
+                      "adj_close": 45., "stock_splits": [0.]*5+[2.]+[0.]*4})
     responses = {"eod": [{"date": d, "open": 50*f, "high": 51*f, "low": 49*f, "close": 50*f,
                           "adjusted_close": 45.} for d, f in zip(days, [2]*5+[1]*5)],
                  "splits": [{"date": day, "split": "2/1"}], "div": []}
@@ -72,3 +72,24 @@ def test_fractional_price_basis_is_not_integer_approval():
     assert result["production_eligible"] is False
     responses["div"] = [{"date": event["yahoo_date"], "value": 1}]
     assert screen_event(yy, ee, responses, event, screen, fractional=True)["status"] == "same_day_cash_event"
+
+
+def test_small_fraction_uses_cross_provider_evidence_and_preserves_cash_blocker():
+    for ratio, label in ((1.05, "21/20"), (1.10, "11/10")):
+        y, responses, event, screen = fixture()
+        y.loc[5, "stock_splits"] = ratio
+        event["yahoo_value"] = ratio
+        responses["splits"][0]["split"] = label
+        screen["continuity"] = "ambiguous"
+        for row in responses["eod"][:5]:
+            for field in ("open", "high", "low", "close"):
+                row[field] *= ratio / 2
+        yy, ee = prepare(y, responses)
+        assert screen_event(yy, ee, responses, event, screen, fractional=True)["status"] == "yahoo_continuity_not_confirmed"
+        assert screen_event(yy, ee, responses, event, screen, small_fraction=True)["status"] == "small_fraction_price_basis_candidate"
+        responses["div"] = [{"date": event["yahoo_date"], "value": 1}]
+        assert screen_event(yy, ee, responses, event, screen, small_fraction=True)["status"] == "same_day_cash_event"
+        responses["div"] = []
+        responses["eod"][5]["adjusted_close"] = 30
+        yy, ee = prepare(y, responses)
+        assert screen_event(yy, ee, responses, event, screen, small_fraction=True)["status"] == "adjustment_factor_disagreement"

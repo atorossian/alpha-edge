@@ -22,3 +22,19 @@ def test_approval_is_exact_and_price_basis_only(monkeypatch):
     registry["entries"][0]["status"] = "fractional_price_basis_candidate"
     with pytest.raises(ValueError):
         approval.approve(None, "bucket", "a" * 64, expected_count=1)
+
+
+def test_fractional_approval_requires_explicit_mode(monkeypatch):
+    from alpha_edge.market.audit_matching_split_basis_v3 import FRACTIONAL, FRACTIONAL_POLICY
+    registry = {"schema": "alpha_edge_split_basis_candidate_registry_v1", "policy": FRACTIONAL_POLICY,
+                "entries": [{"asset_id": "asset", "date": "2020-01-01", "status": FRACTIONAL,
+                             "group": "simple_fraction", "policy": FRACTIONAL_POLICY}]}
+    monkeypatch.setattr(approval, "verified_bytes", lambda *args: json.dumps(registry).encode())
+    with pytest.raises(ValueError):
+        approval.approve(None, "bucket", "a" * 64, expected_count=1)
+    result = approval.approve(None, "bucket", "a" * 64, expected_count=1, fractional=True)
+    assert result["economic_review_required"] is True
+    assert result["quarantine_released"] is False
+    registry["entries"][0]["status"] = "small_fraction_price_basis_candidate"
+    with pytest.raises(ValueError):
+        approval.approve(None, "bucket", "a" * 64, expected_count=1, fractional=True)

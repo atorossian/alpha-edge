@@ -33,3 +33,9 @@ and immutable candidate registry. No provider calls or price writes occur.
 The 1,674 integer decisions in candidate registry `e2e88b74a4578a1f50b777845b7c32364ce5cc7fb023ac6f49a27e6b35482eff` were approved for price basis only. Record the approval with `approve_split_basis_v3 --candidate-version <digest> --expected-count 1674 --execute`. The immutable record references the hash-verified candidate registry; it does not release quarantine or publish prices.
 
 Run the existing matching split audit with `--fractional` and a new run ID to assess simple fractional exact-date ratio matches separately. The same ten-session evidence gates apply. A passing event is labelled `fractional_price_basis_candidate`, not an approved integer event. The manifest reports status counts by rational ratio; economic identity (split, bonus issue, rights, spin-off or another distribution) remains unresolved. No prices, volume, or quarantine are changed by this audit.
+
+## Fractional approval and small-ratio follow-up
+
+The 720 candidates in registry `28e74121870b0a73a31834931f035cf28fbf8dd68328461de34a0219d2037e77` were approved for price basis only. Record using the approval CLI with `--fractional --expected-count 720`. Economic review remains required.
+
+The 243 exact 21:20 and 11:10 matches receive a separate `--small-fraction` audit. The original continuity gate demanded a log-distance margin of 0.10, which is mathematically unattainable for these ratios (log ratios about 0.049 and 0.095). The alternate test retains the exact-date/ratio checks, ten-session OHLC scale and adjusted-close factor steps, requires an absolute Yahoo event log return no greater than 0.10, and keeps simultaneous cash events blocked. It writes a separate candidate policy and never releases quarantine. The 41 same-day cash cases need separate cash/share reconciliation.

@@ -93,3 +93,26 @@ def test_small_fraction_uses_cross_provider_evidence_and_preserves_cash_blocker(
         responses["eod"][5]["adjusted_close"] = 30
         yy, ee = prepare(y, responses)
         assert screen_event(yy, ee, responses, event, screen, small_fraction=True)["status"] == "adjustment_factor_disagreement"
+
+
+def test_irregular_ratio_requires_scope_and_independent_price_evidence():
+    y, responses, event, screen = fixture()
+    ratio = 1.328
+    y.loc[5, "stock_splits"] = ratio
+    event["yahoo_value"] = ratio
+    responses["splits"][0]["split"] = "166/125"
+    screen["continuity"] = "ambiguous"
+    for row in responses["eod"][:5]:
+        for field in ("open", "high", "low", "close"):
+            row[field] *= ratio / 2
+    yy, ee = prepare(y, responses)
+    assert screen_event(yy, ee, responses, event, screen, fractional=True)["status"] == "non_integer_economic_review"
+    result = screen_event(yy, ee, responses, event, screen, irregular=True)
+    assert result["status"] == "irregular_price_basis_candidate"
+    assert result["production_eligible"] is False
+    responses["div"] = [{"date": event["yahoo_date"], "value": 1}]
+    assert screen_event(yy, ee, responses, event, screen, irregular=True)["status"] == "same_day_cash_event"
+    responses["div"] = []
+    responses["eod"][0]["open"] *= 1.1
+    yy, ee = prepare(y, responses)
+    assert screen_event(yy, ee, responses, event, screen, irregular=True)["status"] == "ohlc_window_disagreement"

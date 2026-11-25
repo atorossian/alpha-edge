@@ -40,6 +40,8 @@ FRACTIONAL = "fractional_price_basis_candidate"
 FRACTIONAL_POLICY = "fractional_five_session_ohlc_basis_economic_review_v1"
 SMALL_POLICY = "small_fraction_cross_provider_ohlc_basis_v1"
 SMALL_CANDIDATE = "small_fraction_price_basis_candidate"
+IRREGULAR_POLICY = "irregular_cross_provider_ohlc_basis_economic_review_v1"
+IRREGULAR_CANDIDATE = "irregular_price_basis_candidate"
 
 
 def is_small_fraction(ratio):
@@ -63,24 +65,26 @@ def prepare(yahoo, responses):
     return y, e
 
 
-def screen_event(y, e, responses, event, screen, *, fractional=False, small_fraction=False):
+def screen_event(y, e, responses, event, screen, *, fractional=False, small_fraction=False, irregular=False):
     day = event["yahoo_date"]
     ratio = float(event["yahoo_value"])
     group = classify(ratio)
-    policy = SMALL_POLICY if small_fraction else FRACTIONAL_POLICY if fractional else POLICY
+    policy = IRREGULAR_POLICY if irregular else SMALL_POLICY if small_fraction else FRACTIONAL_POLICY if fractional else POLICY
     details = {"group": group, "date": day, "ratio": ratio, "policy": policy,
                "status": "not_evaluated", "production_eligible": False}
 
     def finish(status):
         return {**details, "status": status}
 
+    if sum((fractional, small_fraction, irregular)) > 1:
+        raise ValueError("Choose one screening mode")
     if small_fraction and not is_small_fraction(ratio):
         return finish("outside_small_fraction_scope")
-    if group not in ({"simple_fraction"} if fractional or small_fraction else {"integer_forward", "integer_reverse"}):
+    if group not in ({"irregular_ratio"} if irregular else {"simple_fraction"} if fractional or small_fraction else {"integer_forward", "integer_reverse"}):
         return finish("non_integer_economic_review")
     if bool(screen["same_day_dividend"]) or any(r["date"] == day for r in responses["div"]):
         return finish("same_day_cash_event")
-    if not small_fraction and screen["continuity"] != "provider_normalized_signal":
+    if not (small_fraction or irregular) and screen["continuity"] != "provider_normalized_signal":
         return finish("yahoo_continuity_not_confirmed")
     if y.index.has_duplicates or e.index.has_duplicates or day not in y.index or day not in e.index:
         return finish("missing_or_duplicate_session")
@@ -126,11 +130,11 @@ def screen_event(y, e, responses, event, screen, *, fractional=False, small_frac
         return finish("implied_share_ratio_disagreement")
     if not close_to(yf, 1.0) or not close_to(ef, ratio):
         return finish("adjustment_factor_disagreement")
-    if small_fraction and abs(math.log(y_step)) > 0.10:
+    if (small_fraction or irregular) and abs(math.log(y_step)) > 0.10:
         return finish("large_event_session_return_review")
     # Cross-provider OHLC and factor-step checks replace the impossible 0.10 log-margin gate.
     # This corroborates price basis, not the legal identity of every corporate action.
-    return finish(SMALL_CANDIDATE if small_fraction else FRACTIONAL if fractional else CANDIDATE)
+    return finish(IRREGULAR_CANDIDATE if irregular else SMALL_CANDIDATE if small_fraction else FRACTIONAL if fractional else CANDIDATE)
 
 
 def recovery_bound(y, findings, approved_dates):
@@ -147,7 +151,7 @@ def recovery_bound(y, findings, approved_dates):
     return int((valid & dates.le(old) & (dates.gt(remaining.max()) if not remaining.empty else True)).sum())
 
 
-def audit(s3, bucket, *, reconciliation_run, screening_run, run_id, workers=8, execute=False, fractional=False, small_fraction=False):
+def audit(s3, bucket, *, reconciliation_run, screening_run, run_id, workers=8, execute=False, fractional=False, small_fraction=False, irregular=False):
     for value in (reconciliation_run, screening_run, run_id):
         check_id(value)
     if not 1 <= workers <= 16:
@@ -173,16 +177,19 @@ def audit(s3, bucket, *, reconciliation_run, screening_run, run_id, workers=8, e
     if screens.duplicated(["asset_id", "date"]).any() or coverage.asset_id.duplicated().any():
         raise ValueError("Duplicate source evidence")
     by_screen = {(x["asset_id"], x["date"]): x for x in screens.to_dict("records")}
-    if fractional and small_fraction:
-        raise ValueError("Choose one fractional screening mode")
-    if small_fraction:
+    if sum((fractional, small_fraction, irregular)) > 1:
+        raise ValueError("Choose one screening mode")
+    if irregular:
+        matched = matched.loc[matched.yahoo_value.map(lambda v: classify(float(v)) == "irregular_ratio")]
+        expected = len(matched)
+    elif small_fraction:
         matched = matched.loc[matched.yahoo_value.map(lambda v: is_small_fraction(float(v)))]
         expected = len(matched)
     elif fractional:
         matched = matched.loc[matched.yahoo_value.map(lambda v: classify(float(v)) == "simple_fraction")]
         expected = len(matched)
-    policy = SMALL_POLICY if small_fraction else FRACTIONAL_POLICY if fractional else POLICY
-    candidate_status = SMALL_CANDIDATE if small_fraction else FRACTIONAL if fractional else CANDIDATE
+    policy = IRREGULAR_POLICY if irregular else SMALL_POLICY if small_fraction else FRACTIONAL_POLICY if fractional else POLICY
+    candidate_status = IRREGULAR_CANDIDATE if irregular else SMALL_CANDIDATE if small_fraction else FRACTIONAL if fractional else CANDIDATE
     by_asset = {a: g.to_dict("records") for a, g in matched.groupby("asset_id")}
     by_cov = coverage.set_index("asset_id").to_dict("index")
     by_q = {a: g for a, g in quarantine.groupby("asset_id")}
@@ -215,7 +222,7 @@ def audit(s3, bucket, *, reconciliation_run, screening_run, run_id, workers=8, e
                     or event["eodhd_sha256"] != receipt["data"]["sha256"]
                     or not math.isclose(float(screen["ratio"]), float(event["yahoo_value"]), rel_tol=0.0001)):
                 raise ValueError(f"Event source evidence mismatch: {aid}")
-            decision = screen_event(y, e, responses, event, screen, fractional=fractional, small_fraction=small_fraction)
+            decision = screen_event(y, e, responses, event, screen, fractional=fractional, small_fraction=small_fraction, irregular=irregular)
             findings.append({"asset_id": aid, "yahoo_symbol": row["yahoo_ticker"], "eodhd_symbol": row["provider_symbol"],
                              "yahoo_sha256": yr["bronze_sha256"], "eodhd_sha256": receipt["data"]["sha256"],
                              **decision})
@@ -240,6 +247,9 @@ def audit(s3, bucket, *, reconciliation_run, screening_run, run_id, workers=8, e
     ratios = {}
     for x in decisions:
         label = str(Fraction(x["ratio"]).limit_denominator(20)) if fractional or small_fraction else str(x["ratio"])
+        if irregular:
+            r = x["ratio"]
+            label = "reverse" if r < 1 else "1_to_1.1" if r <= 1.1 else "1.1_to_1.5" if r <= 1.5 else "above_1.5"
         ratios.setdefault(label, Counter())[x["status"]] += 1
     scope = f"{SCOPE}/runs/{run_id}"
     outputs = {}
@@ -267,7 +277,8 @@ def audit(s3, bucket, *, reconciliation_run, screening_run, run_id, workers=8, e
               "statistics": {"events": len(decisions), "assets": len(assets), "statuses": dict(counts),
                              "groups": {k: dict(v) for k, v in groups.items()},
                              "ratios": {k: dict(v) for k, v in ratios.items()} if fractional or small_fraction else {},
-                             "economic_review_required": fractional or small_fraction,
+                             **({"ratio_bands": {k: dict(v) for k, v in ratios.items()}} if irregular else {}),
+                             "economic_review_required": fractional or small_fraction or irregular,
                              "candidate_assets": sum(x["candidate_events"] > 0 for x in assets),
                              "source_rows_potentially_unblocked": sum(x["source_rows_potentially_unblocked"] for x in assets)},
               "production_eligible": False, "quarantine_released": False, "outputs": outputs,
@@ -287,11 +298,12 @@ def main():
     parser.add_argument("--workers", type=int, default=8)
     parser.add_argument("--fractional", action="store_true", help="Screen simple fractional matches; economic identity remains unverified")
     parser.add_argument("--small-fraction", action="store_true", help="Reassess 21:20 and 11:10 using cross-provider basis evidence")
+    parser.add_argument("--irregular", action="store_true", help="Assess irregular ratio price basis; economic identity remains unverified")
     parser.add_argument("--execute", action="store_true")
     args = parser.parse_args()
     print(json.dumps(audit(boto3.client("s3", region_name=args.region), args.bucket,
                            reconciliation_run=args.reconciliation_run, screening_run=args.screening_run,
-                           run_id=args.run_id, workers=args.workers, execute=args.execute, fractional=args.fractional, small_fraction=args.small_fraction), indent=2))
+                           run_id=args.run_id, workers=args.workers, execute=args.execute, fractional=args.fractional, small_fraction=args.small_fraction, irregular=args.irregular), indent=2))
 
 
 if __name__ == "__main__":

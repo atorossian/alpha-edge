@@ -23,6 +23,9 @@ from alpha_edge.market.audit_matching_split_basis_v3 import (
 )
 from alpha_edge.market.audit_provider_reconciliation_v3 import split_ratio
 from alpha_edge.market.build_silver_adjusted_v3 import load_bundle
+from alpha_edge.market.audit_financial_universe_v3 import load_consolidated, consolidated_receipt
+from alpha_edge.market.build_share_basis_candidate_v3 import reconstruct as reconstruct_share_basis
+from alpha_edge.market.reconciliation_hypotheses_v3 import CANDIDATE as ADVANCED_CANDIDATE, calendar_windows, analyze_window
 from alpha_edge.market.eodhd_source_v3 import load_mapping, verify_bundle
 from alpha_edge.market.ingest_bronze_full_history import EODHD_ROOT, _completed, load_universe
 from alpha_edge.market.lakehouse_v3.storage import (
@@ -32,7 +35,8 @@ from alpha_edge.market.lakehouse_v3.storage import (
 
 SCOPE = f"{ROOT}/silver/corporate_action_reconciliation/v1"
 POLICY = "deterministic_residual_reconciliation_v1"
-PASS = {CANDIDATE, FRACTIONAL, IRREGULAR_CANDIDATE, YAHOO_ONLY_CANDIDATE, CASH_CANDIDATE}
+PASS = {CANDIDATE, FRACTIONAL, IRREGULAR_CANDIDATE, YAHOO_ONLY_CANDIDATE, CASH_CANDIDATE, ADVANCED_CANDIDATE}
+ADVANCED_POLICY = "deterministic_residual_reconciliation_v2"
 
 
 def clean(value):
@@ -105,7 +109,7 @@ def ratio_diagnostic(y, e, row, event):
             "max_relative_error": error}
 
 
-def investigate(y, e, responses, row, event, prior):
+def investigate(y, e, responses, row, event, prior, *, advanced=False, calendar=None, missing_expected=(), share_context=None):
     """Try every applicable bounded hypothesis; conflicts remain held."""
     day, ratio = row["date"], float(row["ratio"])
     attempts = [clean(ratio_diagnostic(y, e, row, event))]
@@ -156,6 +160,17 @@ def investigate(y, e, responses, row, event, prior):
                 attempts.append(record)
                 if decision["status"] in PASS:
                     passed.append(record)
+    if advanced:
+        window_results = calendar_windows(y, e, calendar, responses, day, missing_expected)
+        if not window_results:
+            attempts.append({"method": "calendar_daily_chain", "status": "advanced_calendar_window_unavailable"})
+        advanced_results = [clean(analyze_window(yy, ee, responses, row, event, size)) for size, yy, ee in window_results]
+        attempts.extend(advanced_results)
+        # A wider complete window is an independent challenge, not a reason to cherry-pick.
+        if not passed and advanced_results and all(a["status"] == ADVANCED_CANDIDATE for a in advanced_results):
+            passed.append(advanced_results[-1])
+        if share_context is not None:
+            attempts.append({"method": "existing_share_reconstruction_context", "status": "prior_reconstruction_context_only", **share_context})
     prior_conflict = any(f["comparison"] not in {"documented_share_ratio_match"} for f in prior)
     # No candidate can silently override documented coefficients, a date conflict,
     # or two distinct cash conventions that both fit within tolerance.
@@ -189,7 +204,7 @@ def optional_checkpoint(s3, bucket, key):
     return json.loads(blob)
 
 
-def audit(s3, bucket, *, remaining_run, reconciliation_run, run_id, expected_count=None, workers=8, execute=False):
+def audit(s3, bucket, *, remaining_run, reconciliation_run, run_id, expected_count=None, workers=8, execute=False, residual_diagnostics_run=None):
     for value in (remaining_run, reconciliation_run, run_id):
         check_id(value)
     if not 1 <= workers <= 16:
@@ -199,13 +214,39 @@ def audit(s3, bucket, *, remaining_run, reconciliation_run, run_id, expected_cou
     if remaining["inputs"]["reconciliation_events"] != recon["outputs"]["events"]:
         raise ValueError("Reconciliation evidence mismatch")
     cases = verified_frame(s3, bucket, remaining["outputs"]["events"])
-    if (len(cases) != remaining["statistics"]["remaining"] or
-            (expected_count is not None and len(cases) != expected_count) or cases.duplicated(["asset_id", "date"]).any()):
+    if len(cases) != remaining["statistics"]["remaining"] or cases.duplicated(["asset_id", "date"]).any():
         raise ValueError("Unexpected residual population")
+    residual_ref = None
+    if residual_diagnostics_run:
+        check_id(residual_diagnostics_run)
+        diagnostic = read_json(s3, bucket, f"{ROOT}/silver/deterministic_residual_diagnostics/v1/runs/{residual_diagnostics_run}/manifest.json")
+        approval = json.loads(verified_bytes(s3, bucket, diagnostic["inputs"]["approval"]))
+        registry = json.loads(verified_bytes(s3, bucket, approval["candidate_registry"]))
+        if (approval["decision"] != "approved_price_basis_only" or approval["production_eligible"] is not False
+                or registry["inputs"]["remaining_events"] != remaining["outputs"]["events"]
+                or registry["inputs"]["reconciliation_events"] != recon["outputs"]["events"]
+                or approval["events"] != diagnostic["inputs"]["deterministic_events"]):
+            raise ValueError("Residual approval source mismatch")
+        excluded = {(r["asset_id"], r["date"]) for r in registry["entries"]}
+        residual_ref = diagnostic["outputs"]["events"]
+        residual = verified_frame(s3, bucket, residual_ref)
+        original_ids = set(zip(cases.asset_id, cases.date))
+        residual_ids = set(zip(residual.asset_id, residual.date))
+        if (len(excluded) != approval["approved_count"] or len(residual_ids) != len(residual)
+                or excluded & residual_ids or excluded | residual_ids != original_ids):
+            raise ValueError("Residual population does not partition original inventory")
+        cases = cases.loc[[(a,d) in residual_ids for a,d in zip(cases.asset_id,cases.date)]]
+    if expected_count is not None and len(cases) != expected_count:
+        raise ValueError("Unexpected selected residual count")
     pins = recon["inputs"]
     bundle_version = remaining["inputs"]["financial_bundle_version"]
     bundle = load_bundle(s3, bucket, bundle_version)
     factors = prior_factors(bundle)
+    consolidated = load_consolidated(s3, bucket, bundle["consolidated_index_version"]) if residual_ref else None
+    calendar_records = {}
+    if consolidated:
+        active, _ = load_universe(s3, bucket, consolidated["source_fingerprint"])
+        calendar_records = {r["asset_id"]: r for r in active}
     coverage = verified_frame(s3, bucket, pins["yahoo_coverage"]).set_index("asset_id")
     if not coverage.index.is_unique:
         raise ValueError("Duplicate coverage")
@@ -227,7 +268,11 @@ def audit(s3, bucket, *, remaining_run, reconciliation_run, run_id, expected_cou
     scope = f"{SCOPE}/runs/{run_id}"
     inputs = {"remaining_events": remaining["outputs"]["events"], "reconciliation_events": recon["outputs"]["events"],
               "yahoo_coverage": pins["yahoo_coverage"], "eodhd_run_config_sha256": pins["eodhd_run_config_sha256"],
-              "financial_bundle_version": bundle_version, "policy": POLICY}
+              "financial_bundle_version": bundle_version, "policy": ADVANCED_POLICY if residual_ref else POLICY}
+    if residual_ref:
+        inputs["residual_diagnostics_events"] = residual_ref
+        inputs["prior_approval"] = diagnostic["inputs"]["approval"]
+        inputs["consolidated_index_version"] = bundle["consolidated_index_version"]
     fingerprint = digest(json_bytes(inputs))
 
     def process(aid):
@@ -263,6 +308,19 @@ def audit(s3, bucket, *, remaining_run, reconciliation_run, run_id, expected_cou
                 raise ValueError(f"Provider receipt mismatch: {aid}")
             responses = {k: json.loads(v["raw_json"]) for k, v in json.loads(blob)["responses"].items()}
             y, e = prepare(bars, responses)
+            calendar, missing_expected, reconstructed = None, (), None
+            if consolidated and aid in calendar_records:
+                cal_receipt = consolidated_receipt(s3, bucket, consolidated, calendar_records[aid])
+                if cal_receipt["data"]["sha256"] != yr["bronze_sha256"]:
+                    raise ValueError("Calendar source mismatch")
+                refs = consolidated["assets"][aid]["outputs"]
+                calendar = verified_frame(s3, bucket, refs["candidate"])
+                findings = verified_frame(s3, bucket, refs["findings"])
+                missing_expected = tuple(findings.loc[findings.issue.eq("missing_expected_session"), "session_date"].astype(str))
+                share_doc = bundle["share"]
+                if share_doc["asset_id"] == aid:
+                    reconstructed, _ = reconstruct_share_basis(bars, share_doc, bronze_sha256=yr["bronze_sha256"])
+                    reconstructed = reconstructed.set_index("session_date")
             for row in source:
                 event = by_event[(aid, row["date"])]
                 if (row["bronze_sha256"] != yr["bronze_sha256"] or event["yahoo_sha256"] != yr["bronze_sha256"]
@@ -270,7 +328,13 @@ def audit(s3, bucket, *, remaining_run, reconciliation_run, run_id, expected_cou
                         or not math.isclose(float(event["yahoo_value"]), float(row["ratio"]), rel_tol=1e-7)):
                     raise ValueError(f"Event source mismatch: {aid} {row['date']}")
                 prior = assess_prior(row, factors.get((aid, row["date"]), []))
-                decision = investigate(y, e, responses, row, event, prior)
+                context = None
+                if reconstructed is not None and row["date"] in reconstructed.index:
+                    r = reconstructed.loc[row["date"]]
+                    context = clean({k: r[k] for k in ("missing_subsequent_share_factor", "candidate_cash_dividend",
+                                                        "candidate_share_event", "unresolved_cash")})
+                decision = investigate(y, e, responses, row, event, prior, advanced=bool(residual_ref),
+                                       calendar=calendar, missing_expected=missing_expected, share_context=context)
                 output.append({"asset_id": aid, "symbol": record["yahoo_ticker"], "date": row["date"], "ratio": row["ratio"],
                                "root_category": row["root_category"], "previous_status": row["status"],
                                "bronze_sha256": yr["bronze_sha256"], "eodhd_sha256": receipt["data"]["sha256"], **decision})
@@ -330,11 +394,12 @@ def main():
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--expected-count", type=int)
     parser.add_argument("--workers", type=int, default=8)
+    parser.add_argument("--residual-diagnostics-run", help="Apply v2 hypotheses only to the prior approved residual inventory")
     parser.add_argument("--execute", action="store_true")
     args = parser.parse_args()
     print(json.dumps(audit(boto3.client("s3", region_name=args.region), args.bucket,
                            remaining_run=args.remaining_run, reconciliation_run=args.reconciliation_run,
-                           run_id=args.run_id, expected_count=args.expected_count, workers=args.workers, execute=args.execute), indent=2))
+                           run_id=args.run_id, expected_count=args.expected_count, workers=args.workers, execute=args.execute, residual_diagnostics_run=args.residual_diagnostics_run), indent=2))
 
 
 if __name__ == "__main__":

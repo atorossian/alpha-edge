@@ -115,7 +115,7 @@ def pattern(row):
     return reason, sorted(flags), sorted(statuses)
 
 
-def audit(s3, bucket, *, deterministic_run, candidate_version, approved_count, run_id, expected_count=None, execute=False):
+def audit(s3, bucket, *, deterministic_run, candidate_version, approved_count, run_id, expected_count=None, execute=False, review_run=None):
     for value in (deterministic_run, run_id):
         check_id(value)
     manifest = read_json(s3, bucket, f"{ROOT}/silver/corporate_action_reconciliation/v1/runs/{deterministic_run}/manifest.json")
@@ -129,6 +129,19 @@ def audit(s3, bucket, *, deterministic_run, candidate_version, approved_count, r
                 "candidate_registry": manifest["outputs"]["candidate_registry"], "events": manifest["outputs"]["events"],
                 "approved_count": approved_count, "decision": "approved_price_basis_only",
                 "production_eligible": False, "quarantine_released": False, "economic_review_required": True}
+    if review_run:
+        check_id(review_run)
+        review = read_json(s3,bucket,f"{ROOT}/silver/deterministic_candidate_review/v1/runs/{review_run}/manifest.json")
+        if (review["inputs"]["candidate_registry"] != manifest["outputs"]["candidate_registry"]
+                or review["inputs"]["deterministic_events"] != manifest["outputs"]["events"]):
+            raise ValueError("Candidate review source mismatch")
+        ref = review["outputs"]["candidate_review"]
+        reviewed = verified_frame(s3,bucket,ref)
+        if len(reviewed) != approved_count or set(zip(reviewed.asset_id,reviewed.date)) != approved:
+            raise ValueError("Candidate review population mismatch")
+        approval["review_evidence"] = ref
+        approval["retained_review_flags"] = {k:int(reviewed[k].eq(True).sum()) for k in (
+            "large_return_any_window","large_return_target","raw_cash_basis_any_window","raw_cash_basis_target")}
     body = json_bytes(approval)
     approval_ref = {"key": f"{APPROVAL_SCOPE}/objects/{digest(body)}.json", "sha256": digest(body)}
     categories, patterns, markets, flags, attempts = Counter(), Counter(), Counter(), Counter(), Counter()
@@ -183,12 +196,13 @@ def main():
     parser.add_argument("--approved-count", required=True, type=int)
     parser.add_argument("--expected-count", type=int)
     parser.add_argument("--run-id", required=True)
+    parser.add_argument("--review-run", help="Pin candidate review evidence and retain review flags")
     parser.add_argument("--execute", action="store_true")
     args = parser.parse_args()
     print(json.dumps(audit(boto3.client("s3", region_name=args.region), args.bucket,
                            deterministic_run=args.deterministic_run, candidate_version=args.candidate_version,
                            approved_count=args.approved_count, expected_count=args.expected_count,
-                           run_id=args.run_id, execute=args.execute), indent=2))
+                           run_id=args.run_id, execute=args.execute, review_run=args.review_run), indent=2))
 
 
 if __name__ == "__main__":

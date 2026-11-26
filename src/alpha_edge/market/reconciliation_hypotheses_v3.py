@@ -12,6 +12,7 @@ from alpha_edge.market.audit_provider_reconciliation_v3 import number, split_rat
 
 CANDIDATE = "advanced_session_factor_candidate"
 POLICY = "calendar_aligned_daily_factor_chain_v2"
+CLOSE_CANDIDATE = "close_basis_only_candidate"
 MIN_SIGNAL = 0.00008
 
 
@@ -61,24 +62,38 @@ def calendar_windows(y, e, calendar, responses, day, missing_expected=()):
     return results
 
 
-def analyze_window(y, e, responses, row, event, size):
+def analyze_window(y, e, responses, row, event, size, *, close_only=False):
     """Test field-level scales and each action separately across the entire window."""
     day = row["date"]
-    out = {"method": "daily_factor_chain", "window": f"calendar_{size}_each_side",
+    out = {"method": "close_only_daily_factor_chain" if close_only else "daily_factor_chain", "window": f"calendar_{size}_each_side",
            "date_method": "reported_dates", "policy": POLICY, "production_eligible": False,
            "economic_review_required": True, "quarantine_released": False}
 
     def finish(status):
         return {**out, "status": status}
 
-    ym, em = positive_matrix(y, FIELDS), positive_matrix(e, FIELDS)
+    fields = ["close"] if close_only else FIELDS
+    ym, em = positive_matrix(y, fields), positive_matrix(e, fields)
     ya, ea = positive_matrix(y, ["adj_close"]), positive_matrix(e, ["adjusted_close"])
     if any(v is None for v in (ym, em, ya, ea)):
         return finish("advanced_invalid_prices")
     levels = em/ym
     daily = np.median(levels, axis=1)
     errors = np.abs(levels/daily[:,None]-1)
-    out["field_max_relative_error"] = {f: float(errors[:,i].max()) for i,f in enumerate(FIELDS)}
+    out["field_max_relative_error"] = {f: float(errors[:,i].max()) for i,f in enumerate(fields)}
+    if close_only:
+        eligibility = {"close": True}
+        for field in ("open", "high", "low"):
+            a, b = positive_matrix(y,[field]), positive_matrix(e,[field])
+            if a is None or b is None:
+                eligibility[field] = False
+                continue
+            err = float(np.max(np.abs((b[:,0]/a[:,0])/daily-1)))
+            out["field_max_relative_error"][field] = err
+            eligibility[field] = err <= TOL
+        # Volume is never inferred from a closing-price match.
+        out["field_agreement_hypothesis"] = {**eligibility, "volume": False}
+        out["candidate_eligible_fields"] = ["close"]
     out["max_relative_field_error"] = float(errors.max())
     # A decimal rounding hypothesis is reported, not used to waive a mismatch.
     rounded = np.abs(em - ym*daily[:,None])
@@ -118,8 +133,8 @@ def analyze_window(y, e, responses, row, event, size):
             return finish("advanced_daily_scale_step_disagrees")
         if float(max(errors[i-1].max(),errors[i].max())) > st:
             return finish("advanced_field_scale_disagrees")
-        yf = float((ya[i,0]/ym[i,3])/(ya[i-1,0]/ym[i-1,3]))
-        ef = float((ea[i,0]/em[i,3])/(ea[i-1,0]/em[i-1,3]))
+        yf = float((ya[i,0]/ym[i,-1])/(ya[i-1,0]/ym[i-1,-1]))
+        ef = float((ea[i,0]/em[i,-1])/(ea[i-1,0]/em[i-1,-1]))
         expected_cash = 1.0
         cash_basis = "none"
         ct = TOL
@@ -141,7 +156,7 @@ def analyze_window(y, e, responses, row, event, size):
                 bases.append("reported_adjusted")
             if not bases:
                 return finish("advanced_cash_amount_disagrees")
-            fraction = yc/float(ym[i-1,3])
+            fraction = yc/float(ym[i-1,-1])
             if not 0 < fraction < 1:
                 return finish("advanced_cash_fraction_invalid")
             expected_cash = 1/(1-fraction)
@@ -169,4 +184,44 @@ def analyze_window(y, e, responses, row, event, size):
     # Limit cumulative drift in addition to the individual step tests.
     if not coherent(out["observed_cumulative_scale_step"],out["cumulative_share_ratio"]):
         return finish("advanced_cumulative_scale_disagrees")
-    return finish(CANDIDATE)
+    return finish(CLOSE_CANDIDATE if close_only else CANDIDATE)
+
+
+def cash_sequence_diagnostic(y, e, responses, row):
+    """Locate cash implied by each provider factor, without inferring issuer entitlement."""
+    out = {"method": "cash_sequence_factor_diagnostic", "status": "cash_sequence_diagnostic_only", "sessions": []}
+    if y.index.has_duplicates or e.index.has_duplicates:
+        return out
+    ym, em = positive_matrix(y, ["close"]), positive_matrix(e, ["close"])
+    ya, ea = positive_matrix(y, ["adj_close"]), positive_matrix(e, ["adjusted_close"])
+    if any(x is None for x in (ym,em,ya,ea)):
+        return out
+    dividends = {}
+    splits = {}
+    for r in responses["div"]:
+        if r["date"] in y.index:
+            dividends.setdefault(r["date"], []).append(r)
+    for r in responses["splits"]:
+        if r["date"] in y.index:
+            splits.setdefault(r["date"], []).append(r)
+    for i in range(1,len(y)):
+        d = y.index[i]
+        yr = number(y.iloc[i].stock_splits) or 1.
+        erows = splits.get(d,[])
+        er = split_ratio(erows[0]["split"]) if len(erows)==1 else 1. if not erows else None
+        if er is None or not coherent(yr,er,0.0001):
+            continue
+        yf = float((ya[i,0]/ym[i,0])/(ya[i-1,0]/ym[i-1,0]))
+        ef = float((ea[i,0]/em[i,0])/(ea[i-1,0]/em[i-1,0]))/er
+        if min(yf,ef)<=0 or not math.isfinite(yf+ef):
+            continue
+        yc = number(y.iloc[i].dividends)
+        implied_y = float(ym[i-1,0])*(1-1/yf)
+        implied_e = float(ym[i-1,0])*(1-1/ef)
+        records = dividends.get(d,[])
+        if yc or records or max(abs(implied_y),abs(implied_e))/float(ym[i-1,0]) > MIN_SIGNAL:
+            out["sessions"].append({"date":str(d),"yahoo_reported_cash":yc,"eodhd_reported_cash":records,
+                                    "yahoo_implied_cash":implied_y,"eodhd_implied_cash_on_yahoo_basis":implied_e,
+                                    "cash_implied_agreement":coherent(implied_y,implied_e),
+                                    "issuer_evidence_required":True})
+    return out

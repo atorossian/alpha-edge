@@ -50,3 +50,32 @@ def test_field_disagreement_not_waived_by_rounding():
     result = analyze_window(yy, ee, responses, row, event, 5)
     assert result["status"] == "advanced_field_scale_disagrees"
     assert result["field_max_relative_error"]["high"] > .05
+
+
+def test_close_only_does_not_certify_disputed_ohlc_or_volume():
+    from alpha_edge.market.reconciliation_hypotheses_v3 import CLOSE_CANDIDATE
+    y, responses, cal, row, event = fixture()
+    responses["eod"][4]["open"] *= 1.1
+    yy, ee = prepare(y, responses)
+    assert analyze_window(yy, ee, responses, row, event, 5)["status"] == "advanced_field_scale_disagrees"
+    result = analyze_window(yy, ee, responses, row, event, 5, close_only=True)
+    assert result["status"] == CLOSE_CANDIDATE
+    assert result["candidate_eligible_fields"] == ["close"]
+    assert not result["field_agreement_hypothesis"]["open"]
+    assert not result["field_agreement_hypothesis"]["volume"]
+    responses["eod"][5]["adjusted_close"] *= .8
+    yy, ee = prepare(y, responses)
+    assert analyze_window(yy, ee, responses, row, event, 5, close_only=True)["status"] != CLOSE_CANDIDATE
+
+
+def test_cash_sequence_diagnostic_does_not_create_missing_cash():
+    from alpha_edge.market.reconciliation_hypotheses_v3 import cash_sequence_diagnostic
+    y, responses, cal, row, event = fixture(cash=1.)
+    responses["div"] = []
+    yy, ee = prepare(y, responses)
+    result = cash_sequence_diagnostic(yy, ee, responses, row)
+    target = next(x for x in result["sessions"] if x["date"] == row["date"])
+    assert target["cash_implied_agreement"]
+    assert target["issuer_evidence_required"]
+    assert target["eodhd_reported_cash"] == []
+    assert result["status"] == "cash_sequence_diagnostic_only"

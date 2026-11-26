@@ -25,7 +25,7 @@ from alpha_edge.market.audit_provider_reconciliation_v3 import split_ratio
 from alpha_edge.market.build_silver_adjusted_v3 import load_bundle
 from alpha_edge.market.audit_financial_universe_v3 import load_consolidated, consolidated_receipt
 from alpha_edge.market.build_share_basis_candidate_v3 import reconstruct as reconstruct_share_basis
-from alpha_edge.market.reconciliation_hypotheses_v3 import CANDIDATE as ADVANCED_CANDIDATE, calendar_windows, analyze_window
+from alpha_edge.market.reconciliation_hypotheses_v3 import CANDIDATE as ADVANCED_CANDIDATE, calendar_windows, analyze_window, CLOSE_CANDIDATE, cash_sequence_diagnostic
 from alpha_edge.market.eodhd_source_v3 import load_mapping, verify_bundle
 from alpha_edge.market.ingest_bronze_full_history import EODHD_ROOT, _completed, load_universe
 from alpha_edge.market.lakehouse_v3.storage import (
@@ -37,6 +37,7 @@ SCOPE = f"{ROOT}/silver/corporate_action_reconciliation/v1"
 POLICY = "deterministic_residual_reconciliation_v1"
 PASS = {CANDIDATE, FRACTIONAL, IRREGULAR_CANDIDATE, YAHOO_ONLY_CANDIDATE, CASH_CANDIDATE, ADVANCED_CANDIDATE}
 ADVANCED_POLICY = "deterministic_residual_reconciliation_v2"
+FIELD_POLICY = "deterministic_residual_reconciliation_v3_field_review"
 
 
 def clean(value):
@@ -109,7 +110,7 @@ def ratio_diagnostic(y, e, row, event):
             "max_relative_error": error}
 
 
-def investigate(y, e, responses, row, event, prior, *, advanced=False, calendar=None, missing_expected=(), share_context=None):
+def investigate(y, e, responses, row, event, prior, *, advanced=False, calendar=None, missing_expected=(), share_context=None, field_review=False):
     """Try every applicable bounded hypothesis; conflicts remain held."""
     day, ratio = row["date"], float(row["ratio"])
     attempts = [clean(ratio_diagnostic(y, e, row, event))]
@@ -160,6 +161,7 @@ def investigate(y, e, responses, row, event, prior, *, advanced=False, calendar=
                 attempts.append(record)
                 if decision["status"] in PASS:
                     passed.append(record)
+    field_choice = None
     if advanced:
         window_results = calendar_windows(y, e, calendar, responses, day, missing_expected)
         if not window_results:
@@ -169,6 +171,15 @@ def investigate(y, e, responses, row, event, prior, *, advanced=False, calendar=
         # A wider complete window is an independent challenge, not a reason to cherry-pick.
         if not passed and advanced_results and all(a["status"] == ADVANCED_CANDIDATE for a in advanced_results):
             passed.append(advanced_results[-1])
+        if field_review and window_results:
+            close_results = [clean(analyze_window(yy, ee, responses, row, event, size, close_only=True))
+                             for size, yy, ee in window_results]
+            attempts.extend(close_results)
+            if not passed and all(a["status"] == CLOSE_CANDIDATE for a in close_results):
+                field_choice = close_results[-1]
+            if row["root_category"] == "cash_and_share":
+                _, yy, ee = window_results[-1]
+                attempts.append(clean(cash_sequence_diagnostic(yy, ee, responses, row)))
         if share_context is not None:
             attempts.append({"method": "existing_share_reconstruction_context", "status": "prior_reconstruction_context_only", **share_context})
     prior_conflict = any(f["comparison"] not in {"documented_share_ratio_match"} for f in prior)
@@ -177,7 +188,7 @@ def investigate(y, e, responses, row, event, prior, *, advanced=False, calendar=
     if prior_conflict:
         status, choice = "prior_factor_requires_review", None
     elif not passed:
-        status, choice = "evidence_exhausted", None
+        status, choice = ("close_basis_candidate_field_review", field_choice) if field_choice else ("evidence_exhausted", None)
     else:
         substantive = {(r["method"], r["date_method"]) for r in passed}
         if len(substantive) != 1:
@@ -204,7 +215,7 @@ def optional_checkpoint(s3, bucket, key):
     return json.loads(blob)
 
 
-def audit(s3, bucket, *, remaining_run, reconciliation_run, run_id, expected_count=None, workers=8, execute=False, residual_diagnostics_run=None):
+def audit(s3, bucket, *, remaining_run, reconciliation_run, run_id, expected_count=None, workers=8, execute=False, residual_diagnostics_run=None, field_review=False):
     for value in (remaining_run, reconciliation_run, run_id):
         check_id(value)
     if not 1 <= workers <= 16:
@@ -216,6 +227,8 @@ def audit(s3, bucket, *, remaining_run, reconciliation_run, run_id, expected_cou
     cases = verified_frame(s3, bucket, remaining["outputs"]["events"])
     if len(cases) != remaining["statistics"]["remaining"] or cases.duplicated(["asset_id", "date"]).any():
         raise ValueError("Unexpected residual population")
+    if field_review and not residual_diagnostics_run:
+        raise ValueError("Field review requires a pinned residual diagnostics run")
     residual_ref = None
     if residual_diagnostics_run:
         check_id(residual_diagnostics_run)
@@ -232,8 +245,31 @@ def audit(s3, bucket, *, remaining_run, reconciliation_run, run_id, expected_cou
         residual = verified_frame(s3, bucket, residual_ref)
         original_ids = set(zip(cases.asset_id, cases.date))
         residual_ids = set(zip(residual.asset_id, residual.date))
+        # Walk the prior approval chain, verifying each parent inventory partition.
+        ancestors = set()
+        parent_registry = registry
+        seen_refs = set()
+        while parent_registry["inputs"].get("prior_approval"):
+            ref = parent_registry["inputs"]["prior_approval"]
+            if ref["sha256"] in seen_refs:
+                raise ValueError("Cyclic approval chain")
+            seen_refs.add(ref["sha256"])
+            old = json.loads(verified_bytes(s3, bucket, ref))
+            previous = json.loads(verified_bytes(s3, bucket, old["candidate_registry"]))
+            ids = {(r["asset_id"],r["date"]) for r in previous["entries"]}
+            if (old["decision"] != "approved_price_basis_only" or old["production_eligible"] is not False
+                    or len(ids) != old["approved_count"] or ids & (ancestors | excluded | residual_ids)
+                    or previous["inputs"]["remaining_events"] != remaining["outputs"]["events"]
+                    or previous["inputs"]["reconciliation_events"] != recon["outputs"]["events"]):
+                raise ValueError("Invalid ancestor approval")
+            parent_rows = verified_frame(s3, bucket, parent_registry["inputs"]["residual_diagnostics_events"])
+            parent_ids = set(zip(parent_rows.asset_id,parent_rows.date))
+            if parent_ids != (excluded | residual_ids | ancestors):
+                raise ValueError("Prior residual partition mismatch")
+            ancestors |= ids
+            parent_registry = previous
         if (len(excluded) != approval["approved_count"] or len(residual_ids) != len(residual)
-                or excluded & residual_ids or excluded | residual_ids != original_ids):
+                or excluded & residual_ids or excluded | residual_ids | ancestors != original_ids):
             raise ValueError("Residual population does not partition original inventory")
         cases = cases.loc[[(a,d) in residual_ids for a,d in zip(cases.asset_id,cases.date)]]
     if expected_count is not None and len(cases) != expected_count:
@@ -268,7 +304,7 @@ def audit(s3, bucket, *, remaining_run, reconciliation_run, run_id, expected_cou
     scope = f"{SCOPE}/runs/{run_id}"
     inputs = {"remaining_events": remaining["outputs"]["events"], "reconciliation_events": recon["outputs"]["events"],
               "yahoo_coverage": pins["yahoo_coverage"], "eodhd_run_config_sha256": pins["eodhd_run_config_sha256"],
-              "financial_bundle_version": bundle_version, "policy": ADVANCED_POLICY if residual_ref else POLICY}
+              "financial_bundle_version": bundle_version, "policy": FIELD_POLICY if field_review else ADVANCED_POLICY if residual_ref else POLICY}
     if residual_ref:
         inputs["residual_diagnostics_events"] = residual_ref
         inputs["prior_approval"] = diagnostic["inputs"]["approval"]
@@ -334,7 +370,7 @@ def audit(s3, bucket, *, remaining_run, reconciliation_run, run_id, expected_cou
                     context = clean({k: r[k] for k in ("missing_subsequent_share_factor", "candidate_cash_dividend",
                                                         "candidate_share_event", "unresolved_cash")})
                 decision = investigate(y, e, responses, row, event, prior, advanced=bool(residual_ref),
-                                       calendar=calendar, missing_expected=missing_expected, share_context=context)
+                                       calendar=calendar, missing_expected=missing_expected, share_context=context, field_review=field_review)
                 output.append({"asset_id": aid, "symbol": record["yahoo_ticker"], "date": row["date"], "ratio": row["ratio"],
                                "root_category": row["root_category"], "previous_status": row["status"],
                                "bronze_sha256": yr["bronze_sha256"], "eodhd_sha256": receipt["data"]["sha256"], **decision})
@@ -370,6 +406,14 @@ def audit(s3, bucket, *, remaining_run, reconciliation_run, run_id, expected_cou
                              "rows": len(rows), "format": "parquet"}
         registry = {"schema": "alpha_edge_deterministic_corporate_action_candidate_registry_v1", "inputs": inputs,
                     "entries": candidates, "production_eligible": False, "quarantine_released": False}
+        if field_review:
+            partial = {"schema": "alpha_edge_close_basis_only_candidate_registry_v1", "inputs": inputs,
+                       "entries": [r for r in rows if r["status"] == "close_basis_candidate_field_review"],
+                       "production_eligible": False, "quarantine_released": False}
+            partial_body = json_bytes(partial)
+            partial_root = f"{ROOT}/config/close_basis_only_candidate_registries/v1"
+            outputs["close_only_registry"] = put_immutable(s3,bucket,f"{partial_root}/objects/{digest(partial_body)}.json",partial_body,
+                                                           content_type="application/json",scope=partial_root)
         body = json_bytes(registry)
         root = f"{ROOT}/config/deterministic_corporate_action_candidate_registries/v1"
         outputs["candidate_registry"] = put_immutable(s3, bucket, f"{root}/objects/{digest(body)}.json", body,
@@ -395,11 +439,12 @@ def main():
     parser.add_argument("--expected-count", type=int)
     parser.add_argument("--workers", type=int, default=8)
     parser.add_argument("--residual-diagnostics-run", help="Apply v2 hypotheses only to the prior approved residual inventory")
+    parser.add_argument("--field-review", action="store_true", help="Evaluate close-only basis separately from complete OHLC")
     parser.add_argument("--execute", action="store_true")
     args = parser.parse_args()
     print(json.dumps(audit(boto3.client("s3", region_name=args.region), args.bucket,
                            remaining_run=args.remaining_run, reconciliation_run=args.reconciliation_run,
-                           run_id=args.run_id, expected_count=args.expected_count, workers=args.workers, execute=args.execute, residual_diagnostics_run=args.residual_diagnostics_run), indent=2))
+                           run_id=args.run_id, expected_count=args.expected_count, workers=args.workers, execute=args.execute, residual_diagnostics_run=args.residual_diagnostics_run, field_review=args.field_review), indent=2))
 
 
 if __name__ == "__main__":

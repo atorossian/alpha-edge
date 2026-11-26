@@ -75,3 +75,7 @@ Use `reconcile_corporate_actions_v3 --residual-diagnostics-run <run>` to select 
 ## V2 candidate review before further approval
 
 The v2 run produced 165 price-basis candidates and 596 residual events. The `audit_v2_reconciliation_review_v3` command verifies the pinned registry against the event table without writing an approval. It splits candidates into large-return, original-cash-basis, both and neither review groups (target-event and wider-window flags distinguished), reports per-field and advanced failure evidence for the full residual population, and produces an issuer-evidence queue for the 137 cases lacking independent confirmation. No new thresholds, source corrections or production changes are authorized by this review.
+
+## V3 field-specific evidence
+
+The 165 V2 candidates are approved for price basis only using the pinned review run, retaining the 95 large-return flags. The residual engine accepts subsequent approval chains and validates the exact disjoint partition; `--field-review` adds a close-only daily factor test after the full-field tests fail. A successful close-only chain is stored in a separate partial candidate registry, never the complete price-basis approval registry. Other OHLC fields and volume remain unapproved. Cash-sequence diagnostics show reported and factor-implied cash by session without inserting a dividend or moving its ex-date. Rounding compatibility remains diagnostic, not a reason to relax a gate. No source, production or quarantine changes occur.

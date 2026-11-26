@@ -40,3 +40,7 @@ as `candidate_segment_adjusted_close` with `candidate_segment_id` and must not
 be concatenated as a continuous series. Open/high/low use the same corresponding
 price coefficient as close. Existing source-based quarantine is retained for
 subsequent independent adjudication.
+
+## Approved split price-basis impact
+
+The optional `--split-basis-approvals` and `--deterministic-basis-approvals` arguments load immutable approved price-basis registries, validate their counts, unique identities and source hashes, and attach the exact matched decisions to the Silver candidate. The separate counterfactual return eligibility view removes only the split-price-basis blocker from the historical prefix; other reasons, unavailable returns and invalid sessions are retained. Existing historical quarantine and production eligibility are unchanged. All economic review requirements and large-return dates remain flagged; the view is a potential availability measure, not a production release. The manifest reports the before/after and incremental return observations. Close-only and AI investigation registries are intentionally not consumed by this build.

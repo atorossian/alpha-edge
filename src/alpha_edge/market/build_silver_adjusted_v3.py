@@ -37,6 +37,7 @@ from alpha_edge.market.lakehouse_v3.storage import (
     verified_frame,
 )
 from alpha_edge.market.silver_financial_evidence_v3 import extract_source_actions
+from alpha_edge.market.split_basis_eligibility_v3 import annotate_candidate, load_approved_basis
 
 OUTPUT_ROOT = f"{ROOT}/silver/adjusted_candidates/v1"
 OHLC = ("open", "high", "low", "close")
@@ -413,7 +414,7 @@ def reconstruct(bars, calendar, findings, bundle, *, asset_id, symbol, source_ke
     dup = duplicates.mark_legitimate_pairs(
         dup, currency_normalized, bundle["duplicates"], asset_id=asset_id, provider_symbol=symbol, bronze_sha256=sha
     )
-    _, _, q = quarantine.assess(
+    _, qfindings, q = quarantine.assess(
         raw.reset_index(drop=True),
         currency_normalized,
         asset_id=asset_id,
@@ -423,11 +424,15 @@ def reconstruct(bars, calendar, findings, bundle, *, asset_id, symbol, source_ke
         duplicate_findings=dup,
     )
     f["historical_quarantine"] = f.index <= q["quarantine_through"] if q["quarantine_through"] else False
+    if "split_basis_approved" in bundle:
+        annotate_candidate(f, raw, qfindings, bundle["split_basis_approved"].get(asset_id,{}),
+                           asset_id=asset_id, symbol=symbol, sha=sha)
     f["production_eligible"] = False
     return f.reset_index(drop=True), applied
 
 
-def build(s3, bucket, *, consolidated_version, bundle_version, run_id, selectors=None, workers=4, execute=False):
+def build(s3, bucket, *, consolidated_version, bundle_version, run_id, selectors=None, workers=4, execute=False,
+          split_basis_approvals=(), deterministic_basis_approvals=(), expected_split_approvals=None):
     check_id(run_id)
     if not 1 <= workers <= 16:
         raise ValueError("Invalid worker count")
@@ -441,6 +446,13 @@ def build(s3, bucket, *, consolidated_version, bundle_version, run_id, selectors
     bundle = load_bundle(s3, bucket, bundle_version)
     if bundle["consolidated_index_version"] != consolidated_version:
         raise ValueError("Integration bundle targets a different consolidated index")
+    if split_basis_approvals or deterministic_basis_approvals:
+        bundle["split_basis_approved"]=load_approved_basis(s3,bucket,split_basis_approvals,
+                                                           deterministic_basis_approvals,expected_split_approvals)
+        if not set(bundle["split_basis_approved"]) <= set(index["assets"]):
+            raise ValueError("Approved split asset outside consolidated index")
+    elif expected_split_approvals is not None:
+        raise ValueError("Expected split approvals requires registry versions")
     root = f"{OUTPUT_ROOT}/runs/{run_id}"
 
     def process(row):
@@ -475,6 +487,11 @@ def build(s3, bucket, *, consolidated_version, bundle_version, run_id, selectors
             "large_return_review_rows": int(frame.candidate_large_return_review.sum()),
             "unresolved_spin_rows": int(frame.candidate_spin_actual.isna().sum()),
         }
+        if "split_basis_approved" in bundle:
+            report.update({"approved_split_events":int(frame.candidate_split_basis_approved.sum()),
+                           "potential_returns_before":int(frame.candidate_return_potential_before_split_basis_review.sum()),
+                           "potential_returns_after":int(frame.candidate_return_potential_after_split_basis_review.sum()),
+                           "retained_large_return_review_sessions":int(frame.candidate_split_basis_large_return_review.sum())})
         if execute:
             blob = parquet_bytes(frame)
             key = f"{root}/assets/{digest(aid.encode())}/prices-{digest(blob)}.parquet"
@@ -495,6 +512,10 @@ def build(s3, bucket, *, consolidated_version, bundle_version, run_id, selectors
         raise ValueError("Full universe excludes a pinned reconciliation asset")
     if seen != {x for x in bundle["cohort"] if x[0] in selected_ids}:
         raise ValueError("Reconciliation cohort not fully applied")
+    if "split_basis_approved" in bundle:
+        expected_approved=sum(len(v) for a,v in bundle["split_basis_approved"].items() if a in selected_ids)
+        if sum(r["approved_split_events"] for r in reports)!=expected_approved:
+            raise ValueError("Not all selected split approvals matched source events")
     manifest = {
         "schema": "alpha_edge_silver_adjusted_candidate_v1",
         "run_id": run_id,
@@ -525,6 +546,13 @@ def build(s3, bucket, *, consolidated_version, bundle_version, run_id, selectors
         "currency": "original_local_currency",
         "quarantine_released": False,
     }
+    if "split_basis_approved" in bundle:
+        manifest["split_basis_approvals"]={"standard":list(split_basis_approvals),
+                                            "deterministic":list(deterministic_basis_approvals),
+                                            "scope":"price_basis_only_counterfactual"}
+        manifest["statistics"].update({k:sum(r[k] for r in reports) for k in (
+            "approved_split_events","potential_returns_before","potential_returns_after","retained_large_return_review_sessions")})
+        manifest["statistics"]["potential_incremental_returns"]=manifest["statistics"]["potential_returns_after"]-manifest["statistics"]["potential_returns_before"]
     if execute:
         put_immutable(
             s3,
@@ -548,6 +576,9 @@ def main():
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--all", action="store_true")
     group.add_argument("--only", nargs="+")
+    parser.add_argument("--split-basis-approvals",nargs="+",default=[])
+    parser.add_argument("--deterministic-basis-approvals",nargs="+",default=[])
+    parser.add_argument("--expected-split-approvals",type=int)
     parser.add_argument("--execute", action="store_true")
     args = parser.parse_args()
     result = build(
@@ -559,6 +590,9 @@ def main():
         selectors=args.only,
         workers=args.workers,
         execute=args.execute,
+        split_basis_approvals=args.split_basis_approvals,
+        deterministic_basis_approvals=args.deterministic_basis_approvals,
+        expected_split_approvals=args.expected_split_approvals,
     )
     print(json.dumps({k: v for k, v in result.items() if k != "assets"}, indent=2))
 

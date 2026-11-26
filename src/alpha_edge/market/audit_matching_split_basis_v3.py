@@ -67,7 +67,7 @@ def prepare(yahoo, responses):
     return y, e
 
 
-def screen_event(y, e, responses, event, screen, *, fractional=False, small_fraction=False, irregular=False, yahoo_only=False):
+def screen_event(y, e, responses, event, screen, *, fractional=False, small_fraction=False, irregular=False, yahoo_only=False, recheck_continuity=False):
     day = event["yahoo_date"]
     ratio = float(event["yahoo_value"])
     group = classify(ratio)
@@ -88,7 +88,7 @@ def screen_event(y, e, responses, event, screen, *, fractional=False, small_frac
         return finish("non_integer_economic_review")
     if bool(screen["same_day_dividend"]) or any(r["date"] == day for r in responses["div"]):
         return finish("same_day_cash_event")
-    if not (small_fraction or irregular or yahoo_only) and screen["continuity"] != "provider_normalized_signal":
+    if not (small_fraction or irregular or yahoo_only or recheck_continuity) and screen["continuity"] != "provider_normalized_signal":
         return finish("yahoo_continuity_not_confirmed")
     if y.index.has_duplicates or e.index.has_duplicates or day not in y.index or day not in e.index:
         return finish("missing_or_duplicate_session")
@@ -148,7 +148,7 @@ def screen_event(y, e, responses, event, screen, *, fractional=False, small_frac
         return finish("implied_share_ratio_disagreement")
     if not close_to(yf, 1.0) or not close_to(ef, ratio):
         return finish("adjustment_factor_disagreement")
-    if (small_fraction or irregular or yahoo_only) and abs(math.log(y_step)) > 0.10:
+    if (small_fraction or irregular or yahoo_only or recheck_continuity) and abs(math.log(y_step)) > 0.10:
         return finish("large_event_session_return_review")
     # Cross-provider OHLC and factor-step checks replace the impossible 0.10 log-margin gate.
     # This corroborates price basis, not the legal identity of every corporate action.

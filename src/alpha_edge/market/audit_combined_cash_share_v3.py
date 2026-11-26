@@ -61,7 +61,7 @@ def assess_prior(row, factors):
     return findings
 
 
-def screen_cash_share(y, e, responses, row, split_event):
+def screen_cash_share(y, e, responses, row, split_event, *, cash_basis="post"):
     """Confirm both cash and price-basis steps; never infer legal share issuance."""
     day, ratio = row["date"], float(row["ratio"])
     details = {"policy": POLICY, "status": "not_evaluated", "production_eligible": False,
@@ -126,13 +126,16 @@ def screen_cash_share(y, e, responses, row, split_event):
     ef = float((ea[WINDOW, 0]/em[WINDOW, 3])/(ea[WINDOW-1, 0]/em[WINDOW-1, 3]))
     # EODHD original cash is tested on the post-event quote basis. No alternative
     # basis is guessed when that hypothesis fails.
-    e_cash_normalized = raw_cash/post
+    if cash_basis not in {"pre", "post"}:
+        raise ValueError("Unknown cash basis")
+    e_cash_normalized = raw_cash / (pre if cash_basis == "pre" else post)
     details.update({"pre_scale": pre, "post_scale": post, "implied_ratio": implied,
                     "pre_max_relative_error": pre_error, "post_max_relative_error": post_error,
                     "yahoo_adjustment_factor_step": yf, "eodhd_adjustment_factor_step": ef,
                     "yahoo_close_step": y_step, "eodhd_close_step": e_step,
                     "eodhd_original_cash": raw_cash, "eodhd_cash_on_yahoo_basis": e_cash_normalized,
-                    "cash_currency": currency})
+                    "cash_currency": currency, "cash_basis_hypothesis": cash_basis,
+                    "eodhd_adjusted_cash": number(cash.get("value"))})
     if not all(math.isfinite(x) for x in (pre, post, implied, pre_error, post_error, yf, ef, y_step, e_step, e_cash_normalized)):
         return finish("invalid_price_window")
     if pre_error > TOL or post_error > TOL:
@@ -142,7 +145,7 @@ def screen_cash_share(y, e, responses, row, split_event):
     if not close_to(e_cash_normalized, y_cash):
         return finish("cash_amount_or_share_basis_disagreement")
     cash_fraction_y = y_cash/float(ym[WINDOW-1, 3])
-    cash_fraction_e = raw_cash/(float(em[WINDOW-1, 3])/ratio)
+    cash_fraction_e = raw_cash / (float(em[WINDOW-1, 3]) if cash_basis == "pre" else float(em[WINDOW-1, 3])/ratio)
     if not (0 < cash_fraction_y < 1 and 0 < cash_fraction_e < 1):
         return finish("invalid_cash_fraction")
     expected_y, expected_e = 1/(1-cash_fraction_y), ratio/(1-cash_fraction_e)

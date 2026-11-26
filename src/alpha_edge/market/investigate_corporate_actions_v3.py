@@ -14,6 +14,7 @@ import boto3
 import requests
 from botocore.exceptions import ClientError
 
+from alpha_edge.market import corporate_action_research_strategy_v3 as enhanced_strategy
 from alpha_edge.market.lakehouse_v3.storage import (
     ROOT, check_id, digest, json_bytes, parquet_bytes, put_immutable, read_json, verified_frame,
 )
@@ -62,8 +63,8 @@ INSTRUCTIONS = (
 )
 
 
-def select_cases(rows, category, offset, limit):
-    if not 1 <= limit <= MAX_CASES or offset < 0:
+def select_cases(rows, category, offset, limit, *, enhanced=False):
+    if not 1 <= limit <= (enhanced_strategy.MAX_CASES if enhanced else MAX_CASES) or offset < 0:
         raise ValueError("Invalid bounded case selection")
     selected = [r for r in rows if r["status"] == "evidence_exhausted" and
                 (category == "all" or r["root_category"] == category)]
@@ -186,19 +187,20 @@ def claim(s3,bucket,key,body):
         raise
 
 
-def request_case(token,case,model):
+def request_case(token,case,model,*,enhanced=False,context=None):
     # No retries: an uncertain timeout might already have incurred usage.
     try:
         response=requests.post(ENDPOINT,headers={"Authorization":f"Bearer {token}","Content-Type":"application/json"},
-                               json=payload(case,model),timeout=(15,180),allow_redirects=False)
+                               json=enhanced_strategy.payload(case,model,context or []) if enhanced else payload(case,model),
+                               timeout=(15,180),allow_redirects=False)
         if response.status_code!=200:
             return {"status":"api_http_error","http_status":response.status_code,"production_eligible":False}
-        return parse_response(response.json(),case)
+        return enhanced_strategy.parse_response(response.json(),case,https_url) if enhanced else parse_response(response.json(),case)
     except (requests.RequestException,ValueError,TypeError,KeyError,OverflowError):
         return {"status":"api_request_or_response_error","production_eligible":False}
 
 
-def audit(s3,ssm,bucket,*,deterministic_run,run_id,category,offset,limit,model=MODEL,execute=False):
+def audit(s3,ssm,bucket,*,deterministic_run,run_id,category,offset,limit,model=MODEL,execute=False,enhanced=False,prior_run=None):
     for value in (deterministic_run,run_id):
         check_id(value)
     manifest=read_json(s3,bucket,f"{ROOT}/silver/corporate_action_reconciliation/v1/runs/{deterministic_run}/manifest.json")
@@ -207,21 +209,46 @@ def audit(s3,ssm,bucket,*,deterministic_run,run_id,category,offset,limit,model=M
     rows=verified_frame(s3,bucket,manifest["outputs"]["events"]).to_dict("records")
     if len(rows)!=manifest["statistics"]["events"]:
         raise ValueError("Incomplete deterministic inventory")
-    selected,total=select_cases(rows,category,offset,limit)
+    selected,total=select_cases(rows,category,offset,limit,enhanced=enhanced)
     if not selected:
         raise ValueError("No eligible cases in selected range")
+    prior_records, prior_ref = [], None
+    if prior_run:
+        if not enhanced:
+            raise ValueError("Prior research requires enhanced strategy")
+        check_id(prior_run)
+        pm=read_json(s3,bucket,f"{SCOPE}/runs/{prior_run}/manifest.json")
+        if pm["inputs"]["deterministic_events"] != manifest["outputs"]["events"]:
+            raise ValueError("Prior investigation source mismatch")
+        prior_ref=pm["outputs"]["evidence"]
+        previous=verified_frame(s3,bucket,prior_ref)
+        current={(r["asset_id"],r["date"]):r for r in rows}
+        for r in previous.to_dict("records"):
+            record=json.loads(r["evidence_json"])
+            c=record["case"]
+            source=current[(c["asset_id"],c["date"])]
+            if c["bronze_sha256"]!=source["bronze_sha256"] or c["eodhd_sha256"]!=source["eodhd_sha256"]:
+                raise ValueError("Prior investigation source hash mismatch")
+            prior_records.append(record)
     root=f"{SCOPE}/runs/{run_id}"
     cases=[{"asset_id":r["asset_id"],"date":r["date"],"bronze_sha256":r["bronze_sha256"],
             "eodhd_sha256":r["eodhd_sha256"],"public_case":public_case(r)} for r in selected]
-    plan={"schema":"alpha_edge_corporate_action_research_plan_v1","policy":POLICY,
+    policy=enhanced_strategy.POLICY if enhanced else POLICY
+    tool_limit=enhanced_strategy.MAX_TOOL_CALLS if enhanced else MAX_TOOL_CALLS
+    output_limit=enhanced_strategy.MAX_OUTPUT_TOKENS if enhanced else MAX_OUTPUT_TOKENS
+    instructions=enhanced_strategy.INSTRUCTIONS if enhanced else INSTRUCTIONS
+    schema=enhanced_strategy.SCHEMA if enhanced else SCHEMA
+    plan={"schema":"alpha_edge_corporate_action_research_plan_v1","policy":policy,
           "source":manifest["outputs"]["events"],"model":model,"category":category,"offset":offset,
-          "prompt_schema_sha256":digest(json_bytes({"instructions":INSTRUCTIONS,"schema":SCHEMA})),
-          "max_tool_calls_per_case":MAX_TOOL_CALLS,"max_output_tokens_per_case":MAX_OUTPUT_TOKENS,
+          "prompt_schema_sha256":digest(json_bytes({"instructions":instructions,"schema":schema})),
+          "max_tool_calls_per_case":tool_limit,"max_output_tokens_per_case":output_limit,
           "cases":cases}
+    if prior_ref:
+        plan["prior_research"]=prior_ref
     fingerprint=digest(json_bytes(plan))
     if not execute:
         return {"status":"dry_run","eligible":total,"selected":len(cases),"max_api_requests":len(cases),
-                "max_web_tool_calls":len(cases)*MAX_TOOL_CALLS,"model":model,
+                "max_web_tool_calls":len(cases)*tool_limit,"model":model,
                 "selected_cases":[c["public_case"] for c in cases]}
     put_immutable(s3,bucket,f"{root}/plan.json",json_bytes(plan),content_type="application/json",scope=SCOPE)
     token=None
@@ -246,7 +273,8 @@ def audit(s3,ssm,bucket,*,deterministic_run,run_id,category,offset,limit,model=M
             # No automatic retry after a possibly charged/active request.
             outcome={"status":"claimed_request_requires_review","production_eligible":False}
         else:
-            outcome=request_case(token,c["public_case"],model)
+            context=enhanced_strategy.context_for_asset(prior_records+result,c["asset_id"]) if enhanced else None
+            outcome=request_case(token,c["public_case"],model,enhanced=enhanced,context=context)
         saved={"plan_fingerprint":fingerprint,"case":c,"outcome":outcome}
         if outcome["status"]=="claimed_request_requires_review":
             return {"status":"paused_claim_review","completed":len(result),"selected":len(cases),"case":c["public_case"]}
@@ -264,7 +292,7 @@ def audit(s3,ssm,bucket,*,deterministic_run,run_id,category,offset,limit,model=M
     ref=put_immutable(s3,bucket,f"{root}/objects/evidence-{digest(blob)}.parquet",blob,
                       content_type="application/vnd.apache.parquet",scope=SCOPE)
     counts=Counter(r["outcome"]["status"] for r in result)
-    report={"schema":"alpha_edge_corporate_action_investigation_v1","run_id":run_id,"policy":POLICY,
+    report={"schema":"alpha_edge_corporate_action_investigation_v1","run_id":run_id,"policy":policy,
             "plan_sha256":fingerprint,"inputs":{"deterministic_events":manifest["outputs"]["events"]},
             "statistics":{"eligible":total,"selected":len(cases),"statuses":dict(counts),
                           "input_tokens":sum(r["outcome"].get("usage",{}).get("input_tokens",0) for r in result),
@@ -272,6 +300,8 @@ def audit(s3,ssm,bucket,*,deterministic_run,run_id,category,offset,limit,model=M
                           "web_search_calls":sum(r["outcome"].get("web_search_calls",0) for r in result)},
             "outputs":{"evidence":{**ref,"rows":len(flat),"format":"parquet"}},
             "production_eligible":False,"quarantine_released":False,"approval_required":True}
+    if prior_ref:
+        report["inputs"]["prior_research"]=prior_ref
     key=f"{root}/manifest.json"
     put_immutable(s3,bucket,key,json_bytes(report),content_type="application/json",scope=SCOPE)
     return {**report,"manifest_key":key,"resumed":resumed,"status":"research_written"}
@@ -287,11 +317,13 @@ def main():
     parser.add_argument("--offset",type=int,default=0)
     parser.add_argument("--limit",type=int,required=True)
     parser.add_argument("--model",default=MODEL)
+    parser.add_argument("--enhanced",action="store_true",help="Use historical issuer identity and fact-level source evidence")
+    parser.add_argument("--prior-run",help="Reuse public evidence from a pinned earlier investigation")
     parser.add_argument("--execute",action="store_true")
     args=parser.parse_args()
     print(json.dumps(audit(boto3.client("s3",region_name=args.region),boto3.client("ssm",region_name=args.region),
                            args.bucket,deterministic_run=args.deterministic_run,run_id=args.run_id,category=args.category,
-                           offset=args.offset,limit=args.limit,model=args.model,execute=args.execute),indent=2))
+                           offset=args.offset,limit=args.limit,model=args.model,execute=args.execute,enhanced=args.enhanced,prior_run=args.prior_run),indent=2))
 
 
 if __name__=="__main__":

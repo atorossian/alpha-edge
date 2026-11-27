@@ -34,6 +34,7 @@ from alpha_edge.market.lakehouse_v3.storage import (
     json_bytes,
     parquet_bytes,
     put_immutable,
+    read_object,
     verified_bytes,
     verified_frame,
 )
@@ -42,6 +43,66 @@ from alpha_edge.market.split_basis_eligibility_v3 import annotate_candidate, loa
 
 OUTPUT_ROOT = f"{ROOT}/silver/adjusted_candidates/v1"
 OHLC = ("open", "high", "low", "close")
+
+
+def _resume_asset(s3, bucket, root, aid, fingerprint, expected_cohort):
+    key = f"{root}/checkpoints/{digest(aid.encode())}.json"
+    found = read_object(s3, bucket, key, optional=True)
+    if found is None:
+        return None
+    raw, metadata = found
+    if metadata.get("sha256") != digest(raw):
+        raise ValueError(f"Adjusted checkpoint checksum mismatch: {aid}")
+    doc = json.loads(raw)
+    report = doc["report"]
+    cohort = {tuple(e) for e in doc["applied"]}
+    if (
+        doc.get("schema") != "alpha_edge_adjusted_asset_checkpoint_v1"
+        or doc.get("input_fingerprint") != fingerprint
+        or report.get("asset_id") != aid
+        or cohort != expected_cohort
+        or len(cohort) != report["cohort_cases"]
+    ):
+        raise ValueError(f"Adjusted checkpoint identity mismatch: {aid}")
+    ref = report["output"]
+    if ref["key"] != f"{root}/assets/{digest(aid.encode())}/prices-{ref['sha256']}.parquet":
+        raise ValueError(f"Adjusted checkpoint output path mismatch: {aid}")
+    payload, meta = read_object(s3, bucket, ref["key"])
+    if digest(payload) != ref["sha256"] or meta.get("sha256") != ref["sha256"] or len(payload) != ref["bytes"]:
+        raise ValueError(f"Adjusted checkpoint output checksum mismatch: {aid}")
+    return report, cohort
+
+
+def _publish_asset(s3, bucket, root, aid, fingerprint, report, applied, blob):
+    sha = digest(blob)
+    key = f"{root}/assets/{digest(aid.encode())}/prices-{sha}.parquet"
+    existing = read_object(s3, bucket, key, optional=True)
+    if existing is not None:
+        payload, metadata = existing
+        if payload != blob or metadata.get("sha256") != sha:
+            raise ValueError(f"Existing adjusted output checksum mismatch: {aid}")
+        report["output"] = {"key": key, "sha256": sha, "bytes": len(blob)}
+    else:
+        report["output"] = put_immutable(
+            s3, bucket, key, blob, content_type="application/vnd.apache.parquet", scope=OUTPUT_ROOT
+        )
+    checkpoint = {
+        "schema": "alpha_edge_adjusted_asset_checkpoint_v1",
+        "input_fingerprint": fingerprint,
+        "report": report,
+        "applied": sorted(applied),
+    }
+    put_immutable(
+        s3,
+        bucket,
+        f"{root}/checkpoints/{digest(aid.encode())}.json",
+        json_bytes(checkpoint),
+        content_type="application/json",
+        scope=OUTPUT_ROOT,
+    )
+    return existing is not None
+
+
 FAMILIES = {
     "reconciliation": "dividend_factor_reconciliation_registries",
     "missing": "missing_session_dividend_candidate_registries",
@@ -513,9 +574,41 @@ def build(
     elif expected_residual_count is not None or eodhd_run_id is not None:
         raise ValueError("Residual registry required")
     root = f"{OUTPUT_ROOT}/runs/{run_id}"
+    run_inputs = {
+        "schema": "alpha_edge_adjusted_run_inputs_v1",
+        "run_id": run_id,
+        "consolidated_version": consolidated_version,
+        "bundle_version": bundle_version,
+        "selected_assets": sorted(r["asset_id"] for r in selected),
+        "full_universe": selectors is None,
+        "split_basis_approvals": list(split_basis_approvals),
+        "deterministic_basis_approvals": list(deterministic_basis_approvals),
+        "expected_split_approvals": expected_split_approvals,
+        "residual_version": residual_version,
+        "expected_residual_count": expected_residual_count,
+        "eodhd_run_id": eodhd_run_id,
+        "execution_plan_version": execution_plan_version,
+    }
+    fingerprint = digest(json_bytes(run_inputs))
+    if execute:
+        put_immutable(
+            s3,
+            bucket,
+            f"{root}/inputs.json",
+            json_bytes(run_inputs),
+            content_type="application/json",
+            scope=OUTPUT_ROOT,
+        )
+    cohort_by_asset = {}
+    for case in bundle["cohort"]:
+        cohort_by_asset.setdefault(case[0], set()).add(case)
 
     def process(row):
         aid = row["asset_id"]
+        if execute:
+            recovered = _resume_asset(s3, bucket, root, aid, fingerprint, cohort_by_asset.get(aid, set()))
+            if recovered is not None:
+                return *recovered, "resumed"
         receipt = consolidated_receipt(s3, bucket, index, row)
         ref = receipt["data"]
         bars = verified_frame(s3, bucket, ref)
@@ -574,19 +667,26 @@ def build(
             report.update(residual.validate_candidate(frame, bars, decisions))
         if execute:
             blob = parquet_bytes(frame)
-            key = f"{root}/assets/{digest(aid.encode())}/prices-{digest(blob)}.parquet"
-            report["output"] = put_immutable(
-                s3, bucket, key, blob, content_type="application/vnd.apache.parquet", scope=OUTPUT_ROOT
-            )
-        return report, applied
+            reused = _publish_asset(s3, bucket, root, aid, fingerprint, report, applied, blob)
+            return report, applied, "existing_verified" if reused else "written"
+        return report, applied, "dry_run"
 
     reports, seen = [], set()
+    resumed, reused = 0, 0
     with ThreadPoolExecutor(max_workers=workers) as pool:
-        for i, (report, applied) in enumerate(pool.map(process, sorted(selected, key=lambda r: r["asset_id"])), 1):
+        for i, (report, applied, state) in enumerate(
+            pool.map(process, sorted(selected, key=lambda r: r["asset_id"])), 1
+        ):
             reports.append(report)
             seen.update(applied)
+            resumed += int(state == "resumed")
+            reused += int(state == "existing_verified")
             if i % 50 == 0 or i == len(selected):
-                print(f"[adjusted candidate] {i}/{len(selected)}", file=sys.stderr, flush=True)
+                print(
+                    f"[adjusted candidate] {i}/{len(selected)}; resumed={resumed}; existing_verified={reused}",
+                    file=sys.stderr,
+                    flush=True,
+                )
     selected_ids = {r["asset_id"] for r in selected}
     if selectors is None and not {a for a, _ in bundle["cohort"]} <= selected_ids:
         raise ValueError("Full universe excludes a pinned reconciliation asset")

@@ -87,3 +87,16 @@ poetry run python -m alpha_edge.market.build_silver_adjusted_v3 \
 
 The plan is candidate-only; it is not a financial acceptance manifest. Add
 `--execute` only after the dry run is reviewed. No provider download is needed.
+
+### Recovery after an interrupted publication
+
+Repeat the same `--execute` command with the same run ID and pinned inputs.
+The run input document and per-asset checkpoints are immutable, and a changed
+input fingerprint is rejected. Every resumed asset's output is read back and
+checksum-verified. Assets written by the older builder without a checkpoint
+are reconstructed once and the existing immutable bytes are reused only if
+they match exactly; no previously published price object is overwritten.
+Progress reports `resumed` and `existing_verified` separately. Transient S3
+response-stream failures retry the entire read from byte zero (five attempts);
+checksum mismatches, missing required data and permissions remain hard failures.
+The final manifest still appears only after all assets have been accounted for.

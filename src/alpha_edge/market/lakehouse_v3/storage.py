@@ -5,10 +5,18 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import logging
 import re
+import time
 
 import pandas as pd
-from botocore.exceptions import ClientError
+from botocore.exceptions import (
+    ClientError,
+    ConnectionClosedError,
+    IncompleteReadError,
+    ReadTimeoutError,
+    ResponseStreamingError,
+)
 
 ROOT = "market/lake_v3"
 SAFE_ID = re.compile(r"^[a-z0-9][a-z0-9_-]{2,63}$")
@@ -32,13 +40,35 @@ def json_bytes(obj: dict) -> bytes:
     return (json.dumps(obj, sort_keys=True, separators=(",", ":"), allow_nan=False) + "\n").encode("utf-8")
 
 
+def read_object(s3, bucket: str, key: str, *, optional=False):
+    """Retry interrupted response bodies from byte zero, never partial bytes."""
+    for attempt in range(5):
+        body = None
+        try:
+            response = s3.get_object(Bucket=bucket, Key=key)
+            body = response["Body"]
+            payload = body.read()
+            if "ContentLength" in response and len(payload) != response["ContentLength"]:
+                raise IncompleteReadError(actual_bytes=len(payload), expected_bytes=response["ContentLength"])
+            return payload, response.get("Metadata", {})
+        except ClientError as exc:
+            if exc.response.get("Error", {}).get("Code") in {"NoSuchKey", "404", "NotFound"}:
+                if optional:
+                    return None
+                raise LakehouseError(f"Required S3 object missing: {key}") from exc
+            raise
+        except (ResponseStreamingError, IncompleteReadError, ReadTimeoutError, ConnectionClosedError):
+            if attempt == 4:
+                raise
+            logging.getLogger(__name__).warning("Retrying interrupted S3 read (%d/5): %s", attempt + 2, key)
+            time.sleep(min(2**attempt, 8))
+        finally:
+            if body is not None:
+                body.close()
+
+
 def read_bytes(s3, bucket: str, key: str) -> bytes:
-    try:
-        return s3.get_object(Bucket=bucket, Key=key)["Body"].read()
-    except ClientError as exc:
-        if exc.response.get("Error", {}).get("Code") in {"NoSuchKey", "404", "NotFound"}:
-            raise LakehouseError(f"Required S3 object missing: {key}") from exc
-        raise
+    return read_object(s3, bucket, key)[0]
 
 
 def read_json(s3, bucket: str, key: str) -> dict:
@@ -86,10 +116,8 @@ def put_immutable(
         }:
             raise
         conflict = exc
-    response = s3.get_object(Bucket=bucket, Key=key)
-    if digest(response["Body"].read()) != sha or any(
-        response.get("Metadata", {}).get(name) != value for name, value in expected_metadata.items()
-    ):
+    payload, actual_metadata = read_object(s3, bucket, key)
+    if digest(payload) != sha or any(actual_metadata.get(name) != value for name, value in expected_metadata.items()):
         if conflict is not None:
             raise LakehouseError(f"Immutable S3 collision: {key}") from conflict
         raise LakehouseError(f"S3 read-after-write checksum or metadata mismatch: {key}")

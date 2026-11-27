@@ -37,3 +37,30 @@ def test_local_patch_preserves_source_and_checks_split():
     doc["entries"][0]["ratio"] = 3.
     with pytest.raises(ValueError, match="Source split mismatch"):
         reconstruct(bars, responses, doc)
+
+
+def test_issuer_precision_only_applies_incremental_factor_and_keeps_cash_entitlement():
+    bars, responses, doc = fixture()
+    day = bars.loc[5, "session_date"]
+    rounded, exact = 1.005, 1.0056
+    bars.loc[5, "stock_splits"] = rounded
+    bars.loc[5, "dividends"] = .60 / rounded
+    for i, row in enumerate(responses["eod"]):
+        for c in ("open", "high", "low", "close"):
+            row[c] = bars.loc[i, c] * (rounded / exact if i < 5 else 1)
+    doc["entries"] = [{"date": day, "ratio": rounded, "issuer_ratio": exact,
+                       "declared_cash": .60, "method": "issuer_ratio_precision"}]
+    out, stats = reconstruct(bars, responses, doc)
+    assert out.loc[4, "candidate_close"] == pytest.approx(100 * rounded / exact)
+    assert out.loc[5, "candidate_close"] == 100
+    assert out.loc[5, "candidate_split_event"] == exact
+    assert out.loc[5, "stock_splits"] == rounded
+    assert out.loc[5, "candidate_cash_dividend"] == pytest.approx(.60 / exact)
+    assert not out.loc[5, "candidate_cash_review"]
+    assert stats["corrected_ratios"] == 1
+    assert out.loc[5, "dividends"] == pytest.approx(.60 / rounded)
+    responses["eod"][0]["close"] = 50
+    for row in responses["eod"][1:5]:
+        row["close"] = 50
+    with pytest.raises(ValueError, match="Independent precision step mismatch"):
+        reconstruct(bars, responses, doc)

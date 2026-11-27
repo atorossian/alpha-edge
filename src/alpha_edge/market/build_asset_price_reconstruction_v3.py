@@ -19,6 +19,77 @@ OUTPUT = f"{ROOT}/silver/asset_price_reconstruction_candidates/v1"
 OHLC = ("open", "high", "low", "close")
 
 
+def _precision_reconstruction(f, e, doc):
+    """Correct only the missing precision of an already-normalized share chain."""
+    factor = pd.Series(1.0, index=f.index)
+    cash_factor = factor.copy()
+    exact = pd.to_numeric(f.stock_splits, errors="raise").copy()
+    reports, seen = [], set()
+    for event in sorted(doc["entries"], key=lambda x: x["date"]):
+        day = event["date"]
+        reported, issuer = float(event["ratio"]), float(event["issuer_ratio"])
+        if (day in seen or day not in f.index or day not in e.index or not math.isfinite(reported)
+                or not math.isfinite(issuer) or min(reported, issuer) <= 0
+                or not math.isclose(float(exact.at[day]), reported, rel_tol=1e-7)):
+            raise ValueError(f"Invalid precision correction: {day}")
+        seen.add(day)
+        change = reported / issuer
+        pos = f.index.get_loc(day)
+        before = f.index[max(0, pos-5):pos].intersection(e.index)
+        after = f.index[pos:pos+5].intersection(e.index)
+        if len(before) < 3 or len(after) < 3:
+            raise ValueError(f"Missing precision corroboration window: {day}")
+        pre_levels = (e.loc[before, list(OHLC)] / f.loc[before, list(OHLC)]).to_numpy(dtype=float)
+        post_levels = (e.loc[after, list(OHLC)] / f.loc[after, list(OHLC)]).to_numpy(dtype=float)
+        pre, post = float(np.median(pre_levels)), float(np.median(post_levels))
+        observed = pre / post if post > 0 else math.nan
+        error = max(float(np.max(np.abs(pre_levels / pre - 1))), float(np.max(np.abs(post_levels / post - 1)))) if pre > 0 and post > 0 else math.inf
+        if not math.isfinite(observed) or not math.isfinite(error) or error > 0.0002 or not math.isclose(observed, change, rel_tol=0.0002):
+            raise ValueError(f"Independent precision step mismatch: {day}")
+        factor.loc[f.index < day] *= change
+        # Cash paid for pre-distribution shares includes today's ratio as well.
+        cash_factor.loc[f.index <= day] *= change
+        exact.at[day] = issuer
+        reports.append({"date": day, "source_ratio": reported, "issuer_ratio": issuer,
+                        "incremental_factor": change, "observed_ratio": observed, "ohlc_scale_max_relative_error": error})
+    if not np.isfinite(factor).all() or not factor.gt(0).all():
+        raise ValueError("Invalid cumulative precision factor")
+    for c in OHLC:
+        f[f"candidate_{c}"] = pd.to_numeric(f[c], errors="raise") * factor
+    f["candidate_split_event"] = exact
+    f["candidate_share_precision_factor"] = factor
+    f["candidate_cash_precision_factor"] = cash_factor
+    f["candidate_price_source"] = np.where(factor.ne(1.0), "yahoo_issuer_ratio_precision", "yahoo")
+    f["candidate_volume"] = pd.to_numeric(f.volume, errors="coerce").where(factor.eq(1.0))
+    f["candidate_volume_review"] = factor.ne(1.0)
+    f["candidate_boundary_review"] = False
+    f["candidate_cash_review"] = False
+    f["candidate_cash_dividend"] = pd.to_numeric(f.dividends, errors="coerce") * cash_factor
+    future = exact.replace(0, 1).iloc[::-1].cumprod().iloc[::-1]
+    if not np.isfinite(future).all() or not future.gt(0).all():
+        raise ValueError("Invalid recorded share chain")
+    f["candidate_declared_cash_on_basis"] = np.nan
+    for event in doc["entries"]:
+        day = event["date"]
+        declared = float(event["declared_cash"])
+        if not math.isfinite(declared) or declared <= 0:
+            raise ValueError("Invalid declared cash evidence")
+        expected = declared / float(future.at[day])
+        f.at[day, "candidate_declared_cash_on_basis"] = expected
+        # Do not change the economic cash amount. Hold discrepancies for review.
+        same = math.isclose(float(f.at[day, "candidate_cash_dividend"]), expected, rel_tol=0.001, abs_tol=0.0001)
+        f.at[day, "candidate_cash_review"] = not same
+    o, h, l, c = (f[f"candidate_{x}"] for x in OHLC)
+    valid = np.isfinite(o) & np.isfinite(h) & np.isfinite(l) & np.isfinite(c) & l.gt(0) & h.ge(o) & h.ge(c) & l.le(o) & l.le(c)
+    f["candidate_ohlc_valid"] = valid
+    f["candidate_price_return"] = (c / c.shift() - 1).where(valid & valid.shift(fill_value=False))
+    f["candidate_total_return"] = ((c + f.candidate_cash_dividend) / c.shift() - 1).where(f.candidate_price_return.notna() & ~f.candidate_cash_review)
+    f["production_eligible"] = False
+    return f.reset_index(), {"events": reports, "corrected_ratios": sum(x["source_ratio"] != x["issuer_ratio"] for x in reports),
+                             "touched_rows": int(factor.ne(1.0).sum()), "cash_review_rows": int(f.candidate_cash_review.sum()),
+                             "volume_review_rows": int(f.candidate_volume_review.sum()), "invalid_touched_ohlc_rows": int((~valid & factor.ne(1.0)).sum())}
+
+
 def reconstruct(bars, responses, doc):
     """Preserve source columns; apply explicit local factors or anchored provider windows."""
     if (doc.get("schema") != "alpha_edge_asset_price_reconstruction_approval_v1"
@@ -33,6 +104,8 @@ def reconstruct(bars, responses, doc):
     e = pd.DataFrame(responses["eod"]).set_index("date").sort_index()
     if not e.index.is_unique:
         raise ValueError("Duplicate provider session")
+    if doc["entries"] and all(x["method"] == "issuer_ratio_precision" for x in doc["entries"]):
+        return _precision_reconstruction(f, e, doc)
     for c in OHLC:
         f[f"candidate_{c}"] = pd.to_numeric(f[c], errors="raise")
     f["candidate_volume"] = pd.to_numeric(f.volume, errors="coerce")
@@ -125,6 +198,8 @@ def build(s3, bucket, version, run_id, execute=False):
     check_id(run_id)
     ref = {"key": f"{REGISTRY}/{version}.json", "sha256": version}
     doc = json.loads(verified_bytes(s3, bucket, ref))
+    if "checkpoint" in doc:
+        verified_bytes(s3, bucket, doc["checkpoint"])
     bars = verified_frame(s3, bucket, doc["yahoo"])
     source = json.loads(verified_bytes(s3, bucket, doc["eodhd"]))
     responses = {k: json.loads(v["raw_json"]) for k, v in source["responses"].items()}

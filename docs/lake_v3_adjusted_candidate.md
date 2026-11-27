@@ -100,3 +100,29 @@ Progress reports `resumed` and `existing_verified` separately. Transient S3
 response-stream failures retry the entire read from byte zero (five attempts);
 checksum mismatches, missing required data and permissions remain hard failures.
 The final manifest still appears only after all assets have been accounted for.
+
+### Financial acceptance audit
+
+The completed immutable candidate can be reviewed without rebuilding prices.
+The audit reads the exact manifest, its pinned plan, Bronze and session-calendar
+inputs, and the published candidate Parquet objects. It checks source identity,
+event populations, return/factor arithmetic, availability on the pinned
+calendar, gaps, segmented adjusted-price continuity and economic review flags.
+It separates full-price-basis passes from close-only passes, reconstruction
+arithmetic passes, further reconstruction/review, and documented quarantines.
+These are audit outcomes, not authorization to release quarantine. Even a
+price-basis pass does not prove legal/economic treatment of a corporate action.
+
+```bash
+poetry run python -m alpha_edge.market.audit_silver_financial_acceptance_v3 \
+  --bucket alpha-edge-algo --region eu-west-1 \
+  --candidate-run aea94-consolidated-financial-20261127 \
+  --manifest-sha256 daea386040b50670a480b7cd803ab2311cd9e94e2d98316ac6b1dd40bd90738b \
+  --audit-run aea94-financial-acceptance-20261128 --workers 4 --execute
+```
+
+`--execute` writes only immutable audit evidence under `silver/financial_acceptance_audits/v1`:
+per-asset checkpoints, the event outcome table, and the final summary. Repeat
+the identical command to resume. Neither Bronze, Silver candidate prices nor
+Gold are changed. Without `--execute`, the audit is read-only and no checkpoints
+are retained.

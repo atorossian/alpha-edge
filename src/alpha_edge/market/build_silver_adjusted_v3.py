@@ -19,6 +19,7 @@ import pandas as pd
 from alpha_edge.market import (
     build_dividend_event_candidate_v3 as events,
     build_share_basis_candidate_v3 as shares,
+    consolidated_split_decisions_v3 as residual,
     dividend_duplicate_evidence_v3 as duplicate_evidence,
     dividend_duplicate_registry_v3 as duplicates,
     historical_quarantine_v3 as quarantine,
@@ -117,7 +118,7 @@ def _same(a, b):
     return math.isclose(float(a), float(b), rel_tol=1e-7, abs_tol=1e-8)
 
 
-def reconstruct(bars, calendar, findings, bundle, *, asset_id, symbol, source_key, sha):
+def reconstruct(bars, calendar, findings, bundle, *, asset_id, symbol, source_key, sha, residual_responses=None):
     """Apply each pinned correction once; keep source and candidate fields separate."""
     raw = bars.copy(deep=True).sort_values("session_date").reset_index(drop=True)
     if (
@@ -144,6 +145,9 @@ def reconstruct(bars, calendar, findings, bundle, *, asset_id, symbol, source_ke
         raise ValueError("Consolidated calendar does not match source dates")
     applied = set()
     cash_overrides = {}
+    decisions = bundle.get("residual_decisions", {}).get(asset_id, {})
+    if "residual_decisions" in bundle:
+        residual.check_source(raw, decisions, asset_id=asset_id, symbol=symbol, sha=sha)
 
     def pin(e):
         if (
@@ -324,6 +328,9 @@ def reconstruct(bars, calendar, findings, bundle, *, asset_id, symbol, source_ke
         mark(e["effective_date"], "spin_off_distribution", True)
         applied.add((asset_id, cash["ex_date"]))
 
+    if "residual_decisions" in bundle:
+        residual.apply_existing_repairs(f, raw, decisions, residual_responses, source_key=source_key, sha=sha)
+
     # Preserve original calendar decisions and quarantine. The manual session
     # is specifically evidenced; no other missing session is silently filled.
     f = f.sort_index()
@@ -355,6 +362,8 @@ def reconstruct(bars, calendar, findings, bundle, *, asset_id, symbol, source_ke
     for day in gaps | set(cal.index[cal.calendar_exception_review.eq(True)]):
         blocked |= prev_day.lt(day) & cur_day.gt(day)
     good = valid & valid.shift(fill_value=False) & ~blocked
+    if "residual_decisions" in bundle:
+        good &= ~trade.candidate_residual_boundary_review & ~trade.candidate_residual_cash_review
     trade["candidate_price_return"] = (trade.candidate_close / prev - 1).where(good)
     value = trade.candidate_close * trade.candidate_share_multiplier + trade.candidate_cash
     trade["candidate_total_return"] = ((value + trade.candidate_spin_actual) / prev - 1).where(good)
@@ -425,14 +434,44 @@ def reconstruct(bars, calendar, findings, bundle, *, asset_id, symbol, source_ke
     )
     f["historical_quarantine"] = f.index <= q["quarantine_through"] if q["quarantine_through"] else False
     if "split_basis_approved" in bundle:
-        annotate_candidate(f, raw, qfindings, bundle["split_basis_approved"].get(asset_id,{}),
-                           asset_id=asset_id, symbol=symbol, sha=sha)
+        annotate_candidate(
+            f,
+            raw,
+            qfindings,
+            bundle["split_basis_approved"].get(asset_id, {}),
+            asset_id=asset_id,
+            symbol=symbol,
+            sha=sha,
+        )
+    if "residual_decisions" in bundle:
+        evidence = (
+            residual.close_evidence(raw, calendar, findings, decisions, residual_responses)
+            if residual_responses is not None
+            else {}
+        )
+        residual.annotate(f, raw, decisions, evidence, version=bundle["residual_version"])
     f["production_eligible"] = False
     return f.reset_index(drop=True), applied
 
 
-def build(s3, bucket, *, consolidated_version, bundle_version, run_id, selectors=None, workers=4, execute=False,
-          split_basis_approvals=(), deterministic_basis_approvals=(), expected_split_approvals=None):
+def build(
+    s3,
+    bucket,
+    *,
+    consolidated_version,
+    bundle_version,
+    run_id,
+    selectors=None,
+    workers=4,
+    execute=False,
+    split_basis_approvals=(),
+    deterministic_basis_approvals=(),
+    expected_split_approvals=None,
+    residual_version=None,
+    expected_residual_count=None,
+    eodhd_run_id=None,
+    execution_plan_version=None,
+):
     check_id(run_id)
     if not 1 <= workers <= 16:
         raise ValueError("Invalid worker count")
@@ -447,12 +486,32 @@ def build(s3, bucket, *, consolidated_version, bundle_version, run_id, selectors
     if bundle["consolidated_index_version"] != consolidated_version:
         raise ValueError("Integration bundle targets a different consolidated index")
     if split_basis_approvals or deterministic_basis_approvals:
-        bundle["split_basis_approved"]=load_approved_basis(s3,bucket,split_basis_approvals,
-                                                           deterministic_basis_approvals,expected_split_approvals)
+        bundle["split_basis_approved"] = load_approved_basis(
+            s3, bucket, split_basis_approvals, deterministic_basis_approvals, expected_split_approvals
+        )
         if not set(bundle["split_basis_approved"]) <= set(index["assets"]):
             raise ValueError("Approved split asset outside consolidated index")
     elif expected_split_approvals is not None:
         raise ValueError("Expected split approvals requires registry versions")
+    if residual_version is not None:
+        if not expected_residual_count or not eodhd_run_id:
+            raise ValueError("Residual decisions require an expected count and pinned EODHD run")
+        bundle["residual_decisions"] = residual.load(
+            s3,
+            bucket,
+            residual_version,
+            consolidated_version=consolidated_version,
+            bundle_version=bundle_version,
+            expected_count=expected_residual_count,
+        )
+        bundle["residual_version"] = residual_version
+        if not set(bundle["residual_decisions"]) <= set(index["assets"]):
+            raise ValueError("Residual decision asset outside consolidated index")
+        for aid, rows in bundle["residual_decisions"].items():
+            if set(rows) & set(bundle.get("split_basis_approved", {}).get(aid, {})):
+                raise ValueError("Duplicate standard and residual split approval")
+    elif expected_residual_count is not None or eodhd_run_id is not None:
+        raise ValueError("Residual registry required")
     root = f"{OUTPUT_ROOT}/runs/{run_id}"
 
     def process(row):
@@ -463,6 +522,20 @@ def build(s3, bucket, *, consolidated_version, bundle_version, run_id, selectors
         outputs = index["assets"][aid]["outputs"]
         cal = verified_frame(s3, bucket, outputs["candidate"])
         findings = verified_frame(s3, bucket, outputs["findings"])
+        responses = None
+        decisions = bundle.get("residual_decisions", {}).get(aid, {})
+        needed = [
+            e
+            for e in decisions.values()
+            if e["financial_status"] == "close_only_pending_integration"
+            or (e["financial_status"] == "approved_price_basis_pending_integration" and e["eodhd_sha256"] is not None)
+            or (e["source_doc"] or {}).get("schema") == "alpha_edge_asset_price_reconstruction_approval_v1"
+        ]
+        if needed:
+            hashes = {e["eodhd_sha256"] for e in needed}
+            if len(hashes) != 1 or None in hashes:
+                raise ValueError(f"Missing or inconsistent pinned EODHD evidence: {aid}")
+            responses = residual.read_eodhd(s3, bucket, aid, eodhd_run_id, hashes.pop())
         frame, applied = reconstruct(
             bars,
             cal,
@@ -472,6 +545,7 @@ def build(s3, bucket, *, consolidated_version, bundle_version, run_id, selectors
             symbol=row["yahoo_ticker"],
             source_key=ref["key"],
             sha=ref["sha256"],
+            residual_responses=responses,
         )
         report = {
             "asset_id": aid,
@@ -488,10 +562,16 @@ def build(s3, bucket, *, consolidated_version, bundle_version, run_id, selectors
             "unresolved_spin_rows": int(frame.candidate_spin_actual.isna().sum()),
         }
         if "split_basis_approved" in bundle:
-            report.update({"approved_split_events":int(frame.candidate_split_basis_approved.sum()),
-                           "potential_returns_before":int(frame.candidate_return_potential_before_split_basis_review.sum()),
-                           "potential_returns_after":int(frame.candidate_return_potential_after_split_basis_review.sum()),
-                           "retained_large_return_review_sessions":int(frame.candidate_split_basis_large_return_review.sum())})
+            report.update(
+                {
+                    "approved_split_events": int(frame.candidate_split_basis_approved.sum()),
+                    "potential_returns_before": int(frame.candidate_return_potential_before_split_basis_review.sum()),
+                    "potential_returns_after": int(frame.candidate_return_potential_after_split_basis_review.sum()),
+                    "retained_large_return_review_sessions": int(frame.candidate_split_basis_large_return_review.sum()),
+                }
+            )
+        if "residual_decisions" in bundle:
+            report.update(residual.validate_candidate(frame, bars, decisions))
         if execute:
             blob = parquet_bytes(frame)
             key = f"{root}/assets/{digest(aid.encode())}/prices-{digest(blob)}.parquet"
@@ -513,8 +593,8 @@ def build(s3, bucket, *, consolidated_version, bundle_version, run_id, selectors
     if seen != {x for x in bundle["cohort"] if x[0] in selected_ids}:
         raise ValueError("Reconciliation cohort not fully applied")
     if "split_basis_approved" in bundle:
-        expected_approved=sum(len(v) for a,v in bundle["split_basis_approved"].items() if a in selected_ids)
-        if sum(r["approved_split_events"] for r in reports)!=expected_approved:
+        expected_approved = sum(len(v) for a, v in bundle["split_basis_approved"].items() if a in selected_ids)
+        if sum(r["approved_split_events"] for r in reports) != expected_approved:
             raise ValueError("Not all selected split approvals matched source events")
     manifest = {
         "schema": "alpha_edge_silver_adjusted_candidate_v1",
@@ -547,12 +627,48 @@ def build(s3, bucket, *, consolidated_version, bundle_version, run_id, selectors
         "quarantine_released": False,
     }
     if "split_basis_approved" in bundle:
-        manifest["split_basis_approvals"]={"standard":list(split_basis_approvals),
-                                            "deterministic":list(deterministic_basis_approvals),
-                                            "scope":"price_basis_only_counterfactual"}
-        manifest["statistics"].update({k:sum(r[k] for r in reports) for k in (
-            "approved_split_events","potential_returns_before","potential_returns_after","retained_large_return_review_sessions")})
-        manifest["statistics"]["potential_incremental_returns"]=manifest["statistics"]["potential_returns_after"]-manifest["statistics"]["potential_returns_before"]
+        manifest["split_basis_approvals"] = {
+            "standard": list(split_basis_approvals),
+            "deterministic": list(deterministic_basis_approvals),
+            "scope": "price_basis_only_counterfactual",
+        }
+        manifest["statistics"].update(
+            {
+                k: sum(r[k] for r in reports)
+                for k in (
+                    "approved_split_events",
+                    "potential_returns_before",
+                    "potential_returns_after",
+                    "retained_large_return_review_sessions",
+                )
+            }
+        )
+        manifest["statistics"]["potential_incremental_returns"] = (
+            manifest["statistics"]["potential_returns_after"] - manifest["statistics"]["potential_returns_before"]
+        )
+    if "residual_decisions" in bundle:
+        expected = sum(len(v) for a, v in bundle["residual_decisions"].items() if a in selected_ids)
+        keys = (
+            "residual_decision_events",
+            "residual_source_verified_events",
+            "residual_reconstruction_applied_events",
+            "residual_close_reverified_events",
+            "residual_full_price_basis_reverified_events",
+            "residual_close_return_rows",
+            "residual_financial_blocker_events",
+        )
+        manifest["statistics"].update({k: sum(r[k] for r in reports) for k in keys})
+        if manifest["statistics"]["residual_decision_events"] != expected:
+            raise ValueError("Not all selected residual decisions were represented")
+        manifest["residual_decisions"] = {
+            "version": residual_version,
+            "eodhd_run_id": eodhd_run_id,
+            "expected_count": expected,
+            "scope": "candidate_only_validation",
+            "financial_validation_complete": False,
+        }
+    if execution_plan_version is not None:
+        manifest["execution_plan_version"] = execution_plan_version
     if execute:
         put_immutable(
             s3,
@@ -569,30 +685,48 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--bucket", default=DEFAULT_BUCKET)
     parser.add_argument("--region", default=DEFAULT_REGION)
-    parser.add_argument("--consolidated-index-version", required=True)
-    parser.add_argument("--bundle-version", required=True)
+    parser.add_argument("--consolidated-index-version")
+    parser.add_argument("--bundle-version")
+    parser.add_argument("--execution-plan-version")
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--workers", type=int, default=4)
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--all", action="store_true")
     group.add_argument("--only", nargs="+")
-    parser.add_argument("--split-basis-approvals",nargs="+",default=[])
-    parser.add_argument("--deterministic-basis-approvals",nargs="+",default=[])
-    parser.add_argument("--expected-split-approvals",type=int)
+    parser.add_argument("--split-basis-approvals", nargs="+", default=[])
+    parser.add_argument("--deterministic-basis-approvals", nargs="+", default=[])
+    parser.add_argument("--expected-split-approvals", type=int)
+    parser.add_argument("--residual-version")
+    parser.add_argument("--expected-residual-count", type=int)
+    parser.add_argument("--eodhd-run-id")
     parser.add_argument("--execute", action="store_true")
     args = parser.parse_args()
+    client = boto3.client("s3", region_name=args.region)
+    inputs = {
+        "consolidated_version": args.consolidated_index_version,
+        "bundle_version": args.bundle_version,
+        "split_basis_approvals": args.split_basis_approvals,
+        "deterministic_basis_approvals": args.deterministic_basis_approvals,
+        "expected_split_approvals": args.expected_split_approvals,
+        "residual_version": args.residual_version,
+        "expected_residual_count": args.expected_residual_count,
+        "eodhd_run_id": args.eodhd_run_id,
+    }
+    if args.execution_plan_version:
+        if any(inputs.values()):
+            parser.error("Execution plan cannot be mixed with explicit input versions")
+        inputs = residual.load_execution_plan(client, args.bucket, args.execution_plan_version)
+    elif not args.consolidated_index_version or not args.bundle_version:
+        parser.error("Provide an execution plan or both consolidated index and bundle versions")
     result = build(
-        boto3.client("s3", region_name=args.region),
+        client,
         args.bucket,
-        consolidated_version=args.consolidated_index_version,
-        bundle_version=args.bundle_version,
         run_id=args.run_id,
         selectors=args.only,
         workers=args.workers,
         execute=args.execute,
-        split_basis_approvals=args.split_basis_approvals,
-        deterministic_basis_approvals=args.deterministic_basis_approvals,
-        expected_split_approvals=args.expected_split_approvals,
+        execution_plan_version=args.execution_plan_version,
+        **inputs,
     )
     print(json.dumps({k: v for k, v in result.items() if k != "assets"}, indent=2))
 

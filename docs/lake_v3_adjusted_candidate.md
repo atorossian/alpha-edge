@@ -44,3 +44,46 @@ subsequent independent adjudication.
 ## Approved split price-basis impact
 
 The optional `--split-basis-approvals` and `--deterministic-basis-approvals` arguments load immutable approved price-basis registries, validate their counts, unique identities and source hashes, and attach the exact matched decisions to the Silver candidate. The separate counterfactual return eligibility view removes only the split-price-basis blocker from the historical prefix; other reasons, unavailable returns and invalid sessions are retained. Existing historical quarantine and production eligibility are unchanged. All economic review requirements and large-return dates remain flagged; the view is a potential availability measure, not a production release. The manifest reports the before/after and incremental return observations. Close-only and AI investigation registries are intentionally not consumed by this build.
+
+## Consolidated residual dispositions
+
+`--residual-version`, `--expected-residual-count` and `--eodhd-run-id` enable
+the approved residual decision inventory in the same builder. The pinned
+registry must target the exact consolidated index and existing financial
+integration bundle. The original manual approval objects are checksum
+verified and their event identities matched. All selected decisions must be
+represented, including intentionally held cases. The earlier close-only
+research registry is not an approval and cannot be passed directly.
+
+The candidate reuses explicitly executable asset price reconstruction plans,
+rejects overlapping price or cash repairs, and retains independent volume,
+cash and boundary checks. The approved treasury-share delivery duplicate is
+handled only on its source-pinned dates and amount. Research-only actions
+whose price reconstruction specification is incomplete remain held. The
+close-only daily factor-chain audit is repeated against the pinned provider
+and calendar objects; its local price returns are separate diagnostic fields,
+not a replacement for total returns or proof of full OHLC quality. Full-price
+basis checks additionally distinguish already-normalized prices from an
+independent share-scale change. No decision clears historical quarantine.
+
+The builder validates unchanged source observations, exact decision coverage,
+positive finite segmented adjusted prices and return-chain consistency. The
+manifest distinguishes applied repairs, reverified price bases and remaining
+financial blockers. These checks are candidate invariants rather than final
+financial acceptance. Execute only after reviewing a dry run; the same inputs
+and a new immutable run ID publish to S3 with read-after-write verification.
+
+The `--execution-plan-version` option replaces all individual registry/version
+arguments. It reads a checksum-pinned S3 plan containing the approved counts
+and exact input versions (3,014 existing price-basis approvals and 596 residual
+decisions in the November 27, 2026 plan). For the full-universe dry run:
+
+```bash
+poetry run python -m alpha_edge.market.build_silver_adjusted_v3 \
+  --bucket alpha-edge-algo --region eu-west-1 \
+  --execution-plan-version 9e111f4b6be9a2d81c19001ad1dfe6ca24542f0f976dd5f9abb781ba556043a5 \
+  --run-id aea94-consolidated-financial-20261127 --all --workers 4
+```
+
+The plan is candidate-only; it is not a financial acceptance manifest. Add
+`--execute` only after the dry run is reviewed. No provider download is needed.
